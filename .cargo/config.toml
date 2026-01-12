@@ -1,0 +1,48 @@
+# Cargo 配置文件
+# 用于设置编译选项，实现静态链接 CRT（不依赖 vcruntime*.dll）
+
+# Windows MSVC 目标：静态链接 C 运行时
+[target.x86_64-pc-windows-msvc]
+rustflags = [
+	"-C",
+	"target-feature=+crt-static",
+	"-C",
+	"link-arg=/INCREMENTAL:NO",
+	"-C",
+	"link-arg=/OPT:REF",
+	"-C",
+	"link-arg=/OPT:ICF",
+]
+
+[target.i686-pc-windows-msvc]
+rustflags = [
+	"-C",
+	"target-feature=+crt-static",
+	"-C",
+	"link-arg=/INCREMENTAL:NO",
+	"-C",
+	"link-arg=/OPT:REF",
+	"-C",
+	"link-arg=/OPT:ICF",
+]
+
+[target.aarch64-pc-windows-msvc]
+rustflags = [
+	"-C",
+	"target-feature=+crt-static",
+	"-C",
+	"link-arg=/INCREMENTAL:NO",
+	"-C",
+	"link-arg=/OPT:REF",
+	"-C",
+	"link-arg=/OPT:ICF",
+]
+
+# Windows GNU 目标：静态链接
+[target.x86_64-pc-windows-gnu]
+rustflags = ["-C", "target-feature=+crt-static"]
+
+# 构建配置
+[build]
+# 取消注释以下行来默认启用 nightly 特性
+# rustflags = ["-Z", "build-std=std,panic_abort"]

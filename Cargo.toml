@@ -1,0 +1,117 @@
+[package]
+name = "mario"
+version = "1.0.0"
+edition = "2024"
+build = "build.rs"
+authors = ["planet0104- <planet0104-@users.noreply.github.com>"]
+description = "Mario - A classic platformer game ported from Pascal to Rust"
+repository = "https://github.com/planet0104/MarioRS"
+license = "MIT"
+keywords = ["game", "mario", "platformer", "retro"]
+categories = ["games"]
+
+[dependencies]
+# wgpu 渲染后端（可选）
+pixels = { version = "0.15", optional = true }
+winit = { version = "0.30", optional = true }
+bitflags = "2.9.1"
+
+# Optional logging dependencies (activate via `--features logging`).
+tracing = { version = "0.1", default-features = false, features = ["std"], optional = true }
+tracing-subscriber = { version = "0.3", default-features = false, features = ["env-filter", "fmt", "std", "ansi"], optional = true }
+tracing-wasm = { version = "0.2", optional = true }
+tracing-android = { version = "0.2", optional = true }
+
+# include_dir: compile-time embedding of directories (used by src/sprites.rs)
+# Removed: assets are generated at build time into generated_assets.rs
+# ============================================================================
+# 跨平台音频系统 - cpal (支持 Desktop + WASM + Android + iOS)
+# ============================================================================
+
+[target.'cfg(not(target_os = "windows"))'.dependencies]
+# Use cpal on non-Windows platforms; Windows uses audio_waveout.rs instead
+cpal = "0.15"
+
+# ============================================================================
+# 跨平台日志系统（通过 feature 激活，可选依赖以减少 release 体积）
+# ============================================================================
+# tracing / tracing-subscriber / tracing-wasm / tracing-android 都声明为
+# 顶层 optional 依赖（使用 `--features logging` 来激活）。平台特有的
+# tracing-wasm / tracing-android 也在各自的 target 块被标注为 optional，
+# 但不使用 `debug_assertions` 进行条件选择（Cargo 不支持）。
+
+# ============================================================================
+# 跨平台随机数
+# - Windows: 使用 Win32 RtlGenRandom (XP+)，无需 getrandom
+# - 其他平台: 使用 getrandom
+# ============================================================================
+[target.'cfg(not(target_os = "windows"))'.dependencies.rand]
+version = "0.8"
+default-features = false
+features = ["alloc", "getrandom", "small_rng"]
+
+[target.'cfg(not(target_os = "windows"))'.dependencies.getrandom]
+version = "0.2"
+
+# ============================================================================
+# Web平台 (WASM) 特定依赖
+# ============================================================================
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.2", features = ["js"] }
+# tracing-wasm is optional; activate via `--features logging` when needed.
+tracing-wasm = { version = "0.2", optional = true }
+
+# ============================================================================
+# Android平台特定依赖
+# ============================================================================
+[target.'cfg(target_os = "android")'.dependencies]
+# tracing-android is optional; activate via `--features logging` when needed.
+tracing-android = { version = "0.2", optional = true }
+
+# ============================================================================
+# Windows平台特定依赖 - Win32 GDI 后端
+# ============================================================================
+[target.'cfg(target_os = "windows")'.dependencies]
+# 使用 windows-sys 替代 windows crate，减小体积（无 proc-macro 依赖）
+windows-sys = { version = "0.59", optional = true, features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_System_LibraryLoader",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_UI_Input_KeyboardAndMouse",
+] }
+winapi = { version = "0.3", optional = true, features = ["mmsystem"] }
+# Windows 使用 small_rng，种子由 RtlGenRandom 提供（无需 getrandom crate）
+rand = { version = "0.8", default-features = false, features = ["alloc", "small_rng"] }
+# hashbrown 替代 std HashMap/HashSet，避免 BCryptGenRandom 依赖（兼容 Win7）
+hashbrown = "0.15"
+
+[features]
+default = ["gdi-backend", "dark-theme"]   # 默认使用 gdi 后端 + 暗黑主题适配
+logging = ["dep:tracing", "dep:tracing-subscriber", "dep:tracing-wasm", "dep:tracing-android"]
+wgpu-backend = ["dep:pixels", "dep:winit"]  # wgpu 渲染后端（跨平台，体积大）
+gdi-backend = ["dep:windows-sys"]           # Win32 GDI 后端（仅 Windows，体积小）
+dark-theme = []                             # 暗黑主题适配（需要 Vista+ dwmapi.dll）
+
+# ============================================================================
+# Release 编译优化 - 最小体积
+# ============================================================================
+# ============================================================================
+# 构建依赖 - Windows 图标嵌入
+# ============================================================================
+[build-dependencies]
+embed-resource = "3.0"
+
+# ============================================================================
+# 开发依赖 - 仅用于示例和测试
+# ============================================================================
+[dev-dependencies]
+image = "0.25"
+
+[profile.release]
+opt-level = "z"         # 优化体积而非速度
+lto = true              # 链接时优化，消除未使用代码 (cargo-zbuild 兼容性使用 true 而非 "fat")
+codegen-units = 1       # 单代码生成单元，更好的优化
+panic = "abort"         # 不使用 unwind，减少 panic 处理代码
+strip = true            # 移除符号表和调试信息
+debug = 0
