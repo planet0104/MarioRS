@@ -631,7 +631,7 @@ impl Intro {
     fn convert_map_from_bytes(&self, map_lines: &[&[u8]]) -> MapBuffer {
         // Pascal ReadWorld 逻辑是 M^[X+1, i]，因此MapBuffer的第0列是“占位列”，真实数据从列1开始。
         // 同时 ReadWorld 通过检查 M^[X+1,1] = #0 作为地图结束标记，因此未提供的列必须为#0（不是空格）。
-        let mut map = [['\0'; NV as usize]; (crate::buffers::MAX_WORLD_SIZE as usize + 1)];
+        let mut map = [['\0'; NV as usize]; crate::buffers::MAX_WORLD_SIZE as usize + 1];
         for (col, line) in map_lines.iter().enumerate() {
             let i = col + 1; // 关键：列偏移，严格对齐Pascal的X+1访问
             if i > crate::buffers::MAX_WORLD_SIZE as usize {

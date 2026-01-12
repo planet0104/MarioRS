@@ -429,7 +429,7 @@ impl Level1A {
         // 2. 通过检查 M^[X+1,1] = #0 作为地图结束标记，因此未提供的列必须为 #0（不是空格）
         //
         // 注意：Y 翻转发生在 Buffers::read_world 内部（W^[X, NV-i]），这里必须保持“原始列数据”不翻转。
-        let mut map = [['\0'; NV as usize]; (MAX_WORLD_SIZE as usize + 1)];
+        let mut map = [['\0'; NV as usize]; MAX_WORLD_SIZE as usize + 1];
 
         for (col, line) in map_bytes.iter().enumerate() {
             let x = col + 1; // 关键：列偏移，严格对齐 Pascal 的 X+1 访问

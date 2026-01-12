@@ -219,8 +219,13 @@ pub struct DesktopRandom {
 
 impl DesktopRandom {
     pub fn new() -> Self {
+        // 使用系统时间作为种子，避免依赖rand的std_rng特性
+        let seed = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos() as u64;
         Self {
-            rng: SmallRng::from_entropy(),
+            rng: SmallRng::seed_from_u64(seed),
         }
     }
 }

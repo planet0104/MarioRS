@@ -70,7 +70,7 @@ impl PictureBufferFill for PictureBuffer {
 ///
 /// Pascal 是 1..MaxWorldSize（包含 MaxWorldSize 这一列），并且 ReadWorld 会访问 M^[X+1,*]。
 /// Rust 这里保留第 0 列作为占位，真实数据从列 1 开始写入。
-pub type MapBuffer = [[char; NV as usize]; (MAX_WORLD_SIZE as usize + 1)];
+pub type MapBuffer = [[char; NV as usize]; MAX_WORLD_SIZE as usize + 1];
 
 /// StarBuffer = array [0..MAX_PAGE, 0..319] of u8;
 pub type StarBuffer = [[u8; 320]; MAX_PAGE as usize + 1];

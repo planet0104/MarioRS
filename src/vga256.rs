@@ -1238,13 +1238,28 @@ impl VGA {
     }
 
     /// Wrapper to call `palette.fade_down` without double mutable borrow of `vga`
+    /// 淡出效果：画面逐渐变暗，最终保持变暗状态
     pub fn palette_fade_down_wrapper(&mut self, n: u8) {
         // 保存锁定状态，因为take后self.palette会变成默认值（unlock状态）
         let was_locked = self.palette.lock_palette;
         let mut pal = std::mem::take(&mut self.palette);
-        // 恢复锁定状态到默认替换的调色板
+        // 恢复锁定状态
+        pal.lock_palette = was_locked;
         self.palette.lock_palette = was_locked;
         pal.fade_down(n, self);
+        // 写回pal，此时pal.palette是变暗的，pal.source_palette是原始值
+        self.palette = pal;
+    }
+    
+    /// Wrapper to call `palette.fade_up` without double mutable borrow of `vga`
+    /// 淡入效果：画面逐渐变亮，从source_palette恢复
+    pub fn palette_fade_up_wrapper(&mut self, n: u8) {
+        let was_locked = self.palette.lock_palette;
+        let mut pal = std::mem::take(&mut self.palette);
+        pal.lock_palette = was_locked;
+        self.palette.lock_palette = was_locked;
+        pal.fade_up(n, self);
+        // 写回pal，此时pal.palette已恢复为source_palette
         self.palette = pal;
     }
 }

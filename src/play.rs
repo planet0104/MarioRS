@@ -1418,6 +1418,9 @@ impl Play {
                 vga.swap_pages();
                 self.pause_back = 0;
                 
+                // 淡入恢复调色板（对应Pascal的FadeUp(8)）
+                vga.palette_fade_up_wrapper(8);
+                
                 keyboard.reset();
                 keyboard.clear_key();
                 

@@ -356,8 +356,8 @@ impl Level2 {
     /// - Y范围：0..NV
     ///
     /// 注意：Y 翻转发生在 Buffers::read_world 内部（W^[X, NV-i]），这里必须保持"原始列数据"不翻转。
-    fn convert_map_data(map_bytes: &[&[u8]]) -> [[char; NV as usize]; (MAX_WORLD_SIZE as usize + 1)] {
-        let mut map = [['\0'; NV as usize]; (MAX_WORLD_SIZE as usize + 1)];
+    fn convert_map_data(map_bytes: &[&[u8]]) -> [[char; NV as usize]; MAX_WORLD_SIZE as usize + 1] {
+        let mut map = [['\0'; NV as usize]; MAX_WORLD_SIZE as usize + 1];
 
         for (col, line) in map_bytes.iter().enumerate() {
             let x = col + 1; // 关键：列偏移，严格对齐 Pascal 的 X+1 访问

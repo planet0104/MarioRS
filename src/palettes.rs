@@ -28,6 +28,8 @@ pub const FADING_DONE_DEFAULT: bool = true;
 #[derive(Clone)]
 pub struct Palettes {
     pub palette: PalType,
+    /// 源调色板：用于fade_up/fade_down的目标/源，对应Pascal中不被FadeDown修改的Palette变量
+    pub source_palette: PalType,
     pub fading_up: bool,
     pub fading_down: bool,
     pub fading_pos: u8,
@@ -45,8 +47,10 @@ pub struct Palettes {
 
 impl Default for Palettes {
     fn default() -> Self {
+        let default_pal = *mpal256::mpal256_palette();
         Palettes {
-            palette: *mpal256::mpal256_palette(),
+            palette: default_pal,
+            source_palette: default_pal,
             fading_up: false,
             fading_down: false,
             fading_pos: 0,
@@ -90,6 +94,7 @@ impl Palettes {
     /// 用新调色板数据替换当前调色板
     pub fn new_palette(&mut self, p: &PalType) {
         self.palette = *p;
+        self.source_palette = *p;  // 同时更新源调色板
         self.fading_up = false;
         self.fading_down = false;
     }
@@ -187,7 +192,8 @@ impl Palettes {
         self.fading_up || self.fading_down
     }
 
-    /// 执行淡入效果，N为步数 - 修复调用方法
+    /// 执行淡入效果，N为步数
+    /// 使用source_palette作为目标值（对应Pascal中不被修改的Palette全局变量）
     pub fn fade_up(&mut self, n: u8, vga: &mut VGA) {
         if self.palette_effect == PE_EGA_MODE {
             return;
@@ -197,8 +203,9 @@ impl Palettes {
         for k in (0..n).rev() {
             for i in 0..256 {
                 for j in 0..3 {
-                    if self.palette[i][j] as i16 - k as i16 > 0 {
-                        temp_pal[i][j] = self.palette[i][j] - k;
+                    // 使用source_palette作为源，与Pascal一致
+                    if self.source_palette[i][j] as i16 - k as i16 > 0 {
+                        temp_pal[i][j] = self.source_palette[i][j] - k;
                     } else {
                         temp_pal[i][j] = 0;
                     }
@@ -206,24 +213,29 @@ impl Palettes {
             }
             vga.wait_display();
             vga.wait_retrace();
-            // 修复：按Pascal逻辑调用read_palette
-            self.read_palette(vga, &mut temp_pal);
-            // 每次更新调色板后都显示到窗口，产生淡入动画效果
+            self.read_palette(vga, &temp_pal);
             vga.present();
         }
+        // 淡入完成后，palette恢复为source_palette
+        self.palette = self.source_palette;
     }
 
-    /// 执行淡出效果，N为步数 - 修复调用方法
+    /// 执行淡出效果，N为步数
+    /// 使用source_palette作为源值（对应Pascal中不被修改的Palette全局变量）
     pub fn fade_down(&mut self, n: u8, vga: &mut VGA) {
         if self.palette_effect == PE_EGA_MODE {
             return;
         }
+        // 保存当前调色板到source_palette，用于fade_up恢复
+        self.source_palette = self.palette;
+        
         let mut temp_pal: PalType = [[0; 3]; 256];
         for k in 0..n {
             for i in 0..256 {
                 for j in 0..3 {
-                    if self.palette[i][j] as i16 - k as i16 > 0 {
-                        temp_pal[i][j] = self.palette[i][j] - k;
+                    // 使用source_palette作为源，与Pascal一致
+                    if self.source_palette[i][j] as i16 - k as i16 > 0 {
+                        temp_pal[i][j] = self.source_palette[i][j] - k;
                     } else {
                         temp_pal[i][j] = 0;
                     }
@@ -231,11 +243,11 @@ impl Palettes {
             }
             vga.wait_display();
             vga.wait_retrace();
-            // 修复：按Pascal逻辑调用read_palette
-            self.read_palette(vga, &mut temp_pal);
-            // 每次更新调色板后都显示到窗口，产生淡出动画效果
+            self.read_palette(vga, &temp_pal);
             vga.present();
         }
+        // 淡出完成后，palette保持在变暗状态（k=n-1时的值）
+        self.palette = temp_pal;
     }
 
     pub fn init_grass(&mut self, vga: &mut VGA, options: &WorldOptions) {

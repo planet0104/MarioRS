@@ -31,8 +31,8 @@ Write-Host "========================================" -ForegroundColor Cyan
 # - MSVC 链接器优化 (/OPT:REF, /OPT:ICF, /INCREMENTAL:NO)
 # 此处不设置 $env:RUSTFLAGS，避免覆盖配置文件
 
-# force Windows GDI backend and disable default features for minimal size
-$featureArgs = @("--no-default-features", "--features", "gdi-backend")
+# force Windows GDI backend with dark-theme support, disable default features for minimal size
+$featureArgs = @("--no-default-features", "--features", "gdi-backend,dark-theme")
 
 # ensure cargo-zbuild is available (cargo subcommand executable is cargo-zbuild)
 $cz = Get-Command cargo-zbuild -ErrorAction SilentlyContinue
@@ -52,7 +52,7 @@ if ($Nightly) {
 
     Write-Host "[2/3] Using nightly + cargo zbuild (build-std)..." -ForegroundColor Yellow
     Write-Host "  RUSTFLAGS: from .cargo/config.toml (CRT static + MSVC optimizations)" -ForegroundColor Gray
-    Write-Host "  Features: --no-default-features --features gdi-backend (logging disabled)" -ForegroundColor Gray
+    Write-Host "  Features: --no-default-features --features gdi-backend,dark-theme" -ForegroundColor Gray
 
     # cargo zbuild 自带 build-std 优化，产生最小体积
     cargo +nightly zbuild @featureArgs `
@@ -63,7 +63,7 @@ if ($Nightly) {
 } else {
     Write-Host "`n[1/3] Building with stable toolchain via cargo zbuild..." -ForegroundColor Yellow
     Write-Host "  RUSTFLAGS: from .cargo/config.toml (CRT static + MSVC optimizations)" -ForegroundColor Gray
-    Write-Host "  Features: --no-default-features --features gdi-backend (logging disabled)" -ForegroundColor Gray
+    Write-Host "  Features: --no-default-features --features gdi-backend,dark-theme" -ForegroundColor Gray
 
     cargo zbuild @featureArgs --target x86_64-pc-windows-msvc
 

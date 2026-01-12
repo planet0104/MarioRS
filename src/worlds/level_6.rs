@@ -331,8 +331,8 @@ impl Level6 {
 
     // run 方法已删除 - 使用新的状态机驱动的 play.frame_update() 方法
 
-    fn convert_map_data(map_bytes: &[&[u8]]) -> [[char; NV as usize]; (MAX_WORLD_SIZE as usize + 1)] {
-        let mut map = [['\0'; NV as usize]; (MAX_WORLD_SIZE as usize + 1)];
+    fn convert_map_data(map_bytes: &[&[u8]]) -> [[char; NV as usize]; MAX_WORLD_SIZE as usize + 1] {
+        let mut map = [['\0'; NV as usize]; MAX_WORLD_SIZE as usize + 1];
 
         for (col, line) in map_bytes.iter().enumerate() {
             let x = col + 1;
