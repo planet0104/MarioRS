@@ -804,8 +804,7 @@ impl Keyboard {
     }
 
     pub fn get_ascii_code(&self, c: char) -> Option<char> {
-        // 这里可以根据需要实现字符到ASCII的转换
-        // 原Pascal代码中这个函数似乎是将扫描码转换为ASCII
+        // 直接返回字符，游戏主要使用扫描码而非ASCII码
         Some(c)
     }
 

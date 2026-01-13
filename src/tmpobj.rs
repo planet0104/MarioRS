@@ -95,8 +95,6 @@ impl Default for RemoveRec {
 pub struct TmpObjManager {
     pub temp_obj: Vec<TempRec>, // 临时对象数组
     pub rem_list: Vec<RemoveRec>, // 移除列表数组
-                                // pub current_page: usize,                 // 当前页面 - 待实现
-                                // pub working_page: usize,                 // 工作页面 - 待实现
 }
 
 impl TmpObjManager {

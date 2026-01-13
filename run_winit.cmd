@@ -1,2 +1,2 @@
-# 跨平台 wgpu 后端
-cargo run --release --features wgpu-backend
+:: 跨平台 wgpu 后端
+cargo run --features wgpu-backend

@@ -11,7 +11,6 @@ use crate::{
     joystick::JoystickState,
     keyboard::Keyboard,
     music::MusicPlayer,
-    palettes::Palettes,
     players::Players,
     sprites::SpriteDataManager,
     stars::Stars,
@@ -26,10 +25,9 @@ use crate::{
 /// 用于简化函数签名，避免传递过多参数
 /// 使用生命周期 `'a` 确保所有引用在上下文存活期间有效
 pub struct GameContext<'a> {
-    // 渲染相关
+    // 渲染相关（vga.palette 包含调色板）
     pub vga: &'a mut VGA,
     pub txt: &'a mut Txt,
-    pub palettes: &'a mut Palettes,
     
     // 游戏状态
     pub buffers: &'a mut Buffers,
@@ -65,7 +63,6 @@ impl<'a> GameContext<'a> {
     pub fn new(
         vga: &'a mut VGA,
         txt: &'a mut Txt,
-        palettes: &'a mut Palettes,
         buffers: &'a mut Buffers,
         players: &'a mut Players,
         enemies: &'a mut Enemies,
@@ -85,7 +82,6 @@ impl<'a> GameContext<'a> {
         Self {
             vga,
             txt,
-            palettes,
             buffers,
             players,
             enemies,

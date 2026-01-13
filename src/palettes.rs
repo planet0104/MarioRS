@@ -121,10 +121,15 @@ impl Palettes {
     }
 
     /// 开始淡入（非阻塞，指定步数）
+    /// 淡入从黑屏渐变到当前palette的颜色
     pub fn start_fade_up_steps(&mut self, n: u8) {
+        // 保存当前调色板作为渐变目标
+        self.source_palette = self.palette;
+        // 立即将palette设置为全黑，防止渐显开始前闪烁
+        self.palette = [[0; 3]; 256];
         self.fading_up = true;
         self.fading_down = false;
-        self.fading_pos = 63;
+        self.fading_pos = 63;  // 从最暗开始
         self.fading_target = 0;
         self.fading_step = if n > 0 { 64 / n } else { 1 };
         self.fading_done = false;
@@ -136,54 +141,70 @@ impl Palettes {
     }
 
     /// 开始淡出（非阻塞，指定步数）
+    /// 淡出从当前palette颜色渐变到黑屏
     pub fn start_fade_down_steps(&mut self, n: u8) {
+        // 保存当前调色板作为渐变源
+        self.source_palette = self.palette;
         self.fading_down = true;
         self.fading_up = false;
-        self.fading_pos = 0;
+        self.fading_pos = 0;  // 从当前亮度开始
         self.fading_target = 63;
         self.fading_step = if n > 0 { 64 / n } else { 1 };
         self.fading_done = false;
     }
 
     /// 渐变帧推进（非阻塞，每帧调用）
-    pub fn fade(&mut self, vga: &mut VGA) {
-        if self.fading_up || self.fading_down {
-            let mut temp_pal: PalType = [[0; 3]; 256];
-            
-            // 当fading_pos >= 63时，保持全黑调色板，防止亮色在淡入初始帧闪烁
-            if self.fading_pos < 63 {
-                for i in 0..256 {
-                    for j in 0..3 {
-                        if self.palette[i][j] as i16 - self.fading_pos as i16 > 0 {
-                            temp_pal[i][j] = self.palette[i][j] - self.fading_pos;
-                        } else {
-                            temp_pal[i][j] = 0;
-                        }
+    /// 返回计算好的临时调色板，调用者需要应用到VGA渲染
+    /// 注意：使用source_palette作为源，这样palette可以被正常的blink等操作更新
+    pub fn fade_step(&mut self) -> Option<PalType> {
+        if !self.fading_up && !self.fading_down {
+            return None;
+        }
+        
+        let mut temp_pal: PalType = [[0; 3]; 256];
+        
+        // 先用当前fading_pos计算调色板（与Pascal循环体内的顺序一致）
+        // 当fading_pos >= 63时，保持全黑调色板
+        if self.fading_pos < 63 {
+            for i in 0..256 {
+                for j in 0..3 {
+                    // 使用source_palette作为源，与Pascal一致
+                    if self.source_palette[i][j] as i16 - self.fading_pos as i16 > 0 {
+                        temp_pal[i][j] = self.source_palette[i][j] - self.fading_pos;
+                    } else {
+                        temp_pal[i][j] = 0;
                     }
                 }
             }
-            // 当fading_pos >= 63时，temp_pal保持全0（全黑）
-            
-            self.read_palette(vga, &mut temp_pal);
-
-            if self.fading_up {
-                if self.fading_pos <= self.fading_step {
-                    self.fading_pos = 0;
-                    self.fading_up = false;
-                    self.fading_done = true;
-                } else {
-                    self.fading_pos = self.fading_pos.saturating_sub(self.fading_step);
-                }
+        }
+        // 当fading_pos >= 63时，temp_pal保持全0（全黑）
+        
+        // 然后更新fading_pos（准备下一帧）
+        if self.fading_up {
+            if self.fading_pos == 0 {
+                // 已经到达最亮，渐变完成
+                self.fading_up = false;
+                self.fading_done = true;
+            } else {
+                self.fading_pos = self.fading_pos.saturating_sub(self.fading_step);
             }
-            if self.fading_down {
-                if self.fading_pos >= 63 - self.fading_step {
-                    self.fading_pos = 63;
-                    self.fading_down = false;
-                    self.fading_done = true;
-                } else {
-                    self.fading_pos = self.fading_pos.saturating_add(self.fading_step);
-                }
+        } else if self.fading_down {
+            if self.fading_pos >= 63 {
+                // 已经到达最暗，渐变完成
+                self.fading_down = false;
+                self.fading_done = true;
+            } else {
+                self.fading_pos = self.fading_pos.saturating_add(self.fading_step);
             }
+        }
+        
+        Some(temp_pal)
+    }
+    
+    /// 兼容旧接口（非阻塞渐变帧推进）
+    pub fn fade(&mut self, vga: &mut VGA) {
+        if let Some(temp_pal) = self.fade_step() {
+            self.read_palette(vga, &temp_pal);
         }
     }
 
@@ -271,6 +292,9 @@ impl Palettes {
         self.palette[158] = self.palette[0xF0 - sky_index];
 
         self.out_palette(6, 60, 40, 35, vga); // Champ
+        
+        // 同步更新source_palette，确保渐显时使用正确的颜色
+        self.source_palette = self.palette;
     }
 
     /// 复制调色板颜色 C1 到 C2，并输出到 VGA

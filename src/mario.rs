@@ -29,7 +29,6 @@ use crate::{
     keyboard::Keyboard,
     mpal256,
     music::MusicPlayer,
-    palettes::Palettes,
     platform::{FrameResult, GamePhase},
     play::Play,
     players::Players,
@@ -101,7 +100,6 @@ pub struct MarioGame {
     pub glitters: GlitterSystem,
     pub tmpobj: TmpObjManager,
     pub txt: Txt,
-    pub palettes: Palettes,
     pub play: Play,
     pub keyboard: Keyboard,
     pub joystick: JoystickState,
@@ -160,7 +158,6 @@ impl MarioGame {
         };
         let tmpobj = TmpObjManager::new();
         let txt = Txt::new();
-        let palettes = Palettes::new();
         
         players.init_player_figures(&mut buffers, &sprites);
         
@@ -207,7 +204,6 @@ impl MarioGame {
             glitters,
             tmpobj,
             txt,
-            palettes,
             play,
             keyboard,
             joystick,
@@ -224,8 +220,7 @@ impl MarioGame {
     
     /// 初始化调色板
     pub fn init_palette(&mut self, vga: &mut VGA) {
-        self.palettes.new_palette(mpal256::mpal256_palette());
-        self.palettes.read_palette(vga, mpal256::mpal256_palette());
+        vga.palette_init(mpal256::mpal256_palette());
         self.main_phase = MainPhase::Intro;
         self.intro.start();
     }
@@ -242,8 +237,8 @@ impl MarioGame {
         self.frame_count += 1;
         
         // 处理调色板渐变
-        if self.palettes.is_fading() {
-            self.palettes.fade(vga);
+        if vga.palette.is_fading() {
+            vga.palette_fade_step();
         }
         
         // 主状态机
@@ -258,7 +253,6 @@ impl MarioGame {
                 let mut ctx = GameContext::new(
                     vga,
                     &mut self.txt,
-                    &mut self.palettes,
                     &mut self.buffers,
                     &mut self.players,
                     &mut self.enemies,
@@ -316,8 +310,8 @@ impl MarioGame {
                 
                 // 初始化阶段 (counter=1)
                 if self.show_player_counter == 1 {
-                    self.palettes.clear_palette(vga);
-                    self.palettes.lock_pal();
+                    vga.palette_clear();
+                    vga.lock_pal();
                     vga.clear_vga_mem();
                     vga.set_view(0, 0);
                 }
@@ -339,9 +333,8 @@ impl MarioGame {
                     
                     // 在绘制完成后设置调色板
                     if self.show_player_counter == MAX_PAGE as i32 + 2 {
-                        self.palettes.new_palette(mpal256::mpal256_palette());
-                        self.palettes.unlock_pal();
-                        self.palettes.read_palette(vga, mpal256::mpal256_palette());
+                        vga.unlock_pal();
+                        vga.palette_init(mpal256::mpal256_palette());
                     }
                 }
                 
@@ -354,7 +347,7 @@ impl MarioGame {
                 // 结束阶段 (counter > MAX_PAGE+102)
                 if self.show_player_counter > MAX_PAGE as i32 + 102 {
                     // ClearPalette; ClearVGAMem
-                    self.palettes.clear_palette(vga);
+                    vga.palette_clear();
                     vga.clear_vga_mem();
                     
                     // 闪屏结束，进入游戏
@@ -370,7 +363,6 @@ impl MarioGame {
                 let mut ctx = GameContext::new(
                     vga,
                     &mut self.txt,
-                    &mut self.palettes,
                     &mut self.buffers,
                     &mut self.players,
                     &mut self.enemies,
@@ -392,18 +384,23 @@ impl MarioGame {
                 match result {
                     PlayResult::Continue => FrameResult::Continue,
                     PlayResult::LevelComplete => {
+                        // 渐隐已在play.rs中通过状态机完成
                         self.on_level_complete();
                         FrameResult::Continue
                     }
                     PlayResult::PlayerDeath => {
+                        // 渐隐已在play.rs中通过状态机完成
                         self.on_player_death();
                         FrameResult::Continue
                     }
                     PlayResult::GameOver => {
+                        // 渐隐已在play.rs中通过状态机完成
                         self.on_game_over();
                         FrameResult::Continue
                     }
                     PlayResult::Quit => {
+                        // 渐隐已在play.rs中通过状态机完成
+                        
                         // 退出前保存存档（对应 Pascal MARIO.PAS line 740-741）
                         if self.game_number >= 0 && self.game_number < 3 {
                             self.config.games[self.game_number as usize] = self.buffers.data.clone();

@@ -298,9 +298,13 @@ impl VGA {
     }
 
     /// 创建 VGA 对象（纯 framebuffer 模式）
+    /// 注意：初始调色板为全黑，防止启动时闪烁
     pub fn new_offscreen(width: usize, height: usize) -> Self {
         let framebuffer = vec![0u8; width * height];
-        let palette = Palettes::new();
+        // 创建全黑调色板，防止启动时闪烁
+        let mut palette = Palettes::new();
+        palette.palette = [[0; 3]; 256];  // 显示用调色板全黑
+        // source_palette 保持 mpal256 用于后续渐显
 
         let safe = 34 * BYTES_PER_LINE;
         let stack = [PAGE_0 + PAGE_SIZE + safe, PAGE_1 + PAGE_SIZE + safe];
@@ -447,14 +451,15 @@ impl VGA {
 
     /// 等待显示期间，对应Pascal WaitDisplay
     pub fn wait_display(&self) {
-        // 现代系统中这通常是空操作，或者添加适当的延迟
+        // 现代系统中这通常是空操作
         // 在真实VGA硬件中会等待垂直回扫期间
     }
 
-    /// 等待回扫，对应Pascal WaitRetrace  
+    /// 等待回扫，对应Pascal WaitRetrace
+    /// 渐隐/渐显现在通过状态机实现，不再需要阻塞延迟
     pub fn wait_retrace(&self) {
-        // 现代系统中这通常是空操作，或者添加适当的延迟
-        // 在真实VGA硬件中会等待垂直回扫
+        // 现代系统中这通常是空操作
+        // 渐变效果通过非阻塞状态机实现，每帧推进一步
     }
 
     /// 恢复背景区块（PopBackGr），将 buf 区块数据写回 framebuffer
@@ -1260,6 +1265,65 @@ impl VGA {
         self.palette.lock_palette = was_locked;
         pal.fade_up(n, self);
         // 写回pal，此时pal.palette已恢复为source_palette
+        self.palette = pal;
+    }
+    
+    /// Wrapper to call `palette.new_palette` and `palette.read_palette`
+    /// 初始化调色板
+    pub fn palette_init(&mut self, p: &crate::palettes::PalType) {
+        self.palette.new_palette(p);
+        let was_locked = self.palette.lock_palette;
+        let mut pal = std::mem::take(&mut self.palette);
+        pal.lock_palette = was_locked;
+        self.palette.lock_palette = was_locked;
+        pal.read_palette(self, p);
+        self.palette = pal;
+    }
+    
+    /// Wrapper to call `palette.clear_palette`
+    /// 清空调色板
+    pub fn palette_clear(&mut self) {
+        let was_locked = self.palette.lock_palette;
+        let mut pal = std::mem::take(&mut self.palette);
+        pal.lock_palette = was_locked;
+        self.palette.lock_palette = was_locked;
+        pal.clear_palette(self);
+        self.palette = pal;
+    }
+    
+    /// Wrapper to call `palette.fade_step` (non-blocking fade step)
+    /// 非阻塞渐变帧推进
+    pub fn palette_fade_step(&mut self) {
+        // 计算临时调色板
+        if let Some(temp_pal) = self.palette.fade_step() {
+            // 直接应用到VGA调色板（绕过Palettes.read_palette以避免借用问题）
+            if !self.palette.lock_palette {
+                for i in 0..256 {
+                    self.palette.palette[i] = temp_pal[i];
+                }
+            }
+        }
+    }
+    
+    /// Wrapper to call `palette.init_grass`
+    /// 初始化草地调色板
+    pub fn palette_init_grass(&mut self, options: &crate::buffers::WorldOptions) {
+        let was_locked = self.palette.lock_palette;
+        let mut pal = std::mem::take(&mut self.palette);
+        pal.lock_palette = was_locked;
+        self.palette.lock_palette = was_locked;
+        pal.init_grass(self, options);
+        self.palette = pal;
+    }
+    
+    /// Wrapper to call `palette.out_palette`
+    /// 设置单个调色板颜色
+    pub fn palette_out(&mut self, color: usize, r: u8, g: u8, b: u8) {
+        let was_locked = self.palette.lock_palette;
+        let mut pal = std::mem::take(&mut self.palette);
+        pal.lock_palette = was_locked;
+        self.palette.lock_palette = was_locked;
+        pal.out_palette(color, r, g, b, self);
         self.palette = pal;
     }
 }

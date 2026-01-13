@@ -200,7 +200,6 @@ pub struct Buffers {
     pub quit_game: bool,
     pub beeper_sound: bool,
     pub playing_macro: bool,
-    // ... 其他字段可按需添加 ...
 }
 
 // 需要定义WorldOptions结构体

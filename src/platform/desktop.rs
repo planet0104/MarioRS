@@ -116,11 +116,14 @@ impl DesktopDisplay {
         // 创建窗口图标（从游戏精灵生成）
         let icon = create_window_icon();
         
+        // 关键修复：先创建不可见窗口，初始化 pixels 并填充黑色后再显示
+        // 这样可以避免启动时的白色闪烁
         let window_attributes = Window::default_attributes()
             .with_title("Mario")
             .with_inner_size(size)
             .with_min_inner_size(size)
-            .with_window_icon(icon);
+            .with_window_icon(icon)
+            .with_visible(false);  // 先不显示窗口
         
         let window = Arc::new(event_loop.create_window(window_attributes)?);
         let window_size = window.inner_size();
@@ -131,13 +134,44 @@ impl DesktopDisplay {
             Arc::clone(&window),
         );
 
-        let pixels = PixelsBuilder::new(self.width, self.height, surface_texture)
+        let mut pixels = PixelsBuilder::new(self.width, self.height, surface_texture)
             .wgpu_backend(Backends::VULKAN | Backends::GL)
+            .clear_color(pixels::wgpu::Color::BLACK)  // 设置清除颜色为黑色
             .build()?;
-
+        
+        // 初始化 framebuffer 为黑色
+        for pixel in pixels.frame_mut().chunks_exact_mut(4) {
+            pixel[0] = 0; // R
+            pixel[1] = 0; // G
+            pixel[2] = 0; // B
+            pixel[3] = 255; // A
+        }
+        
+        // 立即渲染黑色帧到 GPU surface，预热渲染管线
+        // 这可以减少首次显示时的白色闪烁
+        let _ = pixels.render();
+        
+        // 注意：不在这里显示窗口，而是在游戏初始化完成后显示
+        // 这样可以避免加载期间的白色闪烁
         self.window = Some(window);
         self.pixels = Some(pixels);
         Ok(())
+    }
+    
+    /// 显示窗口（在游戏初始化完成后调用）
+    pub fn show_window(&mut self) {
+        if let Some(window) = &self.window {
+            // 多次渲染黑色帧确保 GPU 完全准备好
+            // 这可以避免首帧白色闪烁
+            if let Some(pixels) = &mut self.pixels {
+                for _ in 0..3 {
+                    let _ = pixels.render();
+                }
+            }
+            window.set_visible(true);
+            // 显示后立即请求重绘
+            window.request_redraw();
+        }
     }
 
     pub fn has_window(&self) -> bool {
@@ -560,7 +594,11 @@ impl ApplicationHandler for GameApp {
             }
 
             // 初始化游戏状态（游戏逻辑封装在 game_runner 模块中）
+            // 注意：窗口在此期间保持不可见，避免白色闪烁
             self.game_state = Some(GameState::new());
+            
+            // 游戏初始化完成后再显示窗口
+            self.display.show_window();
             
             // 打印启动信息
             print_startup_info();

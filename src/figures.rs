@@ -1617,7 +1617,7 @@ mod tests {
     #[test]
     fn test_init_wall_to_image() {
         // 构造测试用SpriteDataManager和WorldOptions
-        let sprites = SpriteDataManager::new(); // 你需要实现dummy或用实际数据
+        let sprites = SpriteDataManager::new();
         let options = WorldOptions::default();
 
         // 正确初始化嵌套数组
@@ -1649,7 +1649,7 @@ mod tests {
         let options = WorldOptions::default();
         let empty_img: ImageBuffer =
             [[0u8; crate::buffers::W as usize]; crate::buffers::H as usize];
-        let sprites = SpriteDataManager::new(); // 你需要实现dummy或用实际数据
+        let sprites = SpriteDataManager::new();
         let mut figures = Figures {
             fig_list: [[empty_img.clone(); N2]; N1],
             bricks: [empty_img.clone(); 4],
