@@ -3,7 +3,7 @@
 // 实现 platform.rs 中定义的所有 Backend traits
 // 使用: pixels + winit + cpal + rand + std::fs
 //
-// 重要：只有这个模块依赖 winit，其他游戏模块通过 platform.rs 抽象访问
+// 重要:只有这个模块依赖 winit,其他游戏模块通过 platform.rs 抽象访问
 
 use super::{
     AudioBackend, DisplayBackend, InputBackend, 
@@ -11,14 +11,14 @@ use super::{
     LogBackend, LogLevel, RandomBackend, StorageBackend, TimeBackend,
 };
 
-// Windows 使用 hashbrown 避免 BCryptGenRandom 依赖（兼容 Win7）
-// 但 desktop.rs 主要用于 wgpu-backend（非 Windows GDI），所以保留 std
+// Windows 使用 hashbrown 避免 BCryptGenRandom 依赖(兼容 Win7)
+// 但 desktop.rs 主要用于 wgpu-backend(非 Windows GDI),所以保留 std
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 // ============================================================================
-// Winit 相关导入（仅在此模块使用）
+// Winit 相关导入(仅在此模块使用)
 // ============================================================================
 
 use pixels::{Pixels, PixelsBuilder, SurfaceTexture};
@@ -33,13 +33,13 @@ use winit::window::{Icon, Window, WindowId};
 // 窗口图标 - 从游戏精灵生成
 // ============================================================================
 
-/// 从游戏精灵创建窗口图标（32x32 RGBA）
+/// 从游戏精灵创建窗口图标(32x32 RGBA)
 fn create_window_icon() -> Option<Icon> {
     use crate::sprites::{SpriteDataManager, PALETTE};
     
     // 加载精灵管理器获取 Mario 精灵
     let sprites = SpriteDataManager::new();
-    let mario = &sprites.LWMAR_000; // 大马里奥行走（经典形象）
+    let mario = &sprites.LWMAR_000; // 大马里奥行走(经典形象)
     
     // 源精灵尺寸: 20x28
     const SRC_W: usize = 20;
@@ -87,7 +87,7 @@ fn create_window_icon() -> Option<Icon> {
 }
 
 // ============================================================================
-// 显示后端 - 使用 pixels + winit
+// 显示后端 - 使用 pixels + winit,支持等比例全屏
 // ============================================================================
 
 pub struct DesktopDisplay {
@@ -107,16 +107,16 @@ impl DesktopDisplay {
         }
     }
 
-    /// 使用 ActiveEventLoop 创建窗口（winit 0.30 要求在事件循环内创建）
+    /// 使用 ActiveEventLoop 创建窗口(winit 0.30 要求在事件循环内创建)
     pub fn create_window(&mut self, event_loop: &ActiveEventLoop) -> Result<(), Box<dyn std::error::Error>> {
         use winit::dpi::LogicalSize;
         
         let size = LogicalSize::new(self.width as f64, self.height as f64);
         
-        // 创建窗口图标（从游戏精灵生成）
+        // 创建窗口图标(从游戏精灵生成)
         let icon = create_window_icon();
         
-        // 关键修复：先创建不可见窗口，初始化 pixels 并填充黑色后再显示
+        // 关键修复:先创建不可见窗口,初始化 pixels 并填充黑色后再显示
         // 这样可以避免启动时的白色闪烁
         let window_attributes = Window::default_attributes()
             .with_title("Mario")
@@ -147,18 +147,18 @@ impl DesktopDisplay {
             pixel[3] = 255; // A
         }
         
-        // 立即渲染黑色帧到 GPU surface，预热渲染管线
+        // 立即渲染黑色帧到 GPU surface,预热渲染管线
         // 这可以减少首次显示时的白色闪烁
         let _ = pixels.render();
         
-        // 注意：不在这里显示窗口，而是在游戏初始化完成后显示
+        // 注意:不在这里显示窗口,而是在游戏初始化完成后显示
         // 这样可以避免加载期间的白色闪烁
         self.window = Some(window);
         self.pixels = Some(pixels);
         Ok(())
     }
     
-    /// 显示窗口（在游戏初始化完成后调用）
+    /// 显示窗口(在游戏初始化完成后调用)
     pub fn show_window(&mut self) {
         if let Some(window) = &self.window {
             // 多次渲染黑色帧确保 GPU 完全准备好
@@ -176,6 +176,23 @@ impl DesktopDisplay {
 
     pub fn has_window(&self) -> bool {
         self.window.is_some()
+    }
+    
+    /// 处理窗口大小调整,重新创建 surface texture 以支持等比例缩放
+    pub fn resize(&mut self, new_width: u32, new_height: u32) -> Result<(), Box<dyn std::error::Error>> {
+        if let (Some(window), Some(pixels)) = (&self.window, &mut self.pixels) {
+            // 更新 surface 尺寸
+            let surface_texture = SurfaceTexture::new(
+                new_width,
+                new_height,
+                Arc::clone(window),
+            );
+            pixels.resize_surface(new_width, new_height)?;
+            
+            // 无需调整游戏逻辑分辨率 (self.width x self.height)
+            // pixels 会自动进行等比例缩放并添加 letterbox
+        }
+        Ok(())
     }
 }
 
@@ -253,7 +270,7 @@ pub struct DesktopRandom {
 
 impl DesktopRandom {
     pub fn new() -> Self {
-        // 使用系统时间作为种子，避免依赖rand的std_rng特性
+        // 使用系统时间作为种子,避免依赖rand的std_rng特性
         let seed = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -298,8 +315,8 @@ pub struct DesktopStorage {
 
 impl DesktopStorage {
     pub fn new() -> Self {
-        // 优先使用当前工作目录（更稳定，适合开发和发布环境）
-        // 如果获取失败，则使用可执行文件所在目录
+        // 优先使用当前工作目录(更稳定,适合开发和发布环境)
+        // 如果获取失败,则使用可执行文件所在目录
         let base_path = std::env::current_dir()
             .ok()
             .or_else(|| {
@@ -539,7 +556,7 @@ pub fn log_error(msg: &str) {
 use crate::game_runner::{GameState, print_startup_info, GAME_WIDTH, GAME_HEIGHT};
 use crate::platform::FrameResult;
 
-/// 游戏应用程序状态（平台层只负责事件循环，游戏逻辑在 game_runner 中）
+/// 游戏应用程序状态(平台层只负责事件循环,游戏逻辑在 game_runner 中)
 struct GameApp {
     display: DesktopDisplay,
     #[allow(dead_code)]
@@ -575,7 +592,7 @@ impl GameApp {
                 window.set_fullscreen(None);
                 self.is_fullscreen = false;
             } else {
-                // 进入全屏（使用无边框全屏模式）
+                // 进入全屏(使用无边框全屏模式)
                 window.set_fullscreen(Some(Fullscreen::Borderless(None)));
                 self.is_fullscreen = true;
             }
@@ -585,7 +602,7 @@ impl GameApp {
 
 impl ApplicationHandler for GameApp {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        // 窗口创建（winit 0.30 要求在 resumed 中创建）
+        // 窗口创建(winit 0.30 要求在 resumed 中创建)
         if !self.display.has_window() {
             if let Err(e) = self.display.create_window(event_loop) {
                 eprintln!("创建窗口失败: {}", e);
@@ -593,8 +610,8 @@ impl ApplicationHandler for GameApp {
                 return;
             }
 
-            // 初始化游戏状态（游戏逻辑封装在 game_runner 模块中）
-            // 注意：窗口在此期间保持不可见，避免白色闪烁
+            // 初始化游戏状态(游戏逻辑封装在 game_runner 模块中)
+            // 注意:窗口在此期间保持不可见,避免白色闪烁
             self.game_state = Some(GameState::new());
             
             // 游戏初始化完成后再显示窗口
@@ -624,7 +641,7 @@ impl ApplicationHandler for GameApp {
                     return;
                 }
                 
-                // ESC 退出全屏（仅全屏模式下）
+                // ESC 退出全屏(仅全屏模式下)
                 if is_pressed && platform_key == PlatformKeyCode::Escape && self.is_fullscreen {
                     self.toggle_fullscreen();
                     return;
@@ -637,6 +654,15 @@ impl ApplicationHandler for GameApp {
                         pressed: is_pressed,
                     };
                     state.handle_key_event(&platform_event);
+                }
+            }
+            WindowEvent::Resized(new_size) => {
+                // 窗口大小改变时,调整 surface texture 尺寸
+                // pixels 库会自动处理等比例缩放和 letterbox
+                if new_size.width > 0 && new_size.height > 0 {
+                    if let Err(e) = self.display.resize(new_size.width, new_size.height) {
+                        eprintln!("调整窗口大小失败: {}", e);
+                    }
                 }
             }
             WindowEvent::RedrawRequested => {
@@ -656,7 +682,7 @@ impl ApplicationHandler for GameApp {
                     let display_frame = self.display.framebuffer_mut();
                     state.render_to_rgba(display_frame);
 
-                    // 显示
+                    // 显示 - pixels 会自动进行等比例缩放和添加 letterbox
                     let _ = self.display.present();
 
                     if result == FrameResult::Exit {
@@ -679,9 +705,9 @@ impl ApplicationHandler for GameApp {
     }
 }
 
-/// 运行游戏（平台入口函数）
+/// 运行游戏(平台入口函数)
 pub fn run_game() -> Result<(), Box<dyn std::error::Error>> {
-    // 初始化日志系统（仅在启用 logging feature 时）
+    // 初始化日志系统(仅在启用 logging feature 时)
     #[cfg(feature = "logging")]
     {
         use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
