@@ -23,6 +23,7 @@ use std::time::{Duration, Instant};
 
 use pixels::{Pixels, PixelsBuilder, SurfaceTexture};
 use pixels::wgpu::Backends;
+use pixels::wgpu;
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, KeyEvent, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
@@ -93,8 +94,279 @@ fn create_window_icon() -> Option<Icon> {
 pub struct DesktopDisplay {
     window: Option<Arc<Window>>,
     pixels: Option<Pixels<'static>>,
+    fit_renderer: Option<FitRenderer>,
+    fit_viewport: FitViewport,
     width: u32,
     height: u32,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct FitViewport {
+    surface_w: u32,
+    surface_h: u32,
+    draw_w: u32,
+    draw_h: u32,
+    bar_x: u32,
+    bar_y: u32,
+}
+
+impl FitViewport {
+    fn new(game_w: u32, game_h: u32, surface_w: u32, surface_h: u32) -> Self {
+        // 非整数等比缩放,尽可能放大但不超出 surface
+        let gw = game_w as f64;
+        let gh = game_h as f64;
+        let sw = surface_w as f64;
+        let sh = surface_h as f64;
+
+        let scale = (sw / gw).min(sh / gh);
+        let mut draw_w = (gw * scale).floor().max(1.0) as u32;
+        let mut draw_h = (gh * scale).floor().max(1.0) as u32;
+
+        if draw_w > surface_w {
+            draw_w = surface_w;
+        }
+        if draw_h > surface_h {
+            draw_h = surface_h;
+        }
+
+        let bar_x = surface_w.saturating_sub(draw_w) / 2;
+        let bar_y = surface_h.saturating_sub(draw_h) / 2;
+
+        Self {
+            surface_w,
+            surface_h,
+            draw_w,
+            draw_h,
+            bar_x,
+            bar_y,
+        }
+    }
+
+    fn as_uniform_params(&self) -> [f32; 4] {
+        // params: [scale_x, scale_y, translate_x, translate_y]
+        // translate_x/translate_y 是目标区域中心点在 NDC 的坐标
+        let sw = self.surface_w.max(1) as f32;
+        let sh = self.surface_h.max(1) as f32;
+        let dw = self.draw_w.max(1) as f32;
+        let dh = self.draw_h.max(1) as f32;
+
+        let scale_x = dw / sw;
+        let scale_y = dh / sh;
+
+        let center_x = (self.bar_x as f32 + dw * 0.5) / sw;
+        let center_y_topdown = (self.bar_y as f32 + dh * 0.5) / sh;
+
+        let translate_x = center_x * 2.0 - 1.0;
+        let translate_y = 1.0 - center_y_topdown * 2.0;
+
+        [scale_x, scale_y, translate_x, translate_y]
+    }
+}
+
+fn pack_f32x4_le(v: [f32; 4]) -> [u8; 16] {
+    let mut out = [0u8; 16];
+    let mut i = 0usize;
+    while i < 4 {
+        let b = v[i].to_le_bytes();
+        out[i * 4] = b[0];
+        out[i * 4 + 1] = b[1];
+        out[i * 4 + 2] = b[2];
+        out[i * 4 + 3] = b[3];
+        i += 1;
+    }
+    out
+}
+
+const FIT_SCALE_WGSL: &str = r#"
+struct VertexOutput {
+    @location(0) tex_coord: vec2<f32>,
+    @builtin(position) position: vec4<f32>,
+}
+
+@group(0) @binding(0) var r_tex_color: texture_2d<f32>;
+@group(0) @binding(1) var r_tex_sampler: sampler;
+// params: x=scale_x y=scale_y z=translate_x w=translate_y
+@group(0) @binding(2) var<uniform> r_params: vec4<f32>;
+
+@vertex
+fn vs_main(@builtin(vertex_index) vid: u32) -> VertexOutput {
+    var pos = vec2<f32>(0.0, 0.0);
+    if (vid == 0u) {
+        pos = vec2<f32>(-1.0, -1.0);
+    } else if (vid == 1u) {
+        pos = vec2<f32>(3.0, -1.0);
+    } else {
+        pos = vec2<f32>(-1.0, 3.0);
+    }
+
+    var out: VertexOutput;
+    out.tex_coord = fma(pos, vec2<f32>(0.5, -0.5), vec2<f32>(0.5, 0.5));
+    out.position = vec4<f32>(pos * r_params.xy + r_params.zw, 0.0, 1.0);
+    return out;
+}
+
+@fragment
+fn fs_main(@location(0) tex_coord: vec2<f32>) -> @location(0) vec4<f32> {
+    return textureSample(r_tex_color, r_tex_sampler, tex_coord);
+}
+"#;
+
+struct FitRenderer {
+    pipeline: wgpu::RenderPipeline,
+    bind_group: wgpu::BindGroup,
+    uniform_buffer: wgpu::Buffer,
+}
+
+impl FitRenderer {
+    fn new(
+        device: &wgpu::Device,
+        source_texture: &wgpu::Texture,
+        render_target_format: wgpu::TextureFormat,
+    ) -> Self {
+        let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("mariors_fit_scale_shader"),
+            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(FIT_SCALE_WGSL)),
+        });
+
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("mariors_fit_scale_sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        });
+
+        let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("mariors_fit_scale_uniform"),
+            size: 16,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("mariors_fit_scale_bind_group_layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        multisampled: false,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: wgpu::BufferSize::new(16),
+                    },
+                    count: None,
+                },
+            ],
+        });
+
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("mariors_fit_scale_pipeline_layout"),
+            bind_group_layouts: &[&bind_group_layout],
+            push_constant_ranges: &[],
+        });
+
+        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("mariors_fit_scale_pipeline"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &module,
+                entry_point: "vs_main",
+                buffers: &[],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &module,
+                entry_point: "fs_main",
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: render_target_format,
+                    blend: Some(wgpu::BlendState::REPLACE),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                ..Default::default()
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+        });
+
+        let texture_view = source_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("mariors_fit_scale_bind_group"),
+            layout: &bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&texture_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: uniform_buffer.as_entire_binding(),
+                },
+            ],
+        });
+
+        Self {
+            pipeline,
+            bind_group,
+            uniform_buffer,
+        }
+    }
+
+    fn update_viewport(&self, queue: &wgpu::Queue, viewport: FitViewport) {
+        let params = viewport.as_uniform_params();
+        let bytes = pack_f32x4_le(params);
+        queue.write_buffer(&self.uniform_buffer, 0, &bytes);
+    }
+
+    fn render(&self, encoder: &mut wgpu::CommandEncoder, render_target: &wgpu::TextureView, viewport: FitViewport) {
+        let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("mariors_fit_scale_render_pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: render_target,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+        });
+
+        // 只在目标渲染区域绘制,避免 full-screen triangle 在边缘采样导致伪影
+        if viewport.draw_w > 0 && viewport.draw_h > 0 {
+            rpass.set_pipeline(&self.pipeline);
+            rpass.set_bind_group(0, &self.bind_group, &[]);
+            rpass.set_scissor_rect(viewport.bar_x, viewport.bar_y, viewport.draw_w, viewport.draw_h);
+            rpass.draw(0..3, 0..1);
+        }
+    }
 }
 
 impl DesktopDisplay {
@@ -102,6 +374,8 @@ impl DesktopDisplay {
         Self {
             window: None,
             pixels: None,
+            fit_renderer: None,
+            fit_viewport: FitViewport::new(width, height, width, height),
             width,
             height,
         }
@@ -127,6 +401,18 @@ impl DesktopDisplay {
         
         let window = Arc::new(event_loop.create_window(window_attributes)?);
         let window_size = window.inner_size();
+        let window_outer_size = window.outer_size();
+        let scale_factor = window.scale_factor();
+        log_info(&format!(
+            "[display] create_window game={}x{} window_inner={}x{} window_outer={}x{} scale_factor={:.3}",
+            self.width,
+            self.height,
+            window_size.width,
+            window_size.height,
+            window_outer_size.width,
+            window_outer_size.height,
+            scale_factor
+        ));
         
         let surface_texture = SurfaceTexture::new(
             window_size.width,
@@ -138,6 +424,11 @@ impl DesktopDisplay {
             .wgpu_backend(Backends::VULKAN | Backends::GL)
             .clear_color(pixels::wgpu::Color::BLACK)  // 设置清除颜色为黑色
             .build()?;
+        log_info(&format!(
+            "[display] pixels_init surface={}x{}",
+            window_size.width,
+            window_size.height
+        ));
         
         // 初始化 framebuffer 为黑色
         for pixel in pixels.frame_mut().chunks_exact_mut(4) {
@@ -153,7 +444,22 @@ impl DesktopDisplay {
         
         // 注意:不在这里显示窗口,而是在游戏初始化完成后显示
         // 这样可以避免加载期间的白色闪烁
+        self.fit_viewport = FitViewport::new(self.width, self.height, window_size.width, window_size.height);
+        let render_target_format = pixels.surface_texture_format();
+        let fit_renderer = FitRenderer::new(&pixels.context().device, &pixels.context().texture, render_target_format);
+        fit_renderer.update_viewport(&pixels.context().queue, self.fit_viewport);
+
+        log_info(&format!(
+            "[display] fit_viewport surface={}x{} draw={}x{} bar={}x{}",
+            self.fit_viewport.surface_w,
+            self.fit_viewport.surface_h,
+            self.fit_viewport.draw_w,
+            self.fit_viewport.draw_h,
+            self.fit_viewport.bar_x,
+            self.fit_viewport.bar_y
+        ));
         self.window = Some(window);
+        self.fit_renderer = Some(fit_renderer);
         self.pixels = Some(pixels);
         Ok(())
     }
@@ -181,13 +487,84 @@ impl DesktopDisplay {
     /// 处理窗口大小调整,重新创建 surface texture 以支持等比例缩放
     pub fn resize(&mut self, new_width: u32, new_height: u32) -> Result<(), Box<dyn std::error::Error>> {
         if let (Some(window), Some(pixels)) = (&self.window, &mut self.pixels) {
-            // 更新 surface 尺寸
-            let surface_texture = SurfaceTexture::new(
+            // 注意:这里保持当前 pixels 的缩放方式(等比例缩放+letterbox)
+            // 我们只更新 wgpu surface 尺寸,并打出关键尺寸日志用于排查
+            let window_inner = window.inner_size();
+            let window_outer = window.outer_size();
+            let scale_factor = window.scale_factor();
+
+            // 计算理论等比缩放后的渲染矩形(用于对照 pixels 的实际表现)
+            let game_w = self.width as f64;
+            let game_h = self.height as f64;
+            let surface_w = new_width as f64;
+            let surface_h = new_height as f64;
+            let scale_fit = (surface_w / game_w).min(surface_h / game_h);
+            let draw_fit_w = (game_w * scale_fit).floor().max(0.0) as u32;
+            let draw_fit_h = (game_h * scale_fit).floor().max(0.0) as u32;
+            let bar_fit_x = new_width.saturating_sub(draw_fit_w) / 2;
+            let bar_fit_y = new_height.saturating_sub(draw_fit_h) / 2;
+
+            // 如果 pixels 使用整数倍缩放,只有窗口尺寸是游戏尺寸的整数倍时才会无黑边
+            let scale_int = scale_fit.floor().max(1.0) as u32;
+            let draw_int_w = self.width.saturating_mul(scale_int);
+            let draw_int_h = self.height.saturating_mul(scale_int);
+            let bar_int_x = new_width.saturating_sub(draw_int_w) / 2;
+            let bar_int_y = new_height.saturating_sub(draw_int_h) / 2;
+
+            log_info(&format!(
+                "[display] resize surface_event={}x{} window_inner={}x{} window_outer={}x{} scale_factor={:.3} expected_fit_scale={:.6} expected_fit_draw={}x{} expected_fit_bar={}x{} expected_int_scale={} expected_int_draw={}x{} expected_int_bar={}x{}",
                 new_width,
                 new_height,
-                Arc::clone(window),
-            );
+                window_inner.width,
+                window_inner.height,
+                window_outer.width,
+                window_outer.height,
+                scale_factor,
+                scale_fit,
+                draw_fit_w,
+                draw_fit_h,
+                bar_fit_x,
+                bar_fit_y,
+                scale_int,
+                draw_int_w,
+                draw_int_h,
+                bar_int_x,
+                bar_int_y
+            ));
+            if window_inner.width != new_width || window_inner.height != new_height {
+                log_warn(&format!(
+                    "[display] size_mismatch surface_event={}x{} window_inner_now={}x{}",
+                    new_width,
+                    new_height,
+                    window_inner.width,
+                    window_inner.height
+                ));
+            }
+
             pixels.resize_surface(new_width, new_height)?;
+
+            // 使用自定义非整数等比缩放(最小方案:保留 pixels,替换最后的缩放渲染)
+            self.fit_viewport = FitViewport::new(self.width, self.height, new_width, new_height);
+            if let Some(fit_renderer) = &self.fit_renderer {
+                fit_renderer.update_viewport(&pixels.context().queue, self.fit_viewport);
+            }
+
+            // pixels 默认缩放仍然会计算 clip_rect(整数倍缩放),这里保留日志用于对照排查
+            let clip = pixels.context().scaling_renderer.clip_rect();
+            let tex = pixels.context().texture_extent;
+            log_info(&format!(
+                "[display] pixels_default_state texture={}x{} clip_rect={} {} {} {} fit_draw={}x{} fit_bar={}x{}",
+                tex.width,
+                tex.height,
+                clip.0,
+                clip.1,
+                clip.2,
+                clip.3,
+                self.fit_viewport.draw_w,
+                self.fit_viewport.draw_h,
+                self.fit_viewport.bar_x,
+                self.fit_viewport.bar_y
+            ));
             
             // 无需调整游戏逻辑分辨率 (self.width x self.height)
             // pixels 会自动进行等比例缩放并添加 letterbox
@@ -210,8 +587,15 @@ impl DisplayBackend for DesktopDisplay {
     }
 
     fn present(&mut self) -> Result<(), String> {
-        if let Some(pixels) = &self.pixels {
-            pixels.render().map_err(|e| e.to_string())
+        if let (Some(pixels), Some(fit_renderer)) = (&self.pixels, &self.fit_renderer) {
+            let viewport = self.fit_viewport;
+            pixels.render_with(|encoder, render_target, _context| {
+                fit_renderer.render(encoder, render_target, viewport);
+                Ok(())
+            }).map_err(|e| {
+                log_error(&format!("[display] present_failed {}", e));
+                e.to_string()
+            })
         } else {
             Ok(())
         }
@@ -591,10 +975,30 @@ impl GameApp {
                 // 退出全屏
                 window.set_fullscreen(None);
                 self.is_fullscreen = false;
+                let inner = window.inner_size();
+                let outer = window.outer_size();
+                log_info(&format!(
+                    "[display] fullscreen_off window_inner={}x{} window_outer={}x{} scale_factor={:.3}",
+                    inner.width,
+                    inner.height,
+                    outer.width,
+                    outer.height,
+                    window.scale_factor()
+                ));
             } else {
                 // 进入全屏(使用无边框全屏模式)
                 window.set_fullscreen(Some(Fullscreen::Borderless(None)));
                 self.is_fullscreen = true;
+                let inner = window.inner_size();
+                let outer = window.outer_size();
+                log_info(&format!(
+                    "[display] fullscreen_on window_inner={}x{} window_outer={}x{} scale_factor={:.3}",
+                    inner.width,
+                    inner.height,
+                    outer.width,
+                    outer.height,
+                    window.scale_factor()
+                ));
             }
         }
     }
@@ -631,6 +1035,27 @@ impl ApplicationHandler for GameApp {
                 self.running = false;
                 event_loop.exit();
             }
+            WindowEvent::ScaleFactorChanged { .. } => {
+                // DPI 或显示器缩放发生变化时,窗口的物理像素尺寸可能变化
+                // 这里打日志并兜底调用 resize,避免 surface 尺寸没跟上导致画面偏小或黑边异常
+                if let Some(window) = &self.display.window {
+                    let inner = window.inner_size();
+                    let outer = window.outer_size();
+                    log_info(&format!(
+                        "[display] scale_factor_changed window_inner={}x{} window_outer={}x{} scale_factor={:.3}",
+                        inner.width,
+                        inner.height,
+                        outer.width,
+                        outer.height,
+                        window.scale_factor()
+                    ));
+                    if inner.width > 0 && inner.height > 0 {
+                        if let Err(e) = self.display.resize(inner.width, inner.height) {
+                            eprintln!("调整窗口大小失败: {}", e);
+                        }
+                    }
+                }
+            }
             WindowEvent::KeyboardInput { event: key_event, .. } => {
                 let platform_key = winit_keycode_to_platform(&key_event.physical_key);
                 let is_pressed = key_event.state == ElementState::Pressed;
@@ -660,6 +1085,20 @@ impl ApplicationHandler for GameApp {
                 // 窗口大小改变时,调整 surface texture 尺寸
                 // pixels 库会自动处理等比例缩放和 letterbox
                 if new_size.width > 0 && new_size.height > 0 {
+                    if let Some(window) = &self.display.window {
+                        let inner = window.inner_size();
+                        let outer = window.outer_size();
+                        log_info(&format!(
+                            "[display] resized_event new_size={}x{} window_inner_now={}x{} window_outer_now={}x{} scale_factor={:.3}",
+                            new_size.width,
+                            new_size.height,
+                            inner.width,
+                            inner.height,
+                            outer.width,
+                            outer.height,
+                            window.scale_factor()
+                        ));
+                    }
                     if let Err(e) = self.display.resize(new_size.width, new_size.height) {
                         eprintln!("调整窗口大小失败: {}", e);
                     }
