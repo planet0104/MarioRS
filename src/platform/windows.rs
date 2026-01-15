@@ -205,6 +205,13 @@ static mut RENDER_OFFSET_Y: i32 = 0;
 static mut FULLSCREEN_WIDTH: u32 = 0;
 static mut FULLSCREEN_HEIGHT: u32 = 0;
 
+// 双缓冲相关
+static mut BACK_BUFFER_DC: HDC = null_mut();
+static mut BACK_BUFFER_BITMAP: HBITMAP = null_mut();
+static mut BACK_BUFFER_OLD_BITMAP: HGDIOBJ = null_mut();
+static mut BACK_BUFFER_WIDTH: i32 = 0;
+static mut BACK_BUFFER_HEIGHT: i32 = 0;
+
 // F11 虚拟键码
 const VK_F11: u16 = 0x7A;
 
@@ -335,6 +342,21 @@ unsafe extern "system" fn wndproc(
                     state.request_quit();
                     state.shutdown();
                 }
+                
+                // 清理双缓冲资源
+                if !BACK_BUFFER_DC.is_null() {
+                    if !BACK_BUFFER_OLD_BITMAP.is_null() {
+                        SelectObject(BACK_BUFFER_DC, BACK_BUFFER_OLD_BITMAP);
+                    }
+                    if !BACK_BUFFER_BITMAP.is_null() {
+                        DeleteObject(BACK_BUFFER_BITMAP);
+                    }
+                    DeleteDC(BACK_BUFFER_DC);
+                    BACK_BUFFER_DC = null_mut();
+                    BACK_BUFFER_BITMAP = null_mut();
+                    BACK_BUFFER_OLD_BITMAP = null_mut();
+                }
+                
                 RUNNING = false;
                 PostQuitMessage(0);
                 0
@@ -344,6 +366,12 @@ unsafe extern "system" fn wndproc(
                 // 关闭窗口
                 let _ = DestroyWindow(hwnd);
                 0
+            }
+            
+            WM_ERASEBKGND => {
+                // 返回非零值表示已处理，阻止系统擦除背景
+                // 这是防止闪烁的关键 - 我们在 WM_PAINT 中使用双缓冲自己处理
+                1
             }
             
             WM_KEYDOWN | WM_SYSKEYDOWN => {
@@ -388,12 +416,51 @@ unsafe extern "system" fn wndproc(
             }
             
             WM_PAINT => {
-                // 处理重绘请求
+                // 处理重绘请求 - 使用双缓冲防止闪烁
                 let mut ps: PAINTSTRUCT = zeroed();
                 let hdc = BeginPaint(hwnd, &mut ps);
                 
-                // 绘制当前帧
-                render_frame(hwnd, hdc);
+                // 获取窗口客户区尺寸
+                let mut client_rect: RECT = zeroed();
+                GetClientRect(hwnd, &mut client_rect);
+                let client_width = client_rect.right - client_rect.left;
+                let client_height = client_rect.bottom - client_rect.top;
+                
+                // 检查是否需要重新创建后台缓冲区
+                if BACK_BUFFER_DC.is_null() || 
+                   BACK_BUFFER_WIDTH != client_width || 
+                   BACK_BUFFER_HEIGHT != client_height {
+                    // 清理旧的后台缓冲区
+                    if !BACK_BUFFER_DC.is_null() {
+                        if !BACK_BUFFER_OLD_BITMAP.is_null() {
+                            SelectObject(BACK_BUFFER_DC, BACK_BUFFER_OLD_BITMAP);
+                        }
+                        if !BACK_BUFFER_BITMAP.is_null() {
+                            DeleteObject(BACK_BUFFER_BITMAP);
+                        }
+                        DeleteDC(BACK_BUFFER_DC);
+                    }
+                    
+                    // 创建新的后台缓冲区
+                    BACK_BUFFER_DC = CreateCompatibleDC(hdc);
+                    BACK_BUFFER_BITMAP = CreateCompatibleBitmap(hdc, client_width, client_height);
+                    BACK_BUFFER_OLD_BITMAP = SelectObject(BACK_BUFFER_DC, BACK_BUFFER_BITMAP);
+                    BACK_BUFFER_WIDTH = client_width;
+                    BACK_BUFFER_HEIGHT = client_height;
+                }
+                
+                // 在后台缓冲区绘制
+                render_frame(hwnd, BACK_BUFFER_DC, client_width, client_height);
+                
+                // 一次性将后台缓冲区复制到前台（原子操作，无闪烁）
+                BitBlt(
+                    hdc,
+                    0, 0,
+                    client_width, client_height,
+                    BACK_BUFFER_DC,
+                    0, 0,
+                    SRCCOPY,
+                );
                 
                 EndPaint(hwnd, &ps);
                 0
@@ -500,9 +567,21 @@ unsafe extern "system" fn wndproc(
     }
 }
 
-/// 渲染一帧到窗口（支持动态缩放和全屏居中）
-unsafe fn render_frame(_hwnd: HWND, hdc: HDC) {
+/// 渲染一帧到后台缓冲区（支持动态缩放和全屏居中）
+/// 使用双缓冲，所有绘制操作在内存 DC 中完成，避免闪烁
+unsafe fn render_frame(_hwnd: HWND, hdc: HDC, buffer_width: i32, buffer_height: i32) {
     unsafe {
+        // 先用黑色填充整个后台缓冲区（处理黑边和背景）
+        // 因为是在后台缓冲区操作，用户看不到这个过程
+        let brush = GetStockObject(BLACK_BRUSH);
+        let rect = RECT {
+            left: 0,
+            top: 0,
+            right: buffer_width,
+            bottom: buffer_height,
+        };
+        FillRect(hdc, &rect, brush);
+        
         if let Some(state) = GAME_STATE.as_ref() {
             // 确保缓冲区大小正确
             let buffer_size = (GAME_WIDTH * GAME_HEIGHT * 4) as usize;
@@ -529,18 +608,6 @@ unsafe fn render_frame(_hwnd: HWND, hdc: HDC) {
             
             // 设置拉伸模式（像素游戏使用 COLORONCOLOR 保持锐利）
             SetStretchBltMode(hdc, COLORONCOLOR as i32);
-            
-            // 全屏模式下先填充黑色背景
-            if IS_FULLSCREEN && FULLSCREEN_WIDTH > 0 {
-                let brush = GetStockObject(BLACK_BRUSH);
-                let rect = RECT {
-                    left: 0,
-                    top: 0,
-                    right: FULLSCREEN_WIDTH as i32,
-                    bottom: FULLSCREEN_HEIGHT as i32,
-                };
-                FillRect(hdc, &rect, brush);
-            }
             
             // 使用 StretchDIBits 绘制并缩放到当前窗口尺寸
             // 全屏模式使用偏移居中显示
