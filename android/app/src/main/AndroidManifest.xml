@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- MarioRS Android 清单文件 -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application
+        android:label="@string/app_name"
+        android:icon="@drawable/ic_launcher"
+        android:hasCode="false"
+        android:allowBackup="true">
+
+        <!-- 纯 Native Activity，由 Rust 代码驱动 -->
+        <activity
+            android:name="android.app.NativeActivity"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden"
+            android:screenOrientation="landscape"
+            android:theme="@android:style/Theme.NoTitleBar.Fullscreen"
+            android:exported="true">
+
+            <!-- 指定 Rust 编译的动态库名称 -->
+            <meta-data
+                android:name="android.app.lib_name"
+                android:value="mario" />
+
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+
+</manifest>

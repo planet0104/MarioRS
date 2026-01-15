@@ -36,3 +36,11 @@ fn run_platform() -> Result<(), Box<dyn std::error::Error>> {
 fn run_platform() -> Result<(), Box<dyn std::error::Error>> {
     mario::platform::run_game()
 }
+
+/// Android 平台（main.rs 不使用，入口在 lib.rs 的 android_main）
+#[cfg(target_os = "android")]
+fn run_platform() -> Result<(), Box<dyn std::error::Error>> {
+    // Android 使用 NativeActivity，入口点是 lib.rs 中的 android_main
+    // 这个函数不会被调用，仅用于编译通过
+    Ok(())
+}

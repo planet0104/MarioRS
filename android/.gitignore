@@ -1,0 +1,18 @@
+# Gradle
+.gradle/
+build/
+
+# Android Studio
+.idea/
+*.iml
+local.properties
+
+# Build outputs
+app/build/
+*.apk
+
+# JNI libraries
+app/src/main/jniLibs/
+
+# Signing
+*.keystore

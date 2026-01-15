@@ -10,6 +10,10 @@ license = "MIT"
 keywords = ["game", "mario", "platformer", "retro"]
 categories = ["games"]
 
+# 支持编译为动态库 (Android .so) 和静态库
+[lib]
+crate-type = ["cdylib", "rlib"]
+
 [dependencies]
 # wgpu 渲染后端（可选）
 pixels = { version = "0.15", optional = true }
@@ -65,6 +69,14 @@ tracing-wasm = { version = "0.2", optional = true }
 # Android平台特定依赖
 # ============================================================================
 [target.'cfg(target_os = "android")'.dependencies]
+# Android Activity 封装 (支持 NativeActivity)
+android-activity = { version = "0.6", features = ["native-activity"] }
+# Android NDK 绑定
+ndk = "0.9"
+ndk-sys = "0.6"
+# Android 日志系统
+android_logger = "0.14"
+log = "0.4"
 # tracing-android is optional; activate via `--features logging` when needed.
 tracing-android = { version = "0.2", optional = true }
 
@@ -92,6 +104,7 @@ logging = ["dep:tracing", "dep:tracing-subscriber", "dep:tracing-wasm", "dep:tra
 wgpu-backend = ["dep:pixels", "dep:winit"]  # wgpu 渲染后端（跨平台，体积大）
 gdi-backend = ["dep:windows-sys"]           # Win32 GDI 后端（仅 Windows，体积小）
 dark-theme = []                             # 暗黑主题适配（需要 Vista+ dwmapi.dll）
+android = []                                # Android 平台后端
 
 # ============================================================================
 # Release 编译优化 - 最小体积

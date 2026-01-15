@@ -23,6 +23,9 @@ mod windows;
 #[cfg(feature = "wgpu-backend")]
 mod desktop;
 
+#[cfg(target_os = "android")]
+mod android;
+
 // ============================================================================
 // 显示后端 - 最底层的渲染抽象
 // ============================================================================
@@ -303,6 +306,16 @@ pub use self::desktop::{
     log_debug, log_info, log_warn, log_error,
     DesktopStorage, DesktopAudio, DesktopDisplay, DesktopInput, DesktopTime, DesktopRandom, DesktopLog,
     run_game,
+};
+
+// Android 后端
+#[cfg(target_os = "android")]
+pub use self::android::{
+    random_i32, random_usize, random_u32, random_u8, random_f32,
+    now_ms,
+    log_debug, log_info, log_warn, log_error,
+    DesktopStorage, DesktopAudio, DesktopDisplay, DesktopInput, DesktopTime, DesktopRandom, DesktopLog,
+    run_game, android_main,
 };
 
 // Web 平台（未来扩展）

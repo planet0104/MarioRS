@@ -42,6 +42,16 @@ rustflags = [
 [target.x86_64-pc-windows-gnu]
 rustflags = ["-C", "target-feature=+crt-static"]
 
+# Android 目标：链接 C++ 运行时库 (cpal/oboe 依赖)
+[target.aarch64-linux-android]
+rustflags = ["-C", "link-arg=-lc++_shared"]
+
+[target.armv7-linux-androideabi]
+rustflags = ["-C", "link-arg=-lc++_shared"]
+
+[target.x86_64-linux-android]
+rustflags = ["-C", "link-arg=-lc++_shared"]
+
 # 构建配置
 [build]
 # 取消注释以下行来默认启用 nightly 特性

@@ -126,40 +126,40 @@ fn main() -> io::Result<()> {
     // Tell Cargo to include the generated file path via OUT_DIR
     println!("cargo:warning=generated assets at {}", generated.display());
 
-    // Windows: 嵌入应用程序图标
-    // embed_resource::compile 会自动根据 Cargo 环境变量检测目标架构
-    #[cfg(target_os = "windows")]
-    {
+    // 获取目标操作系统 (交叉编译时需要用环境变量而不是 cfg)
+    let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+
+    // Windows: 嵌入应用程序图标 (仅当目标是 Windows 时)
+    if target_os == "windows" {
         let rc_path = assets_dir.join("mario.rc");
         if rc_path.exists() {
-            embed_resource::compile(&rc_path, embed_resource::NONE);
+            let _ = embed_resource::compile(&rc_path, embed_resource::NONE);
         }
-    }
 
-    // Windows XP 兼容性：链接 YY-Thunks
-    // 当设置环境变量 MARIO_XP_COMPAT=1 时启用
-    #[cfg(target_os = "windows")]
-    if env::var("MARIO_XP_COMPAT").is_ok() {
-        let yy_thunks_dir = manifest_dir.join("vendor").join("yy-thunks").join("objs");
-        
-        // 根据目标架构选择对应的 obj 文件
-        let target_arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
-        let (arch_dir, subsystem_version) = match target_arch.as_str() {
-            "x86" => ("x86", "5.01"),   // Windows XP (x86)
-            "x86_64" => ("x64", "5.02"), // Windows Server 2003 / XP x64 Edition
-            _ => ("x64", "5.02"),
-        };
-        
-        let obj_path = yy_thunks_dir.join(arch_dir).join("YY_Thunks_for_WinXP.obj");
-        
-        if obj_path.exists() {
-            // 链接 YY-Thunks obj 文件
-            println!("cargo:rustc-link-arg={}", obj_path.display());
-            // 设置子系统版本以支持 XP
-            println!("cargo:rustc-link-arg=/SUBSYSTEM:WINDOWS,{}", subsystem_version);
-            println!("cargo:warning=YY-Thunks enabled for Windows XP compatibility ({})", arch_dir);
-        } else {
-            println!("cargo:warning=YY-Thunks obj not found at: {}", obj_path.display());
+        // Windows XP 兼容性：链接 YY-Thunks
+        // 当设置环境变量 MARIO_XP_COMPAT=1 时启用
+        if env::var("MARIO_XP_COMPAT").is_ok() {
+            let yy_thunks_dir = manifest_dir.join("vendor").join("yy-thunks").join("objs");
+            
+            // 根据目标架构选择对应的 obj 文件
+            let target_arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
+            let (arch_dir, subsystem_version) = match target_arch.as_str() {
+                "x86" => ("x86", "5.01"),   // Windows XP (x86)
+                "x86_64" => ("x64", "5.02"), // Windows Server 2003 / XP x64 Edition
+                _ => ("x64", "5.02"),
+            };
+            
+            let obj_path = yy_thunks_dir.join(arch_dir).join("YY_Thunks_for_WinXP.obj");
+            
+            if obj_path.exists() {
+                // 链接 YY-Thunks obj 文件
+                println!("cargo:rustc-link-arg={}", obj_path.display());
+                // 设置子系统版本以支持 XP
+                println!("cargo:rustc-link-arg=/SUBSYSTEM:WINDOWS,{}", subsystem_version);
+                println!("cargo:warning=YY-Thunks enabled for Windows XP compatibility ({})", arch_dir);
+            } else {
+                println!("cargo:warning=YY-Thunks obj not found at: {}", obj_path.display());
+            }
         }
     }
 

@@ -4,6 +4,17 @@
 // 平台抽象层
 pub mod platform;
 
+// Android 入口点 - 使用 android-activity crate
+#[cfg(target_os = "android")]
+use android_activity::AndroidApp;
+
+// 声明 Android 入口点 (Rust 2024 edition 要求 unsafe 属性)
+#[cfg(target_os = "android")]
+#[unsafe(no_mangle)]
+pub extern "C" fn android_main(app: AndroidApp) {
+    platform::android_main(app);
+}
+
 // 游戏核心模块
 pub mod buffers;
 pub mod config;
