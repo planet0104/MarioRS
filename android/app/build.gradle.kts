@@ -4,6 +4,20 @@ plugins {
     id("com.android.application")
 }
 
+import java.util.Properties
+import java.io.FileInputStream
+
+// Load keystore properties if present at project root (android/keystore.properties)
+val keystorePropertiesFile = rootProject.file("keystore.properties")
+val keystoreProperties = Properties()
+if (keystorePropertiesFile.exists()) {
+    FileInputStream(keystorePropertiesFile).use { keystoreProperties.load(it) }
+}
+val keyAlias: String? = keystoreProperties.getProperty("keyAlias")
+val keyPassword: String? = keystoreProperties.getProperty("keyPassword")
+val storeFileProp: String? = keystoreProperties.getProperty("storeFile")
+val storePassword: String? = keystoreProperties.getProperty("storePassword")
+
 android {
     namespace = "com.mariogame"
     compileSdk = 34
@@ -21,6 +35,16 @@ android {
         }
     }
 
+    // Create signing config (use defaults if keystore properties are missing)
+    signingConfigs {
+        create("release") {
+            keyAlias = keyAlias ?: "mario"
+            keyPassword = keyPassword ?: "mario123"
+            storeFile = file(storeFileProp ?: "mario.jks")
+            storePassword = storePassword ?: "mario123"
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
@@ -28,6 +52,8 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            // Configure signing for release builds. Values come from keystore.properties if present.
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 

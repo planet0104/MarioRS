@@ -1,3 +1,6 @@
 # Android SDK 和 NDK (通常 Android Studio 会自动安装)
 $env:ANDROID_HOME = "C:\Users\glsa-\AppData\Local\Android\Sdk"
 $env:ANDROID_NDK_HOME = "$env:ANDROID_HOME\ndk\28.0.13004108"  # 根据实际版本
+
+$env:ANDROID_HOME = "C:\Users\planet\AppData\Local\Android\Sdk"
+$env:ANDROID_NDK_HOME = "$env:ANDROID_HOME\ndk\28.0.13004108"
