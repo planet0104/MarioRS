@@ -702,18 +702,19 @@ impl AndroidDisplay {
         }
 
         // 预计算缩放参数 (使用定点数避免浮点运算)
-        let scale_inv_x = (self.width << 16) / scaled_w.max(1);
-        let scale_inv_y = (self.height << 16) / scaled_h.max(1);
         let src_width = self.width as usize;
+        let src_height = self.height as usize;
+        let scale_inv_x = (src_width << 16) / scaled_w.max(1);
+        let scale_inv_y = (src_height << 16) / scaled_h.max(1);
 
         // 缩放复制 framebuffer
         for dst_y in 0..scaled_h {
-            let src_y = ((dst_y * scale_inv_y as usize) >> 16).min(self.height as usize - 1);
+            let src_y = ((dst_y * scale_inv_y) >> 16).min(src_height - 1);
             let src_row_offset = src_y * src_width * 4;
             let dst_row_ptr = dst_ptr.add((offset_y + dst_y) * dst_stride + offset_x);
 
             for dst_x in 0..scaled_w {
-                let src_x = ((dst_x * scale_inv_x as usize) >> 16).min(src_width - 1);
+                let src_x = ((dst_x * scale_inv_x) >> 16).min(src_width - 1);
                 let src_idx = src_row_offset + src_x * 4;
 
                 // RGBA -> ABGR (Android native window 格式)
