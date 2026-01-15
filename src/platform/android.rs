@@ -34,59 +34,106 @@ const GAME_WIDTH: u32 = 320;
 const GAME_HEIGHT: u32 = 200;
 
 // ============================================================================
-// 虚拟按钮渲染器 - 在 framebuffer 中绘制触摸控制UI
+// 虚拟按键渲染器 - 在 framebuffer 中绘制触摸控制UI
 // ============================================================================
 
-/// 虚拟按钮状态
+/// 虚拟按键状态
 #[derive(Default, Clone, Copy)]
 pub struct ButtonStates {
     pub left: bool,
     pub right: bool,
     pub up: bool,
     pub down: bool,
-    pub jump: bool,
+    pub a: bool,      // 跳跃 (A键 - 绿色)
+    pub b: bool,      // 功能键 (B键 - 红色)
+    pub x: bool,      // 加速 (X键 - 蓝色)
+    pub y: bool,      // 功能键 (Y键 - 黄色)
 }
 
-/// 虚拟按钮渲染器 - 在游戏画面上叠加半透明按钮
+/// 虚拟按键渲染器 - 在游戏画面上叠加半透明按键
 pub struct VirtualButtonsRenderer {
     // D-Pad 位置 (基于游戏分辨率 320x200)
     dpad_x: i32,
     dpad_y: i32,
     dpad_size: i32,
-    // 跳跃按钮位置
-    jump_x: i32,
-    jump_y: i32,
-    jump_radius: i32,
+    
+    // 右侧按键区域 - 经典手柄布局
+    // A键 (跳跃) - 右下角，最常用位置
+    button_a_x: i32,
+    button_a_y: i32,
+    button_a_radius: i32,
+    
+    // X键 (加速) - A键左侧
+    button_x_x: i32,
+    button_x_y: i32,
+    button_x_radius: i32,
+    
+    // B键 (功能) - A键上方
+    button_b_x: i32,
+    button_b_y: i32,
+    button_b_radius: i32,
+    
+    // Y键 (功能) - X键上方
+    button_y_x: i32,
+    button_y_y: i32,
+    button_y_radius: i32,
 }
 
 impl VirtualButtonsRenderer {
     pub fn new() -> Self {
-        // 按钮位置基于游戏原始分辨率 (320x200)
+        // 按键位置基于游戏原始分辨率 (320x200)
+        // 右侧按键区域中心位置
+        let right_center_x = 270;
+        let right_center_y = 155;
+        let button_spacing = 35;
+        let button_radius = 18;
+        
         Self {
             // D-Pad 在左下角
             dpad_x: 20,
             dpad_y: 130,
             dpad_size: 60,
-            // 跳跃按钮在右下角
-            jump_x: 275,
-            jump_y: 155,
-            jump_radius: 25,
+            
+            // A键 - 右下角核心位置 (绿色)
+            button_a_x: right_center_x,
+            button_a_y: right_center_y,
+            button_a_radius: button_radius,
+            
+            // X键 - A键左侧 (蓝色)
+            button_x_x: right_center_x - button_spacing,
+            button_x_y: right_center_y,
+            button_x_radius: button_radius - 2,
+            
+            // B键 - A键上方 (红色)
+            button_b_x: right_center_x,
+            button_b_y: right_center_y - button_spacing,
+            button_b_radius: button_radius - 2,
+            
+            // Y键 - X键上方 (黄色)
+            button_y_x: right_center_x - button_spacing,
+            button_y_y: right_center_y - button_spacing,
+            button_y_radius: button_radius - 2,
         }
     }
 
-    /// 在 RGBA framebuffer 上绘制半透明虚拟按钮
+    /// 在 RGBA framebuffer 上绘制半透明虚拟按键
     pub fn render_overlay(&self, framebuffer: &mut [u8], width: u32, _height: u32, states: &ButtonStates) {
         // 绘制 D-Pad (十字方向键)
         self.draw_dpad(framebuffer, width, states);
         
-        // 绘制跳跃按钮 (圆形)
-        self.draw_jump_button(framebuffer, width, states.jump);
+        // 绘制右侧按键 - 经典手柄配色
+        self.draw_button_y(framebuffer, width, states.y);  // Y键 - 黄色
+        self.draw_button_x(framebuffer, width, states.x);  // X键 - 蓝色
+        self.draw_button_b(framebuffer, width, states.b);  // B键 - 红色
+        self.draw_button_a(framebuffer, width, states.a);  // A键 - 绿色 (最后绘制，最突出)
     }
 
     fn draw_dpad(&self, fb: &mut [u8], width: u32, states: &ButtonStates) {
         let alpha = 0.35;
-        let color_normal: (u8, u8, u8) = (120, 120, 120);
-        let color_pressed: (u8, u8, u8) = (220, 80, 80);
+        // 浅灰色 (#CCCCCC) 作为键帽基础色
+        let color_normal: (u8, u8, u8) = (204, 204, 204);
+        // 深灰色 (#555555) 作为按下状态色
+        let color_pressed: (u8, u8, u8) = (85, 85, 85);
         
         let btn_w = 18;
         let btn_h = 18;
@@ -117,17 +164,72 @@ impl VirtualButtonsRenderer {
             if states.right { color_pressed } else { color_normal },
             alpha);
         
-        // 中心圆点
-        self.draw_circle_alpha(fb, width, cx, cy, 6, (80, 80, 80), alpha * 0.8);
+        // 中心圆点 - 使用深灰色
+        self.draw_circle_alpha(fb, width, cx, cy, 6, (85, 85, 85), alpha * 0.8);
     }
 
-    fn draw_jump_button(&self, fb: &mut [u8], width: u32, pressed: bool) {
-        let color = if pressed { (100, 220, 100) } else { (100, 100, 100) };
-        self.draw_circle_alpha(fb, width, self.jump_x, self.jump_y, self.jump_radius, color, 0.4);
+    // A键 - 跳跃 (绿色 - 经典配色)
+    fn draw_button_a(&self, fb: &mut [u8], width: u32, pressed: bool) {
+        let color = if pressed { 
+            (80, 220, 80)   // 按下时更亮的绿色
+        } else { 
+            (60, 180, 60)   // 正常绿色
+        };
+        self.draw_circle_alpha(fb, width, self.button_a_x, self.button_a_y, 
+                              self.button_a_radius, color, 0.5);
         
-        // 绘制 "A" 字母 (简单像素字体)
-        let letter_color = if pressed { (255, 255, 255) } else { (200, 200, 200) };
-        self.draw_letter_a(fb, width, self.jump_x - 4, self.jump_y - 5, letter_color, 0.8);
+        // 绘制 "A" 字母
+        let letter_color = if pressed { (255, 255, 255) } else { (220, 255, 220) };
+        self.draw_letter_a(fb, width, self.button_a_x - 4, self.button_a_y - 5, 
+                          letter_color, 0.9);
+    }
+
+    // B键 - 功能键 (红色 - 经典配色)
+    fn draw_button_b(&self, fb: &mut [u8], width: u32, pressed: bool) {
+        let color = if pressed { 
+            (240, 80, 80)   // 按下时更亮的红色
+        } else { 
+            (200, 50, 50)   // 正常红色
+        };
+        self.draw_circle_alpha(fb, width, self.button_b_x, self.button_b_y, 
+                              self.button_b_radius, color, 0.45);
+        
+        // 绘制 "B" 字母
+        let letter_color = if pressed { (255, 255, 255) } else { (255, 220, 220) };
+        self.draw_letter_b(fb, width, self.button_b_x - 4, self.button_b_y - 4, 
+                          letter_color, 0.9);
+    }
+
+    // X键 - 加速 (蓝色 - 经典配色)
+    fn draw_button_x(&self, fb: &mut [u8], width: u32, pressed: bool) {
+        let color = if pressed { 
+            (80, 160, 240)  // 按下时更亮的蓝色
+        } else { 
+            (60, 120, 200)  // 正常蓝色
+        };
+        self.draw_circle_alpha(fb, width, self.button_x_x, self.button_x_y, 
+                              self.button_x_radius, color, 0.45);
+        
+        // 绘制 "X" 字母
+        let letter_color = if pressed { (255, 255, 255) } else { (220, 240, 255) };
+        self.draw_letter_x(fb, width, self.button_x_x - 4, self.button_x_y - 4, 
+                          letter_color, 0.9);
+    }
+
+    // Y键 - 功能键 (黄色 - 经典配色)
+    fn draw_button_y(&self, fb: &mut [u8], width: u32, pressed: bool) {
+        let color = if pressed { 
+            (240, 220, 80)  // 按下时更亮的黄色
+        } else { 
+            (200, 180, 50)  // 正常黄色
+        };
+        self.draw_circle_alpha(fb, width, self.button_y_x, self.button_y_y, 
+                              self.button_y_radius, color, 0.45);
+        
+        // 绘制 "Y" 字母
+        let letter_color = if pressed { (255, 255, 255) } else { (255, 255, 220) };
+        self.draw_letter_y(fb, width, self.button_y_x - 4, self.button_y_y - 4, 
+                          letter_color, 0.9);
     }
 
     /// Alpha 混合绘制矩形
@@ -179,7 +281,6 @@ impl VirtualButtonsRenderer {
 
     /// 绘制简单的 "A" 字母
     fn draw_letter_a(&self, fb: &mut [u8], width: u32, x: i32, y: i32, color: (u8, u8, u8), alpha: f32) {
-        // 8x10 像素的 A 字母
         let pattern = [
             "  ##  ",
             " #  # ",
@@ -190,7 +291,54 @@ impl VirtualButtonsRenderer {
             "#    #",
             "#    #",
         ];
-        
+        self.draw_letter_pattern(fb, width, x, y, &pattern, color, alpha);
+    }
+
+    /// 绘制 "B" 字母
+    fn draw_letter_b(&self, fb: &mut [u8], width: u32, x: i32, y: i32, color: (u8, u8, u8), alpha: f32) {
+        let pattern = [
+            "##### ",
+            "#    #",
+            "#    #",
+            "##### ",
+            "#    #",
+            "#    #",
+            "##### ",
+        ];
+        self.draw_letter_pattern(fb, width, x, y, &pattern, color, alpha);
+    }
+
+    /// 绘制 "X" 字母
+    fn draw_letter_x(&self, fb: &mut [u8], width: u32, x: i32, y: i32, color: (u8, u8, u8), alpha: f32) {
+        let pattern = [
+            "#    #",
+            " #  # ",
+            "  ##  ",
+            "  ##  ",
+            " #  # ",
+            "#    #",
+            "#    #",
+        ];
+        self.draw_letter_pattern(fb, width, x, y, &pattern, color, alpha);
+    }
+
+    /// 绘制 "Y" 字母
+    fn draw_letter_y(&self, fb: &mut [u8], width: u32, x: i32, y: i32, color: (u8, u8, u8), alpha: f32) {
+        let pattern = [
+            "#    #",
+            " #  # ",
+            "  ##  ",
+            "  ##  ",
+            "  ##  ",
+            "  ##  ",
+            "  ##  ",
+        ];
+        self.draw_letter_pattern(fb, width, x, y, &pattern, color, alpha);
+    }
+
+    /// 通用字母绘制函数
+    fn draw_letter_pattern(&self, fb: &mut [u8], width: u32, x: i32, y: i32, 
+                          pattern: &[&str], color: (u8, u8, u8), alpha: f32) {
         let height = GAME_HEIGHT as i32;
         for (row, line) in pattern.iter().enumerate() {
             for (col, ch) in line.chars().enumerate() {
@@ -229,9 +377,24 @@ impl VirtualButtonsRenderer {
         self.dpad_size / 2
     }
 
-    /// 获取跳跃按钮中心和半径
-    pub fn jump_button(&self) -> (i32, i32, i32) {
-        (self.jump_x, self.jump_y, self.jump_radius)
+    /// 获取A键按钮中心和半径
+    pub fn button_a(&self) -> (i32, i32, i32) {
+        (self.button_a_x, self.button_a_y, self.button_a_radius)
+    }
+
+    /// 获取B键按钮中心和半径
+    pub fn button_b(&self) -> (i32, i32, i32) {
+        (self.button_b_x, self.button_b_y, self.button_b_radius)
+    }
+
+    /// 获取X键按钮中心和半径
+    pub fn button_x(&self) -> (i32, i32, i32) {
+        (self.button_x_x, self.button_x_y, self.button_x_radius)
+    }
+
+    /// 获取Y键按钮中心和半径
+    pub fn button_y(&self) -> (i32, i32, i32) {
+        (self.button_y_x, self.button_y_y, self.button_y_radius)
     }
 }
 
@@ -245,12 +408,23 @@ impl Default for VirtualButtonsRenderer {
 // 触摸输入处理
 // ============================================================================
 
-/// 触摸点状态
+/// 触摸点类型(分配到特定虚拟控件)
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum TouchControl {
+    DPad,
+    ButtonA,
+    ButtonB,
+    ButtonX,
+    ButtonY,
+}
+
+/// 触摸点状态 (带控制类型)
 #[derive(Clone, Copy)]
 struct TouchPoint {
     x: f32,
     y: f32,
     active: bool,
+    control: Option<TouchControl>,
 }
 
 /// Android 输入后端 - 支持触摸和物理键盘
@@ -298,17 +472,17 @@ impl AndroidInput {
         self.has_physical_keyboard = has;
     }
 
-    /// 获取虚拟按钮渲染器
+    /// 获取虚拟按键渲染器
     pub fn virtual_buttons_renderer(&self) -> &VirtualButtonsRenderer {
         &self.virtual_buttons
     }
 
-    /// 获取当前按钮状态
+    /// 获取当前按键状态
     pub fn get_button_states(&self) -> ButtonStates {
         self.button_states
     }
 
-    /// 是否应该显示虚拟按钮
+    /// 是否应该显示虚拟按键
     pub fn should_show_virtual_buttons(&self) -> bool {
         !self.has_physical_keyboard
     }
@@ -325,10 +499,14 @@ impl AndroidInput {
 
         match action {
             MotionAction::Down | MotionAction::PointerDown => {
+                // 确定这个触摸点对应哪个控件
+                let control = self.detect_touch_control(game_x, game_y);
+                
                 self.touch_points[pointer_id] = Some(TouchPoint {
                     x: game_x,
                     y: game_y,
                     active: true,
+                    control,
                 });
             }
             MotionAction::Move => {
@@ -343,8 +521,79 @@ impl AndroidInput {
             _ => {}
         }
 
-        // 更新虚拟按钮状态
+        // 更新虚拟按键状态
         self.update_button_states_from_touches();
+    }
+
+    /// 检测触摸点对应的控件
+    fn detect_touch_control(&self, x: f32, y: f32) -> Option<TouchControl> {
+        // 检测顺序:优先检测小按钮,避免被D-Pad大范围覆盖
+        
+        // 检测A键 (最重要,检测范围稍大)
+        let (ax, ay, ar) = self.virtual_buttons.button_a();
+        if self.is_in_circle(x, y, ax, ay, ar, 1.6) {
+            return Some(TouchControl::ButtonA);
+        }
+        
+        // 检测B键
+        let (bx, by, br) = self.virtual_buttons.button_b();
+        if self.is_in_circle(x, y, bx, by, br, 1.5) {
+            return Some(TouchControl::ButtonB);
+        }
+        
+        // 检测X键
+        let (xx, xy, xr) = self.virtual_buttons.button_x();
+        if self.is_in_circle(x, y, xx, xy, xr, 1.5) {
+            return Some(TouchControl::ButtonX);
+        }
+        
+        // 检测Y键
+        let (yx, yy, yr) = self.virtual_buttons.button_y();
+        if self.is_in_circle(x, y, yx, yy, yr, 1.5) {
+            return Some(TouchControl::ButtonY);
+        }
+        
+        // 最后检测D-Pad (范围最大)
+        let (dpad_cx, dpad_cy) = self.virtual_buttons.dpad_center();
+        let dpad_r = self.virtual_buttons.dpad_radius();
+        if self.is_in_circle(x, y, dpad_cx, dpad_cy, dpad_r, 1.8) {
+            return Some(TouchControl::DPad);
+        }
+        
+        None
+    }
+
+    /// 计算D-Pad方向状态 (支持多方向同时激活)
+    fn calculate_dpad_directions(&self, x: f32, y: f32) -> (bool, bool, bool, bool) {
+        let (dpad_cx, dpad_cy) = self.virtual_buttons.dpad_center();
+        let dpad_r = self.virtual_buttons.dpad_radius() as f32;
+        
+        let mut left = false;
+        let mut right = false;
+        let mut up = false;
+        let mut down = false;
+        
+        // 检查是否在D-Pad范围内
+        let dx = x - dpad_cx as f32;
+        let dy = y - dpad_cy as f32;
+        let dist = (dx * dx + dy * dy).sqrt();
+        
+        if dist < dpad_r * 1.8 {
+            let threshold = dpad_r * 0.3;
+            if dx < -threshold { left = true; }
+            if dx > threshold { right = true; }
+            if dy < -threshold { up = true; }
+            if dy > threshold { down = true; }
+        }
+        
+        (left, right, up, down)
+    }
+
+    /// 检测点是否在圆形区域内
+    fn is_in_circle(&self, x: f32, y: f32, cx: i32, cy: i32, radius: i32, scale: f32) -> bool {
+        let dx = x - cx as f32;
+        let dy = y - cy as f32;
+        (dx * dx + dy * dy).sqrt() < (radius as f32 * scale)
     }
 
     /// 处理物理按键事件
@@ -382,70 +631,104 @@ impl AndroidInput {
         (screen_y - offset_y) / scale
     }
 
-    /// 根据所有触摸点更新按钮状态
+    /// 根据所有触摸点更新按键状态
     fn update_button_states_from_touches(&mut self) {
-        // 重置状态
-        let mut new_states = ButtonStates::default();
+        // 复制旧状态作为基础，保留物理键盘的状态
+        let mut new_states = self.button_states;
         
-        let (dpad_cx, dpad_cy) = self.virtual_buttons.dpad_center();
-        let dpad_r = self.virtual_buttons.dpad_radius() as f32;
-        let (jump_cx, jump_cy, jump_r) = self.virtual_buttons.jump_button();
-
+        // 重置所有由触摸控制的状态（物理键盘状态会在后续重新应用）
+        // 但我们不能直接重置，因为需要区分触摸和物理键盘的控制
+        // 改为：计算触摸应该产生的状态，然后合并到当前状态
+        
+        let mut touch_dpad_left = false;
+        let mut touch_dpad_right = false;
+        let mut touch_dpad_up = false;
+        let mut touch_dpad_down = false;
+        let mut touch_a = false;
+        let mut touch_b = false;
+        let mut touch_x = false;
+        let mut touch_y = false;
+        
+        // 收集所有触摸点的状态
         for point in self.touch_points.iter().flatten() {
-            let x = point.x;
-            let y = point.y;
-
-            // 检测 D-Pad
-            let dx = x - dpad_cx as f32;
-            let dy = y - dpad_cy as f32;
-            let dist = (dx * dx + dy * dy).sqrt();
-
-            if dist < dpad_r * 1.8 {
-                // 在 D-Pad 区域内，根据位置判断方向
-                let threshold = dpad_r * 0.3;
-                if dx < -threshold { new_states.left = true; }
-                if dx > threshold { new_states.right = true; }
-                if dy < -threshold { new_states.up = true; }
-                if dy > threshold { new_states.down = true; }
-            }
-
-            // 检测跳跃按钮
-            let jdx = x - jump_cx as f32;
-            let jdy = y - jump_cy as f32;
-            if (jdx * jdx + jdy * jdy).sqrt() < jump_r as f32 * 1.5 {
-                new_states.jump = true;
+            if let Some(control) = point.control {
+                match control {
+                    TouchControl::DPad => {
+                        // 合并所有D-Pad触摸点的方向状态
+                        let (left, right, up, down) = self.calculate_dpad_directions(point.x, point.y);
+                        touch_dpad_left = touch_dpad_left || left;
+                        touch_dpad_right = touch_dpad_right || right;
+                        touch_dpad_up = touch_dpad_up || up;
+                        touch_dpad_down = touch_dpad_down || down;
+                    }
+                    TouchControl::ButtonA => {
+                        touch_a = true;
+                    }
+                    TouchControl::ButtonB => {
+                        touch_b = true;
+                    }
+                    TouchControl::ButtonX => {
+                        touch_x = true;
+                    }
+                    TouchControl::ButtonY => {
+                        touch_y = true;
+                    }
+                }
             }
         }
+        
+        // 应用触摸状态到new_states（覆盖物理键盘的对应状态）
+        new_states.left = touch_dpad_left;
+        new_states.right = touch_dpad_right;
+        new_states.up = touch_dpad_up;
+        new_states.down = touch_dpad_down;
+        new_states.a = touch_a;
+        new_states.b = touch_b;
+        new_states.x = touch_x;
+        new_states.y = touch_y;
 
         // 生成按键事件
         self.generate_key_events_from_states(&new_states);
         self.button_states = new_states;
     }
 
-    /// 根据按钮状态变化生成按键事件
+    /// 根据按键状态变化生成按键事件
     fn generate_key_events_from_states(&mut self, new_states: &ButtonStates) {
         // 复制旧状态避免借用冲突
         let old = self.button_states;
         
-        // 左
+        // D-Pad 方向键
         if new_states.left != old.left {
             self.update_key_state(PlatformKeyCode::Left, new_states.left);
         }
-        // 右
         if new_states.right != old.right {
             self.update_key_state(PlatformKeyCode::Right, new_states.right);
         }
-        // 上
         if new_states.up != old.up {
             self.update_key_state(PlatformKeyCode::Up, new_states.up);
         }
-        // 下
         if new_states.down != old.down {
             self.update_key_state(PlatformKeyCode::Down, new_states.down);
         }
-        // 跳跃
-        if new_states.jump != old.jump {
-            self.update_key_state(PlatformKeyCode::Space, new_states.jump);
+        
+        // A键 - 跳跃 (映射到 AltLeft)
+        if new_states.a != old.a {
+            self.update_key_state(PlatformKeyCode::AltLeft, new_states.a);
+        }
+        
+        // B键 - 功能键 (映射到 ShiftLeft)
+        if new_states.b != old.b {
+            self.update_key_state(PlatformKeyCode::ShiftLeft, new_states.b);
+        }
+        
+        // X键 - 加速/冲刺 (映射到 ControlLeft)
+        if new_states.x != old.x {
+            self.update_key_state(PlatformKeyCode::ControlLeft, new_states.x);
+        }
+        
+        // Y键 - 功能键 (映射到 Space)
+        if new_states.y != old.y {
+            self.update_key_state(PlatformKeyCode::Space, new_states.y);
         }
     }
 
@@ -613,7 +896,7 @@ impl AndroidDisplay {
                 return Err(format!("ANativeWindow_lock failed: {}", lock_result));
             }
 
-            // 记录 buffer 信息 (只在第一帧记录，避免日志过多)
+            // 记录 buffer 信息 (只在第一帧记录,避免日志过多)
             static LOGGED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
             if !LOGGED.load(std::sync::atomic::Ordering::Relaxed) {
                 LOGGED.store(true, std::sync::atomic::Ordering::Relaxed);
@@ -754,7 +1037,7 @@ impl DisplayBackend for AndroidDisplay {
     }
 
     fn request_redraw(&self) {
-        // Android 使用连续渲染模式，不需要显式请求重绘
+        // Android 使用连续渲染模式,不需要显式请求重绘
     }
 }
 
@@ -849,7 +1132,7 @@ pub struct AndroidStorage {
 }
 
 impl AndroidStorage {
-    /// 创建存储后端 (无参数版本，用于 config.rs 等模块)
+    /// 创建存储后端 (无参数版本,用于 config.rs 等模块)
     /// 使用当前目录作为基础路径
     pub fn new() -> Self {
         Self {
@@ -1124,7 +1407,7 @@ pub fn android_main(app: AndroidApp) {
             let display_frame = display.framebuffer_mut();
             state.render_to_rgba(display_frame);
 
-            // 叠加虚拟按钮 (如果需要显示)
+            // 叠加虚拟按键 (如果需要显示)
             if input.should_show_virtual_buttons() {
                 input.virtual_buttons_renderer().render_overlay(
                     display_frame,
@@ -1148,7 +1431,7 @@ pub fn android_main(app: AndroidApp) {
 }
 
 /// 游戏运行入口 (与其他平台保持一致的接口)
-/// Android 平台不使用此函数，而是通过 lib.rs 中的 android_main 入口
+/// Android 平台不使用此函数,而是通过 lib.rs 中的 android_main 入口
 pub fn run_game() -> Result<(), Box<dyn std::error::Error>> {
     Err("Android platform should use android_main entry point".into())
 }
