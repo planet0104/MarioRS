@@ -403,16 +403,6 @@ impl DesktopDisplay {
         let window_size = window.inner_size();
         let window_outer_size = window.outer_size();
         let scale_factor = window.scale_factor();
-        log_info(&format!(
-            "[display] create_window game={}x{} window_inner={}x{} window_outer={}x{} scale_factor={:.3}",
-            self.width,
-            self.height,
-            window_size.width,
-            window_size.height,
-            window_outer_size.width,
-            window_outer_size.height,
-            scale_factor
-        ));
         
         let surface_texture = SurfaceTexture::new(
             window_size.width,
@@ -424,11 +414,6 @@ impl DesktopDisplay {
             .wgpu_backend(Backends::VULKAN | Backends::GL)
             .clear_color(pixels::wgpu::Color::BLACK)  // 设置清除颜色为黑色
             .build()?;
-        log_info(&format!(
-            "[display] pixels_init surface={}x{}",
-            window_size.width,
-            window_size.height
-        ));
         
         // 初始化 framebuffer 为黑色
         for pixel in pixels.frame_mut().chunks_exact_mut(4) {
@@ -449,15 +434,6 @@ impl DesktopDisplay {
         let fit_renderer = FitRenderer::new(&pixels.context().device, &pixels.context().texture, render_target_format);
         fit_renderer.update_viewport(&pixels.context().queue, self.fit_viewport);
 
-        log_info(&format!(
-            "[display] fit_viewport surface={}x{} draw={}x{} bar={}x{}",
-            self.fit_viewport.surface_w,
-            self.fit_viewport.surface_h,
-            self.fit_viewport.draw_w,
-            self.fit_viewport.draw_h,
-            self.fit_viewport.bar_x,
-            self.fit_viewport.bar_y
-        ));
         self.window = Some(window);
         self.fit_renderer = Some(fit_renderer);
         self.pixels = Some(pixels);
@@ -511,36 +487,6 @@ impl DesktopDisplay {
             let bar_int_x = new_width.saturating_sub(draw_int_w) / 2;
             let bar_int_y = new_height.saturating_sub(draw_int_h) / 2;
 
-            log_info(&format!(
-                "[display] resize surface_event={}x{} window_inner={}x{} window_outer={}x{} scale_factor={:.3} expected_fit_scale={:.6} expected_fit_draw={}x{} expected_fit_bar={}x{} expected_int_scale={} expected_int_draw={}x{} expected_int_bar={}x{}",
-                new_width,
-                new_height,
-                window_inner.width,
-                window_inner.height,
-                window_outer.width,
-                window_outer.height,
-                scale_factor,
-                scale_fit,
-                draw_fit_w,
-                draw_fit_h,
-                bar_fit_x,
-                bar_fit_y,
-                scale_int,
-                draw_int_w,
-                draw_int_h,
-                bar_int_x,
-                bar_int_y
-            ));
-            if window_inner.width != new_width || window_inner.height != new_height {
-                log_warn(&format!(
-                    "[display] size_mismatch surface_event={}x{} window_inner_now={}x{}",
-                    new_width,
-                    new_height,
-                    window_inner.width,
-                    window_inner.height
-                ));
-            }
-
             pixels.resize_surface(new_width, new_height)?;
 
             // 使用自定义非整数等比缩放(最小方案:保留 pixels,替换最后的缩放渲染)
@@ -549,23 +495,6 @@ impl DesktopDisplay {
                 fit_renderer.update_viewport(&pixels.context().queue, self.fit_viewport);
             }
 
-            // pixels 默认缩放仍然会计算 clip_rect(整数倍缩放),这里保留日志用于对照排查
-            let clip = pixels.context().scaling_renderer.clip_rect();
-            let tex = pixels.context().texture_extent;
-            log_info(&format!(
-                "[display] pixels_default_state texture={}x{} clip_rect={} {} {} {} fit_draw={}x{} fit_bar={}x{}",
-                tex.width,
-                tex.height,
-                clip.0,
-                clip.1,
-                clip.2,
-                clip.3,
-                self.fit_viewport.draw_w,
-                self.fit_viewport.draw_h,
-                self.fit_viewport.bar_x,
-                self.fit_viewport.bar_y
-            ));
-            
             // 无需调整游戏逻辑分辨率 (self.width x self.height)
             // pixels 会自动进行等比例缩放并添加 letterbox
         }
@@ -975,30 +904,10 @@ impl GameApp {
                 // 退出全屏
                 window.set_fullscreen(None);
                 self.is_fullscreen = false;
-                let inner = window.inner_size();
-                let outer = window.outer_size();
-                log_info(&format!(
-                    "[display] fullscreen_off window_inner={}x{} window_outer={}x{} scale_factor={:.3}",
-                    inner.width,
-                    inner.height,
-                    outer.width,
-                    outer.height,
-                    window.scale_factor()
-                ));
             } else {
                 // 进入全屏(使用无边框全屏模式)
                 window.set_fullscreen(Some(Fullscreen::Borderless(None)));
                 self.is_fullscreen = true;
-                let inner = window.inner_size();
-                let outer = window.outer_size();
-                log_info(&format!(
-                    "[display] fullscreen_on window_inner={}x{} window_outer={}x{} scale_factor={:.3}",
-                    inner.width,
-                    inner.height,
-                    outer.width,
-                    outer.height,
-                    window.scale_factor()
-                ));
             }
         }
     }
@@ -1041,14 +950,6 @@ impl ApplicationHandler for GameApp {
                 if let Some(window) = &self.display.window {
                     let inner = window.inner_size();
                     let outer = window.outer_size();
-                    log_info(&format!(
-                        "[display] scale_factor_changed window_inner={}x{} window_outer={}x{} scale_factor={:.3}",
-                        inner.width,
-                        inner.height,
-                        outer.width,
-                        outer.height,
-                        window.scale_factor()
-                    ));
                     if inner.width > 0 && inner.height > 0 {
                         if let Err(e) = self.display.resize(inner.width, inner.height) {
                             eprintln!("调整窗口大小失败: {}", e);
@@ -1086,18 +987,6 @@ impl ApplicationHandler for GameApp {
                 // pixels 库会自动处理等比例缩放和 letterbox
                 if new_size.width > 0 && new_size.height > 0 {
                     if let Some(window) = &self.display.window {
-                        let inner = window.inner_size();
-                        let outer = window.outer_size();
-                        log_info(&format!(
-                            "[display] resized_event new_size={}x{} window_inner_now={}x{} window_outer_now={}x{} scale_factor={:.3}",
-                            new_size.width,
-                            new_size.height,
-                            inner.width,
-                            inner.height,
-                            outer.width,
-                            outer.height,
-                            window.scale_factor()
-                        ));
                     }
                     if let Err(e) = self.display.resize(new_size.width, new_size.height) {
                         eprintln!("调整窗口大小失败: {}", e);
