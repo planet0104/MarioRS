@@ -689,40 +689,41 @@ impl AndroidDisplay {
             ));
         }
 
-        // 先清空整个 buffer 为黑色
+        // 快速清空整个 buffer 为黑色 (使用行复制优化)
+        // 0xFF000000 = 不透明黑色 (ABGR)
+        let black: u32 = 0xFF000000;
         for y in 0..dst_height {
+            let row_start = dst_ptr.add(y * dst_stride);
+            std::ptr::write_bytes(row_start, 0, dst_width);
+            // 设置 alpha 通道
             for x in 0..dst_width {
-                *dst_ptr.add(y * dst_stride + x) = 0xFF000000; // ABGR 黑色
+                *row_start.add(x) = black;
             }
         }
 
+        // 预计算缩放参数 (使用定点数避免浮点运算)
+        let scale_inv_x = (self.width << 16) / scaled_w.max(1);
+        let scale_inv_y = (self.height << 16) / scaled_h.max(1);
+        let src_width = self.width as usize;
+
         // 缩放复制 framebuffer
         for dst_y in 0..scaled_h {
-            for dst_x in 0..scaled_w {
-                // 源坐标 (最近邻采样)
-                let src_x = (dst_x as f32 / scale) as usize;
-                let src_y = (dst_y as f32 / scale) as usize;
-                let src_x = src_x.min(self.width as usize - 1);
-                let src_y = src_y.min(self.height as usize - 1);
-                let src_idx = (src_y * self.width as usize + src_x) * 4;
+            let src_y = ((dst_y * scale_inv_y as usize) >> 16).min(self.height as usize - 1);
+            let src_row_offset = src_y * src_width * 4;
+            let dst_row_ptr = dst_ptr.add((offset_y + dst_y) * dst_stride + offset_x);
 
-                // 检查源索引有效性
-                if src_idx + 3 > src.len() {
-                    continue;
-                }
+            for dst_x in 0..scaled_w {
+                let src_x = ((dst_x * scale_inv_x as usize) >> 16).min(src_width - 1);
+                let src_idx = src_row_offset + src_x * 4;
 
                 // RGBA -> ABGR (Android native window 格式)
-                let r = src[src_idx] as u32;
-                let g = src[src_idx + 1] as u32;
-                let b = src[src_idx + 2] as u32;
+                let r = *src.get_unchecked(src_idx) as u32;
+                let g = *src.get_unchecked(src_idx + 1) as u32;
+                let b = *src.get_unchecked(src_idx + 2) as u32;
                 let pixel = 0xFF000000 | (b << 16) | (g << 8) | r;
 
-                // 目标位置 - 严格边界检查
-                let dx = offset_x + dst_x;
-                let dy = offset_y + dst_y;
-                if dx < dst_width && dy < dst_height {
-                    *dst_ptr.add(dy * dst_stride + dx) = pixel;
-                }
+                // 直接写入预计算的行位置
+                *dst_row_ptr.add(dst_x) = pixel;
             }
         }
     }
