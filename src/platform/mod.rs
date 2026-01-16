@@ -31,21 +31,19 @@ mod android;
 // 显示后端 - 最底层的渲染抽象
 // ============================================================================
 
-/// 显示后端接口
+/// 显示后端接口（纯GPU模式）
 ///
 /// 不同平台的实现：
-/// - Desktop: pixels + wgpu
-/// - Windows GDI: Win32 GDI
-/// - Web: canvas 2D 或 WebGL
+/// - Desktop: wgpu (GPU加速)
+/// - Windows: wgpu (GPU加速)
+/// - Android: wgpu (GPU加速)
+/// - Web: WebGPU
 pub trait DisplayBackend {
-    /// 获取 framebuffer 的可变引用（RGBA8888 格式）
-    fn framebuffer_mut(&mut self) -> &mut [u8];
-
     /// 获取显示尺寸
     fn width(&self) -> u32;
     fn height(&self) -> u32;
 
-    /// 将 framebuffer 提交到屏幕显示
+    /// 提交渲染到屏幕显示
     fn present(&mut self) -> Result<(), String>;
 
     /// 请求窗口重绘

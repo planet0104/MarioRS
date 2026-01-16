@@ -10,6 +10,7 @@ use super::{
     KeyCode as PlatformKeyCode, KeyEvent as PlatformKeyEvent,
     LogBackend, LogLevel, RandomBackend, StorageBackend, TimeBackend,
 };
+use crate::gpu::GpuRenderer;
 
 // Windows 使用 hashbrown 避免 BCryptGenRandom 依赖(兼容 Win7)
 // 但 desktop.rs 主要用于 wgpu-backend(非 Windows GDI),所以保留 std
@@ -98,6 +99,8 @@ pub struct DesktopDisplay {
     fit_viewport: FitViewport,
     width: u32,
     height: u32,
+    // GPU渲染器
+    gpu_renderer: Option<GpuRenderer>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -378,7 +381,18 @@ impl DesktopDisplay {
             fit_viewport: FitViewport::new(width, height, width, height),
             width,
             height,
+            gpu_renderer: None,
         }
+    }
+    
+    /// 获取GPU渲染器引用
+    pub fn gpu_renderer(&self) -> Option<&GpuRenderer> {
+        self.gpu_renderer.as_ref()
+    }
+    
+    /// 获取GPU渲染器可变引用
+    pub fn gpu_renderer_mut(&mut self) -> Option<&mut GpuRenderer> {
+        self.gpu_renderer.as_mut()
     }
 
     /// 使用 ActiveEventLoop 创建窗口(winit 0.30 要求在事件循环内创建)
@@ -503,10 +517,6 @@ impl DesktopDisplay {
 }
 
 impl DisplayBackend for DesktopDisplay {
-    fn framebuffer_mut(&mut self) -> &mut [u8] {
-        self.pixels.as_mut().map(|p| p.frame_mut()).unwrap_or(&mut [])
-    }
-
     fn width(&self) -> u32 {
         self.width
     }
@@ -1006,7 +1016,7 @@ impl ApplicationHandler for GameApp {
                 if let Some(state) = &mut self.game_state {
                     let result = state.frame_update();
 
-                    // 将 VGA framebuffer 复制到显示 framebuffer
+                    // 渲染到framebuffer
                     let display_frame = self.display.framebuffer_mut();
                     state.render_to_rgba(display_frame);
 

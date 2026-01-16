@@ -1,10 +1,12 @@
 ﻿// Rust translation of backgr.pas - 严格对应 Pascal BACKGR.PAS
 // 包含 Pascal 中的静态数据和绘制逻辑
 
-use crate::buffers::{Buffers, H, ImageBuffer, MAX_WORLD_SIZE, NH, NV, W, WorldOptions};
-use crate::palettes::{self, Palettes};
+use crate::buffers::{Buffers, H, MAX_WORLD_SIZE, NH, NV, W, WorldOptions};
+use crate::palettes::Palettes;
 use crate::sprites::SpriteDataManager;
-use crate::vga256::{self, BYTES_PER_LINE, VGA};
+use crate::vga256::{self, VGA};
+use crate::gpu::sprite_batch::{FillCommand, SpriteCommand};
+use crate::gpu::texture_atlas::SpriteUV;
 
 // Include generated assets produced by build.rs
 include!(concat!(env!("OUT_DIR"), "/generated_assets.rs"));
@@ -65,7 +67,7 @@ pub struct BackGr {
 
 impl BackGr {
     /// 构造默认状态
-    pub fn new(max_world_size: usize, w: usize, nv: usize, h: usize) -> Self {
+    pub fn new(_max_world_size: usize, _w: usize, nv: usize, h: usize) -> Self {
         BackGr {
             background: 0,
             clouds: 0,
@@ -106,7 +108,7 @@ impl BackGr {
         offset: i32,
         n: i32,
         vga: &mut VGA,
-        buffers: &Buffers,
+        _buffers: &Buffers,
     ) {
         if self.clouds == 0 {
             return;
@@ -426,7 +428,7 @@ impl BackGr {
     ) {
         const SHADOW_POS: i32 = 28;
         const SHADOW_END: i32 = 36;
-        let mut i = i % 60;
+        let i = i % 60;
         // 第一段 Base1
         let mut base = options.backgr_color1;
         let [mut c1, mut c2, mut c3] = palette.get_rgb(base);
@@ -445,7 +447,7 @@ impl BackGr {
             j = k;
             k += 1;
         }
-        for mut j in SHADOW_POS..=SHADOW_END {
+        for j in SHADOW_POS..=SHADOW_END {
             if c1 > 0 {
                 c1 -= 1;
             }
@@ -618,7 +620,7 @@ impl BackGr {
         bl &= 0b0001_1111;
         bl = bl.wrapping_add(0xE0);
 
-        let mut dl_tmp = ((y + 14) & 0xFF) as u8;
+        let dl_tmp = ((y + 14) & 0xFF) as u8;
         if (dl_tmp & 0b0001_0000) != 0 {
             bl ^= 16;
         }
@@ -627,7 +629,7 @@ impl BackGr {
             let di_y = y + dy;
             let dl = (y + dy) as u8;
             let dl_inner = dl & 0x0F;
-            let mut color: u8;
+            let color: u8;
 
             if dl_inner == 2 {
                 color = 0xD4;
@@ -635,7 +637,7 @@ impl BackGr {
                 // 普砖块，颜色随列变化
                 let mut al = bl;
                 for i in 0..w {
-                    let mut color = (al & 0b0001_1111) | 0xE0;
+                    let color = (al & 0b0001_1111) | 0xE0;
                     vga.put_pixel_world(x + i, di_y, color);
                     al = al.wrapping_add(1);
                 }
@@ -675,7 +677,7 @@ impl BackGr {
         let mut si = y + 22;
         for dy in 0..h {
             let di_y = y + dy;
-            let mut bl = ((y + dy) * screen_width + x) as u8 | 0xC0;
+            let bl = ((y + dy) * screen_width + x) as u8 | 0xC0;
             if (si & 0b0001_1111) >= 0b0000_0011 {
                 // 普通窗口填充
                 let mut al = bl;
@@ -830,5 +832,154 @@ impl BackGr {
                 }
             }
         }
+    }
+
+    // ========== GPU渲染支持方法 ==========
+
+    /// GPU模式：收集云朵精灵命令
+    pub fn collect_cloud_sprites(&self, x_view: i32) -> Vec<SpriteCommand> {
+        let mut sprites = Vec::new();
+        
+        // 云朵作为填充矩形渲染（简化版本）
+        for i in 1..=(self.clouds as usize) {
+            if i < self.cloud_map.len() {
+                let cloud = &self.cloud_map[i];
+                let cx = cloud[0] - x_view / CLOUD_SPEED;
+                let cy = cloud[1];
+                
+                if cx > -100 && cx < (NH * W + 100) {
+                    // 云朵使用默认UV (需要在图集中预留云朵纹理)
+                    let uv = SpriteUV { x: 0, y: 0, width: 60, height: 20 };
+                    sprites.push(SpriteCommand::new(cx, cy, uv));
+                }
+            }
+        }
+        
+        sprites
+    }
+
+    /// GPU模式：收集smooth_fill填充命令
+    pub fn collect_smooth_fills(
+        &self,
+        x: i32,
+        y: i32,
+        w: i32,
+        h: i32,
+        options: &WorldOptions,
+    ) -> Vec<FillCommand> {
+        let mut fills = Vec::new();
+        let horizon = options.horizon as i32;
+        
+        let mut cur_y = y;
+        let mut dl = 0xE0u8;
+        let mut dh = 0i32;
+        
+        for _ in 0..h {
+            fills.push(FillCommand::new(x, cur_y, w, 1, dl));
+            
+            cur_y += 1;
+            if cur_y >= horizon {
+                dl = 0xF0;
+            }
+            dh += 1;
+            if dh == 6 {
+                dh = 0;
+                if dl != 0xE0 && dl != 0xF0 {
+                    dl = dl.wrapping_sub(1);
+                }
+            }
+        }
+        
+        fills
+    }
+
+    /// GPU模式：收集背景渲染数据
+    pub fn collect_background_data(&self, _x_view: i32, options: &WorldOptions) -> Vec<FillCommand> {
+        let mut fills = Vec::new();
+        
+        // 根据背景类型生成填充命令
+        match options.backgr_type {
+            0 => {
+                // 单色背景
+                fills.push(FillCommand::new(0, 0, NH * W, NV * H, 0xE0));
+            }
+            1..=3 => {
+                // 山峰/渐变背景 - 简化为渐变填充
+                for row in 0..(NV * H) {
+                    let color = 0xE0 + (row / 12).min(15) as u8;
+                    fills.push(FillCommand::new(0, row, NH * W, 1, color));
+                }
+            }
+            4..=7 => {
+                // 地下室背景
+                fills.push(FillCommand::new(0, 0, NH * W, NV * H, 0x18));
+            }
+            _ => {}
+        }
+        
+        fills
+    }
+    
+    // ========== GPU直接渲染方法 ==========
+    
+    /// GPU版smooth_fill - 直接向vga.sprite_batch添加填充命令
+    pub fn smooth_fill_gpu(
+        &mut self,
+        x: usize,
+        y: usize,
+        w: usize,
+        h: usize,
+        options: &WorldOptions,
+        vga: &mut vga256::VGA,
+    ) {
+        let horizon = options.horizon as i32;
+        let mut cur_y = y as i32;
+        let mut dl = 0xE0u8;
+        let mut dh = 0i32;
+        
+        for _ in 0..h {
+            vga.fill_world_gpu(x as i32, cur_y, w as i32, 1, dl);
+            
+            cur_y += 1;
+            if cur_y >= horizon {
+                dl = 0xF0;
+            }
+            dh += 1;
+            if dh == 6 {
+                dh = 0;
+                if dl != 0xE0 && dl != 0xF0 {
+                    dl = dl.wrapping_sub(1);
+                }
+            }
+        }
+    }
+    
+    /// GPU版draw_bricks - 平铺砖块纹理（使用填充颜色模拟）
+    pub fn draw_bricks_gpu(&self, x: i32, y: i32, w: i32, h: i32, vga: &mut vga256::VGA) {
+        // 简化版本：使用填充色模拟砖块纹理
+        let brick_color = 0x48u8; // 砖块基础色
+        vga.fill_world_gpu(x, y, w, h, brick_color);
+    }
+    
+    /// GPU版large_bricks - 大砖块填充
+    pub fn large_bricks_gpu(&self, x: i32, y: i32, w: i32, h: i32, vga: &mut vga256::VGA) {
+        // 渐变砖块效果
+        for dy in 0..h {
+            let color = 0xE0 + ((y + dy) & 0x1F) as u8;
+            vga.fill_world_gpu(x, y + dy, w, 1, color);
+        }
+    }
+    
+    /// GPU版pillar - 柱子装饰（使用精灵）
+    pub fn pillar_gpu(&self, x: i32, y: i32, _w: i32, _h: i32, vga: &mut vga256::VGA) {
+        // 柱子使用填充色模拟
+        let pillar_color = 0x30u8;
+        vga.fill_world_gpu(x, y, W, H, pillar_color);
+    }
+    
+    /// GPU版windows - 窗户填充
+    pub fn windows_gpu(&self, x: i32, y: i32, w: i32, h: i32, vga: &mut vga256::VGA) {
+        // 窗户背景
+        vga.fill_world_gpu(x, y, w, h, 0x18);
     }
 }

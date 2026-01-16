@@ -1,6 +1,7 @@
 // logging macros (error/warn/info/debug) are available via crate-level macro_exports
 
 // 严格转换自 TXT.PAS，包含字体数据、字体选择、字形解析、文本宽度计算、文本绘制和居中显示
+use crate::gpu::{FillRect, RenderCommand};
 use crate::vga256::VGA;
 use bitflags::bitflags;
 
@@ -1067,6 +1068,171 @@ impl Txt {
     ) {
         let x = self.center_x(s, xview, screen_width);
         self.write_text_world(vga, x, y, s, attr);
+    }
+
+    /// GPU版 - 在世界坐标写文本
+    pub fn write_text_world_gpu(
+        &self,
+        vga: &mut VGA,
+        mut x: i32,
+        y: i32,
+        s: &str,
+        attr: u8,
+        atlas: &crate::sprites::SpriteAtlas,
+    ) {
+        for c in s.chars() {
+            let idx = c as usize;
+            if let Some(glyph) = self.letter(idx) {
+                let width = glyph.width() as i32;
+                let height = glyph.height() as i32;
+                let bitmap_data = glyph.bitmap();
+
+                // 阴影效果
+                if self.b_shadow {
+                    self.render_glyph_world_gpu(vga, x + 1, y + 1, glyph, 16);
+                }
+                
+                // 粗体效果
+                if self.b_bold {
+                    if self.b_shadow {
+                        self.render_glyph_world_gpu(vga, x, y + 1, glyph, 16);
+                    }
+                    self.render_glyph_world_gpu(vga, x - 1, y, glyph, attr);
+                }
+                
+                // 主要文字
+                self.render_glyph_world_gpu(vga, x, y, glyph, attr);
+                
+                x += width;
+            } else {
+                x += 8;
+            }
+        }
+    }
+
+    /// GPU辅助: 在世界坐标渲染单个字形
+    fn render_glyph_world_gpu(
+        &self,
+        vga: &mut VGA,
+        x: i32,
+        y: i32,
+        glyph: &Glyph,
+        attr: u8,
+    ) {
+        let width = glyph.width() as i32;
+        let height = glyph.height() as i32;
+        let bitmap_data = glyph.bitmap();
+
+        for row in 0..height {
+            for col in 0..width {
+                let bit_index = (row * width + col) as usize;
+                let byte_index = bit_index / 8;
+                let bit_offset = bit_index % 8;
+
+                if byte_index < bitmap_data.len() {
+                    let byte = bitmap_data[byte_index];
+                    let bit = (byte >> bit_offset) & 1;
+                    if bit == 1 {
+                        vga.fill_world_gpu(x + col, y + row, 1, 1, attr);
+                    }
+                }
+            }
+        }
+    }
+
+    /// GPU渲染: 收集文本像素为填充矩形命令
+    /// 使用1x1像素的填充矩形逐像素渲染字形
+    pub fn write_text_gpu(
+        &self,
+        commands: &mut Vec<RenderCommand>,
+        mut x: i32,
+        y: i32,
+        s: &str,
+        attr: u8,
+        palette_index: u32,
+    ) {
+        for c in s.chars() {
+            let idx = c as usize;
+            if let Some(glyph) = self.letter(idx) {
+                let width = glyph.width() as i32;
+                let _height = glyph.height() as i32;
+                let _bitmap_data = glyph.bitmap();
+
+                // 阴影效果
+                if self.b_shadow {
+                    self.render_glyph_gpu(commands, x + 1, y + 1, glyph, 16, palette_index);
+                }
+                
+                // 粗体效果
+                if self.b_bold {
+                    if self.b_shadow {
+                        self.render_glyph_gpu(commands, x, y + 1, glyph, 16, palette_index);
+                    }
+                    self.render_glyph_gpu(commands, x - 1, y, glyph, attr, palette_index);
+                }
+                
+                // 主要文字
+                self.render_glyph_gpu(commands, x, y, glyph, attr, palette_index);
+                
+                x += width;
+            } else {
+                x += 8;
+            }
+        }
+    }
+
+    /// GPU辅助: 渲染单个字形
+    fn render_glyph_gpu(
+        &self,
+        commands: &mut Vec<RenderCommand>,
+        x: i32,
+        y: i32,
+        glyph: &Glyph,
+        attr: u8,
+        palette_index: u32,
+    ) {
+        let width = glyph.width() as i32;
+        let height = glyph.height() as i32;
+        let bitmap_data = glyph.bitmap();
+
+        for row in 0..height {
+            for col in 0..width {
+                let bit_index = (row * width + col) as usize;
+                let byte_index = bit_index / 8;
+                let bit_offset = bit_index % 8;
+
+                if byte_index < bitmap_data.len() {
+                    let byte = bitmap_data[byte_index];
+                    let bit = (byte >> bit_offset) & 1;
+                    if bit == 1 {
+                        let fill = FillRect::new(
+                            (x + col) as f32,
+                            (y + row) as f32,
+                            1.0,
+                            1.0,
+                            attr,
+                            palette_index,
+                        );
+                        commands.push(RenderCommand::FillRect(fill));
+                    }
+                }
+            }
+        }
+    }
+
+    /// GPU渲染: 居中显示文本
+    pub fn center_text_gpu(
+        &self,
+        commands: &mut Vec<RenderCommand>,
+        y: i32,
+        s: &str,
+        attr: u8,
+        xview: i32,
+        screen_width: i32,
+        palette_index: u32,
+    ) {
+        let x = self.center_x(s, xview, screen_width);
+        self.write_text_gpu(commands, x, y, s, attr, palette_index);
     }
 }
 

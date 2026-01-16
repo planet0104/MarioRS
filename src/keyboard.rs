@@ -268,7 +268,7 @@ impl MacroSystem {
 
     pub fn save_macro(&mut self) -> Result<(), std::io::Error> {
         use std::fs::File;
-        use std::io::Write;
+        
         let mut file = File::create("macro.dat")?;
         // 写入 9 * 100 u16 values in little-endian order
         for seq in self.sequences.iter() {
@@ -283,7 +283,7 @@ impl MacroSystem {
 
     pub fn load_macro(&mut self) -> Result<(), std::io::Error> {
         use std::fs::File;
-        use std::io::Read;
+        
         let mut file = File::open("macro.dat")?;
         for i in 0..MAX_KEYS {
             for j in 0..MAX_SEQ_LEN {

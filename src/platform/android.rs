@@ -11,6 +11,7 @@ use super::{
     LogBackend, LogLevel, RandomBackend, StorageBackend, TimeBackend,
     touch_panel::{TouchAction, TouchPanelInput, ButtonLayout, LAYOUT_SAVE_KEY},
 };
+use crate::gpu::GpuRenderer;
 
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
@@ -242,6 +243,8 @@ pub struct AndroidDisplay {
     framebuffer: Vec<u8>,
     native_window: Option<NativeWindow>,
     render_params: RenderParams,
+    // GPU渲染器
+    gpu_renderer: Option<GpuRenderer>,
 }
 
 impl AndroidDisplay {
@@ -253,7 +256,18 @@ impl AndroidDisplay {
             framebuffer: vec![0u8; buffer_size],
             native_window: None,
             render_params: RenderParams::default(),
+            gpu_renderer: None,
         }
+    }
+    
+    /// 获取GPU渲染器引用
+    pub fn gpu_renderer(&self) -> Option<&GpuRenderer> {
+        self.gpu_renderer.as_ref()
+    }
+    
+    /// 获取GPU渲染器可变引用
+    pub fn gpu_renderer_mut(&mut self) -> Option<&mut GpuRenderer> {
+        self.gpu_renderer.as_mut()
     }
     
     /// 获取渲染参数（用于 touch_panel 坐标转换）
@@ -441,10 +455,6 @@ impl AndroidDisplay {
 }
 
 impl DisplayBackend for AndroidDisplay {
-    fn framebuffer_mut(&mut self) -> &mut [u8] {
-        &mut self.framebuffer
-    }
-
     fn width(&self) -> u32 {
         self.width
     }
@@ -1131,7 +1141,7 @@ pub fn android_main(app: AndroidApp) {
             // 更新游戏逻辑
             let result = state.frame_update();
 
-            // 渲染游戏画面
+            // 渲染到framebuffer
             let display_frame = display.framebuffer_mut();
             state.render_to_rgba(display_frame);
             

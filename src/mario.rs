@@ -32,7 +32,7 @@ use crate::{
     platform::{FrameResult, GamePhase},
     play::Play,
     players::Players,
-    sprites::SpriteDataManager,
+    sprites::{SpriteAtlas, SpriteDataManager},
     stars::Stars,
     status::Status,
     tmpobj::TmpObjManager,
@@ -89,6 +89,7 @@ pub struct MarioGame {
     // 游戏子系统
     pub buffers: Buffers,
     pub sprites: SpriteDataManager,
+    pub atlas: SpriteAtlas,
     pub music: MusicPlayer,
     pub players: Players,
     pub enemies: Enemies,
@@ -132,6 +133,8 @@ impl MarioGame {
         
         let mut buffers = Buffers::new();
         let sprites = SpriteDataManager::new();
+        // 构建GPU精灵图集
+        let atlas = sprites.build_atlas();
         let mut music = MusicPlayer::new();
         let mut players = Players::new();
         let enemies = Enemies::new(&sprites);
@@ -139,19 +142,13 @@ impl MarioGame {
         let figures = Self::init_figures(&sprites);
         let blocks = Blocks::new();
         let stars = Stars::new();
-        let status = Status {
-            backgr_addr: vec![0; (MAX_PAGE + 1) as usize],
-        };
+        let status = Status;  // GPU版Status是空结构体
         let glitters = GlitterSystem {
             count: vec![0u8; MAX_GLITTER + 1],
             glitter_list: vec![
                 Glitter {
                     attr: 0,
                     pos: 0,
-                    back_gr: [0u8; MAX_PAGE as usize + 1],
-                    dummy1: 0,
-                    dummy2: 0,
-                    dummy3: 0,
                 };
                 MAX_GLITTER + 1
             ],
@@ -193,6 +190,7 @@ impl MarioGame {
             quit_requested: false,
             buffers,
             sprites,
+            atlas,
             music,
             players,
             enemies,
@@ -264,6 +262,7 @@ impl MarioGame {
                     &mut self.tmpobj,
                     &mut self.status,
                     &mut self.sprites,
+                    &self.atlas,
                     &mut self.music,
                     &mut self.keyboard,
                     &mut self.joystick,
@@ -374,6 +373,7 @@ impl MarioGame {
                     &mut self.tmpobj,
                     &mut self.status,
                     &mut self.sprites,
+                    &self.atlas,
                     &mut self.music,
                     &mut self.keyboard,
                     &mut self.joystick,
@@ -670,7 +670,7 @@ impl MarioGame {
     }
     
     /// 初始化Figures
-    fn init_figures(sprites: &SpriteDataManager) -> Figures {
+    fn init_figures(_sprites: &SpriteDataManager) -> Figures {
         use crate::buffers::ImageBuffer;
         use crate::figures::{N1, N2};
         

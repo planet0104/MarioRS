@@ -1,14 +1,13 @@
-// 严格根据 PLAYERS.PAS 转换的 Rust 结构体框架
-// 仅实现结构体和字段声明
-// 变量、常量、类型、方法名均严格对应 Pascal 原文
+// 严格根据 PLAYERS.PAS 转换�?Rust 结构体框�?
+// 仅实现结构体和字段声�?
+// 变量、常量、类型、方法名均严格对�?Pascal 原文
 
 use crate::{
     backgr::BackGr,
     blocks::Blocks,
     buffers::{
         Buffers, CAN_HOLD_YOU, CAN_STAND_ON, DIR_LEFT, DIR_RIGHT, DM_DEAD, DM_DOWN_INTO_PIPE,
-        DM_DOWN_OUT_OF_PIPE, DM_NO_DEMO, DM_UP_INTO_PIPE, DM_UP_OUT_OF_PIPE, EY1, H, HIDDEN,
-        ImageBuffer, MD_FIRE, MD_LARGE, MD_SMALL, NH, NV, PL_LUIGI, PL_MARIO, PictureBufferFill, W,
+        DM_DOWN_OUT_OF_PIPE, DM_NO_DEMO, DM_UP_INTO_PIPE, DM_UP_OUT_OF_PIPE, EY1, H, HIDDEN, MD_FIRE, MD_LARGE, MD_SMALL, NH, NV, PL_LUIGI, PL_MARIO, PictureBufferFill, W,
         WorldOptions,
     },
     enemies::{
@@ -20,6 +19,8 @@ use crate::{
     sprites::SpriteDataManager,
     tmpobj::{TP_NOTE, TmpObjManager},
     vga256::{MAX_PAGE, VGA},
+    gpu::sprite_batch::SpriteCommand,
+    gpu::texture_atlas::SpriteUV,
 };
 
 // 常量定义
@@ -52,9 +53,9 @@ pub struct ScreenRec {
     pub backgr_addr: i32,
 }
 
-// 结构体定义
+// 结构体定�?
 pub struct Players {
-    // 状态变量
+    // 状态变�?
     pub blinking: bool,
     pub growing: bool,
     pub in_pipe: bool,
@@ -64,7 +65,7 @@ pub struct Players {
     pub earthquake: bool,
     pub earthquake_counter: i32,
     pub small: i32,
-    // 键盘/手柄状态
+    // 键盘/手柄状�?
     pub key_left: bool,
     pub key_right: bool,
     pub key_up: bool,
@@ -75,7 +76,7 @@ pub struct Players {
     pub key_right_shift: bool,
     pub key_space: bool,
     pub save_screen: [ScreenRec; MAX_PAGE as usize + 1],
-    // 玩家位置与状态
+    // 玩家位置与状�?
     pub x: i32,
     pub y: i32,
     pub old_x: i32,
@@ -105,7 +106,7 @@ pub struct Players {
     pub below2: u8,
     /// Alt 按下边沿锁存（避免快速点击发生在两帧之间被轮询错过）
     pub alt_pressed_once: bool,
-    /// 跳跃按住锁：一旦在跳跃过程中松开跳跃键，则本次跳跃不再允许重新按住恢复大跳效果
+    /// 跳跃按住锁：一旦在跳跃过程中松开跳跃键，则本次跳跃不再允许重新按住恢复大跳效�?
     pub jump_hold_cancelled: bool,
 }
 
@@ -164,12 +165,12 @@ impl Players {
         }
     }
 
-    /// 根据实际ImageBuffer定义的正确实现
+    /// 根据实际ImageBuffer定义的正确实�?
     pub fn high_mirror(&self, p1: &crate::buffers::PicBuffer, p2: &mut crate::buffers::PicBuffer) {
         // PicBuffer = [[u8; W as usize]; 2*H as usize]
         // 玩家精灵高为2*H，镜像必须覆盖全部行
 
-        // 水平镜像：将每行的字节顺序反转
+        // 水平镜像：将每行的字节顺序反�?
         for y in 0..p1.len().min(p2.len()) {
             for x in 0..p1[y].len() {
                 if x < p2[y].len() && (W as usize - 1 - x) < p1[y].len() {
@@ -295,85 +296,51 @@ impl Players {
         self.earthquake = false;
     }
 
+    /// GPU版draw_demo - Demo动画(进出管道/死亡)的GPU精灵渲染
     pub fn draw_demo(
         &mut self,
         buffers: &mut Buffers,
-        figures: &Figures,
+        _figures: &Figures,
         vga: &mut VGA,
-        options: &WorldOptions,
-        backgr: &mut BackGr,
-        sprites: &mut SpriteDataManager,
+        _options: &WorldOptions,
+        _backgr: &mut BackGr,
+        _sprites: &mut SpriteDataManager,
+        atlas: &crate::sprites::SpriteAtlas,
     ) {
-        let page = vga.current_page() as usize;
-        let save_screen = &mut self.save_screen[page];
-
-        // Important: Different demo types need different background save ranges
-        // For pipe animations, Mario moves 2*H distance in Y direction
-        let (save_y, save_height) = match buffers.demo {
-            DM_DOWN_INTO_PIPE | DM_UP_OUT_OF_PIPE => (self.y, 4 * H),
-            DM_UP_INTO_PIPE | DM_DOWN_OUT_OF_PIPE => (self.y - 2 * H, 4 * H),
-            _ => (self.y, 2 * H),
-        };
-
-        save_screen.backgr_addr = vga.push_backgr_address_world(self.x, save_y, W + 4, save_height);
-        save_screen.xpos = self.x;
-        save_screen.ypos = save_y;
-        save_screen.visible = true;
+        // GPU模式下不需要保存背�?
+        let sprite_id = self.get_player_sprite_id_enum(buffers);
+        let uv = atlas.get(sprite_id);
+        let flip_x = self.direction == DIR_LEFT;
 
         match buffers.demo {
             DM_DOWN_INTO_PIPE | DM_UP_OUT_OF_PIPE => {
-                let draw_height = 2 * H - self.demo_y - 1;
-                // Pascal的DrawPart在高度<=0时直接返回不绘制，Rust也需要这个检查
-                if draw_height > 0 {
-                    vga.draw_part_imagebuffer_world(
+                // 进入管道动画：玩家逐渐消失
+                let draw_height = (2 * H - self.demo_y - 1) as f32;
+                if draw_height > 0.0 {
+                    vga.draw_sprite_partial_world_gpu(
                         self.x,
                         self.y + self.demo_y,
-                        0,
-                        draw_height as usize,
-                        &buffers.pictures[buffers.player][buffers.data.mode[buffers.player] as usize]
-                            [self.walking_mode][self.direction as usize],
+                        uv,
+                        draw_height,
                     );
                 }
             }
             DM_UP_INTO_PIPE | DM_DOWN_OUT_OF_PIPE => {
-                let draw_y_world = self.y + self.demo_y;
-                let src_y = (-self.demo_y) as usize;
-                vga.draw_part_imagebuffer_world(
-                    self.x,
-                    draw_y_world,
-                    src_y,
-                    2 * H as usize,
-                    &buffers.pictures[buffers.player][buffers.data.mode[buffers.player] as usize]
-                        [self.walking_mode][self.direction as usize],
-                );
-                figures.redraw(
-                    self.map_x,
-                    self.map_y - 1,
-                    &buffers.world_map,
-                    vga,
-                    backgr,
-                    sprites,
-                    options,
-                    buffers,
-                );
-                figures.redraw(
-                    self.map_x + 1,
-                    self.map_y - 1,
-                    &buffers.world_map,
-                    vga,
-                    backgr,
-                    sprites,
-                    options,
-                    buffers,
-                );
+                // 从管道出来动画：玩家逐渐出现
+                let visible_height = (2 * H + self.demo_y) as f32;
+                if visible_height > 0.0 {
+                    vga.draw_sprite_partial_world_gpu(
+                        self.x,
+                        self.y + self.demo_y,
+                        uv,
+                        visible_height.min(uv.height as f32),
+                    );
+                }
+                // GPU模式下管道会在tilemap层自动渲染，不需要手动redraw
             }
             DM_DEAD => {
-                vga.draw_image_imagebuffer_world(
-                    self.x,
-                    self.y,
-                    &buffers.pictures[buffers.player][buffers.data.mode[buffers.player] as usize]
-                        [self.walking_mode][self.direction as usize],
-                );
+                // 死亡动画
+                vga.draw_sprite_flipped_world_gpu(self.x, self.y, uv, flip_x, false);
             }
             _ => {}
         }
@@ -383,6 +350,7 @@ impl Players {
         self.old_y = self.y;
     }
 
+    /// GPU版draw_player - 直接向vga.sprite_batch添加GPU精灵
     pub fn draw_player(
         &mut self,
         buffers: &mut Buffers,
@@ -392,78 +360,178 @@ impl Players {
         options: &WorldOptions,
         backgr: &mut BackGr,
         enemies: &mut Enemies,
+        atlas: &crate::sprites::SpriteAtlas,
     ) {
-        // Pascal: if Demo <> dmNoDemo then
+        // Demo模式由draw_demo处理
         if buffers.demo != DM_NO_DEMO {
-            self.draw_demo(buffers, figures, vga, options, backgr, sprites);
+            self.draw_demo(buffers, figures, vga, options, backgr, sprites, atlas);
             return;
         }
         
-        // Pascal代码中DrawPlayer不检查InPipe，只检查Demo。
-        // Rust之前多加了in_pipe检查，导致demo动画期间提前停止绘制，造成大Mario钻管道时闪现bug。
-
-        // if (not Blinking) or (BlinkCounter mod 2 = 0) then
-        if !self.blinking || (self.blink_counter % 2 == 0) {
-            let page = vga.current_page() as usize;
-            let save_screen = &mut self.save_screen[page];
-            // 背景保存
-            // 重要：使用"地址句柄版"背景栈，避免Vec版把x/y存成u8导致320宽屏下截断错位
-            save_screen.backgr_addr = vga.push_backgr_address_world(self.x, self.y, W + 4, 2 * H);
-            save_screen.xpos = self.x;
-            save_screen.ypos = self.y;
-            save_screen.visible = true;
-
-            // if (Data.Mode [Player] = mdFire) and keySpace and (FireCounter < 7)
-            let player = buffers.player;
-            let mode = buffers.data.mode[player] as usize;
-            if mode == MD_FIRE && self.key_space && self.fire_counter < 7 {
-                self.fire_counter += 1;
-                vga.draw_part_imagebuffer_world(
-                    self.x,
-                    self.y + 1,
-                    0,
-                    20,
-                    &buffers.pictures[player][MD_FIRE as usize][1][self.direction as usize],
-                );
-                vga.draw_part_imagebuffer_world(
-                    self.x,
-                    self.y,
-                    21,
-                    2 * H as usize,
-                    &buffers.pictures[player][MD_FIRE as usize][0][self.direction as usize],
-                );
-            } else if enemies.star || self.growing {
-                let color = (((self.grow_counter + self.star_counter) & 1) << 4)
-                    - ((self.grow_counter + self.star_counter) & 0xF < 8) as i32;
-                vga.recolor_image_world(
-                    self.x,
-                    self.y,
-                    &buffers.pictures[player][mode][self.walking_mode][self.direction as usize],
-                    color,
-                );
-            } else {
-                vga.draw_image_imagebuffer_world(
-                    self.x,
-                    self.y,
-                    &buffers.pictures[player][mode][self.walking_mode][self.direction as usize],
-                );
-            }
-            self.old_x = self.x;
-            self.old_y = self.y;
-        }
-    }
-
-    pub fn erase_player(&mut self, vga: &mut VGA) {
-        let page = vga.current_page() as usize;
-        let save_screen = &mut self.save_screen[page];
-        if !save_screen.visible {
+        // 闪烁时隔帧不渲染
+        if self.blinking && (self.blink_counter % 2 != 0) {
             return;
         }
-        if save_screen.backgr_addr != 0 {
-            vga.pop_backgr_address(save_screen.backgr_addr);
+
+        // GPU渲染：使用SpriteId从atlas获取UV
+        let sprite_id = self.get_player_sprite_id_enum(buffers);
+        let flip_x = self.direction == DIR_LEFT;
+        let uv = atlas.get(sprite_id);
+        
+        // 计算调色板偏移（变身/无敌星闪烁效果）
+        let palette_offset = if enemies.star || self.growing {
+            (((self.grow_counter + self.star_counter) & 1) << 4) as i32
+                - ((self.grow_counter + self.star_counter) & 0xF < 8) as i32
+        } else {
+            0
+        };
+        
+        // 开火动画特殊处�?
+        let player = buffers.player;
+        let mode = buffers.data.mode[player] as usize;
+        if mode == MD_FIRE && self.key_space && self.fire_counter < 7 {
+            self.fire_counter += 1;
         }
-        save_screen.backgr_addr = 0;
-        save_screen.visible = false;
+        
+        // 添加精灵到GPU渲染队列
+        vga.draw_sprite_flipped_world_gpu(self.x, self.y, uv, flip_x, false);
+        if palette_offset != 0 {
+            vga.draw_sprite_recolored_world_gpu(self.x, self.y, uv, palette_offset);
+        }
+        
+        self.old_x = self.x;
+        self.old_y = self.y;
+    }
+
+    /// 擦除玩家（GPU模式下为空操作，每帧完整重绘�?
+    pub fn erase_player(&mut self, _vga: &mut VGA) {
+        // GPU模式下不需要擦除，每帧完整重绘
+    }
+
+    // ========== GPU渲染支持方法 ==========
+
+    /// GPU模式：收集玩家精灵渲染命�?
+    pub fn collect_player_sprite(
+        &self,
+        buffers: &Buffers,
+        sprite_uv: SpriteUV,
+    ) -> Option<SpriteCommand> {
+        // 闪烁时隔帧不渲染
+        if self.blinking && (self.blink_counter % 2 != 0) {
+            return None;
+        }
+
+        let player = buffers.player;
+        let _mode = buffers.data.mode[player] as usize;
+        let flip_x = self.direction == 0; // DIR_LEFT = 0
+
+        let mut cmd = SpriteCommand::new(self.x, self.y, sprite_uv)
+            .with_flip(flip_x, false);
+
+        // 变身/无敌星闪烁效�?
+        if self.growing || self.star_counter > 0 {
+            let color_offset = (((self.grow_counter + self.star_counter) & 1) << 4) as i32;
+            cmd = cmd.with_palette(color_offset, 0);
+        }
+
+        Some(cmd)
+    }
+
+    /// GPU模式：获取当前玩家精灵ID (使用SpriteId枚举)
+    pub fn get_player_sprite_id_enum(&self, buffers: &Buffers) -> crate::sprites::SpriteId {
+        use crate::sprites::SpriteId;
+        
+        let player = buffers.player;
+        let mode = buffers.data.mode[player] as usize;
+        let is_mario = player == 0;
+        let is_jumping = self.walking_mode != 0;
+        
+        match (mode, is_jumping, is_mario) {
+            (0, false, true) => SpriteId::SWMAR_000,  // Small Walk Mario
+            (0, true, true) => SpriteId::SJMAR_000,   // Small Jump Mario
+            (1, false, true) => SpriteId::LWMAR_000,  // Large Walk Mario
+            (1, true, true) => SpriteId::LJMAR_000,   // Large Jump Mario
+            (2, false, true) => SpriteId::FWMAR_000,  // Fire Walk Mario
+            (2, true, true) => SpriteId::FJMAR_000,   // Fire Jump Mario
+            (0, false, false) => SpriteId::SWLUI_000, // Small Walk Luigi
+            (0, true, false) => SpriteId::SJLUI_000,  // Small Jump Luigi
+            (1, false, false) => SpriteId::LWLUI_000, // Large Walk Luigi
+            (1, true, false) => SpriteId::LJLUI_000,  // Large Jump Luigi
+            (2, false, false) => SpriteId::FWLUI_000, // Fire Walk Luigi
+            (2, true, false) => SpriteId::FJLUI_000,  // Fire Jump Luigi
+            _ => SpriteId::SWMAR_000,
+        }
+    }
+    
+    /// GPU模式：完整收集玩家精灵（使用SpriteAtlas自动获取UV�?
+    pub fn collect_player_sprites_gpu(
+        &self,
+        buffers: &Buffers,
+        atlas: &crate::sprites::SpriteAtlas,
+        palette_index: u32,
+    ) -> Vec<SpriteCommand> {
+        let mut commands = Vec::new();
+        
+        // 闪烁时隔帧不渲染
+        if self.blinking && (self.blink_counter % 2 != 0) {
+            return commands;
+        }
+        
+        // Demo模式检�?
+        if buffers.demo != DM_NO_DEMO {
+            return commands; // Demo模式由其他方法处�?
+        }
+        
+        let sprite_id = self.get_player_sprite_id_enum(buffers);
+        let uv = atlas.get(sprite_id);
+        let flip_x = self.direction == 0; // DIR_LEFT = 0
+        
+        let mut cmd = SpriteCommand::new(self.x, self.y, uv)
+            .with_flip(flip_x, false)
+            .with_palette(0, palette_index);
+        
+        // 变身/无敌星闪烁效�?
+        if self.growing || self.star_counter > 0 {
+            let color_offset = (((self.grow_counter + self.star_counter) & 1) << 4) as i32;
+            cmd = cmd.with_palette(color_offset, palette_index);
+        }
+        
+        commands.push(cmd);
+        commands
+    }
+    
+    /// GPU模式：获取当前玩家精灵ID (字符串版本，用于调试)
+    pub fn get_player_sprite_id(&self, buffers: &Buffers) -> &'static str {
+        let player = buffers.player;
+        let mode = buffers.data.mode[player] as usize;
+        
+        let _prefix = if player == PL_MARIO as usize { "MAR" } else { "LUI" };
+        let mode_char = match mode {
+            0 => 'S', // MD_SMALL
+            1 => 'L', // MD_LARGE
+            2 => 'F', // MD_FIRE
+            _ => 'S',
+        };
+        let action = if self.walking_mode == 0 { 'W' } else { 'J' };
+        let _frame = if self.direction == 0 { "000" } else { "001" };
+        
+        // 返回精灵名称
+        let is_mario = player == 0;
+        match (mode_char, action, is_mario) {
+            ('S', 'W', true) => "SWMAR_000",
+            ('S', 'J', true) => "SJMAR_000",
+            ('L', 'W', true) => "LWMAR_000",
+            ('L', 'J', true) => "LJMAR_000",
+            ('F', 'W', true) => "FWMAR_000",
+            ('F', 'J', true) => "FJMAR_000",
+            ('S', 'W', false) => "SWLUI_000",
+            ('S', 'J', false) => "SJLUI_000",
+            ('L', 'W', false) => "LWLUI_000",
+            ('L', 'J', false) => "LJLUI_000",
+            ('F', 'W', false) => "FWLUI_000",
+            ('F', 'J', false) => "FJLUI_000",
+            _ => "SWMAR_000",
+        }
     }
 
     pub fn do_demo(&mut self, buffers: &mut Buffers) {
@@ -486,9 +554,9 @@ impl Players {
                     if buffers.demo == DM_DOWN_INTO_PIPE {
                         // 先递增demo_y
                         self.demo_y += 1;
-                        // 如果超过阈值，保持在阈值并增加计数器
+                        // 如果超过阈值，保持在阈值并增加计数�?
                         if self.demo_y > 2 * H - small {
-                            self.demo_y = 2 * H - small; // 保持在阈值位置，不继续增长
+                            self.demo_y = 2 * H - small; // 保持在阈值位置，不继续增�?
                             self.demo_counter2 += 1;
                             if self.demo_counter2 > 10 {
                                 self.in_pipe = true;
@@ -509,19 +577,19 @@ impl Players {
                     if buffers.demo == DM_DOWN_OUT_OF_PIPE {
                         self.demo_y += 1;
                         // Pascal: if DemoY > -Small then Demo := dmNoDemo; Dec(DemoY);
-                        // 注意：Pascal结束动画时不恢复Y坐标！
-                        // Y坐标在start_demo时已经调整过，动画结束后保持该位置
-                        let threshold = -small; // 对于大Mario是0，小Mario是-9
+                        // 注意：Pascal结束动画时不恢复Y坐标�?
+                        // Y坐标在start_demo时已经调整过，动画结束后保持该位�?
+                        let threshold = -small; // 对于大Mario�?，小Mario�?9
                         if self.demo_y > threshold {
                             self.demo_y -= 1;  // Pascal: Dec(DemoY)
                             buffers.demo = DM_NO_DEMO;
-                            // ❌ 不要恢复Y坐标！Pascal没有这个操作
+                            // �?不要恢复Y坐标！Pascal没有这个操作
                         }
                     } else {
                         // DM_UP_INTO_PIPE
                         self.demo_y -= 1;
                         if self.demo_y < -2 * H + small {
-                            self.demo_y = -2 * H + small; // 保持在阈值位置，不继续减小
+                            self.demo_y = -2 * H + small; // 保持在阈值位置，不继续减�?
                             self.demo_counter2 += 1;
                             if self.demo_counter2 > 10 {
                                 self.in_pipe = true;
@@ -569,18 +637,18 @@ impl Players {
             }
             DM_DOWN_OUT_OF_PIPE => {
                 self.demo_y = -2 * H;
-                // 关键修复：对于向下管道，Mario应该从管道底部开始
+                // 关键修复：对于向下管道，Mario应该从管道底部开�?
                 // (MapY-1)*H 给出的是管道tile的顶部Y坐标
-                // 管道底部应该是 MapY*H
+                // 管道底部应该�?MapY*H
                 // 
                 // Pascal原始计算：Inc (Y, H - 7 * Byte (Data.Mode [Player] in [mdSmall]) - 2);
                 // 小Mario: offset = 14 - 7 - 2 = 5
                 // 大Mario: offset = 14 - 0 - 2 = 12
                 //
-                // 但这会导致Mario偏离管道底部！
+                // 但这会导致Mario偏离管道底部�?
                 // 
-                // 正确的做法：调整Y到管道底部 = (MapY-1)*H + H = MapY*H
-                // 即：Y += H，而不是 Y += (H - 7*small - 2)
+                // 正确的做法：调整Y到管道底�?= (MapY-1)*H + H = MapY*H
+                // 即：Y += H，而不�?Y += (H - 7*small - 2)
                 self.y += H; // 将Y从管道顶部调整到管道底部
             }
             DM_DEAD => {
@@ -603,7 +671,7 @@ impl Players {
         }
         
         // Pascal: AtCh1 in $E0..$E7 AND AtCh2 in $E0..$EF
-        // 其中 AtCh2($E8..$EF) 用于跨世界特殊出口编码（例如$E9/$EA/$EB）
+        // 其中 AtCh2($E8..$EF) 用于跨世界特殊出口编码（例如$E9/$EA/$EB�?
         let below1_ok = self.below1 == b'0';
         let below2_ok = self.below2 == b'1';
         let at_ch1_ok = (0xE0..=0xE7).contains(&self.at_ch1);
@@ -634,7 +702,7 @@ impl Players {
         }
         self.map_x = self.x / W;
         self.map_y = self.y / H + 1;
-        // 重要：WorldMap 访问必须包含 EX/EY1 偏移，否则会读到错误行列，导致管道判定失败
+        // 重要：WorldMap 访问必须包含 EX/EY1 偏移，否则会读到错误行列，导致管道判定失�?
         let ch1 = buffers.world_get(self.map_x, self.map_y);
         let ch2 = buffers.world_get(self.map_x + 1, self.map_y);
         if !(0xE0..=0xE7).contains(&ch1) || !(0xE0..=0xEF).contains(&ch2) {
@@ -671,7 +739,6 @@ impl Players {
                     new_x1 * W,
                     new_y * H,
                     false,
-                    vga,
                     glitter_sys,
                     buffers,
                     music_player,
@@ -683,7 +750,6 @@ impl Players {
                     *new_x2 * W,
                     new_y * H,
                     false,
-                    vga,
                     glitter_sys,
                     buffers,
                     music_player,
@@ -710,12 +776,12 @@ impl Players {
             if new_ch1 == b'K' || new_ch2 == b'K' {
                 music_player.play_note();
                 if new_ch1 == b'K' {
-                    blocks.bump_block(new_x1 * W, new_y * H, vga);
+                    blocks.bump_block(new_x1 * W, new_y * H, crate::sprites::SpriteId::NOTE_000);
                     tmp_obj_manager.remove(new_x1 * W, new_y * H, W, H, TP_NOTE);
                     buffers.world_set(new_x1, new_y, b'K');
                 }
                 if new_ch2 == b'K' {
-                    blocks.bump_block(*new_x2 * W, new_y * H, vga);
+                    blocks.bump_block(*new_x2 * W, new_y * H, crate::sprites::SpriteId::NOTE_000);
                     tmp_obj_manager.remove(*new_x2 * W, new_y * H, W, H, TP_NOTE);
                     buffers.world_set(*new_x2, new_y, b'K');
                 }
@@ -753,7 +819,7 @@ impl Players {
             self.jumped = false;
         }
         if !self.jumped {
-            // 触发跳跃用"按下边沿"，高度控制仍用 key_alt(按住)
+            // 触发跳跃�?按下边沿"，高度控制仍�?key_alt(按住)
             if self.alt_pressed_once || self.hit_enemy {
                 self.counter = 0;
                 self.status = ST_JUMPING;
@@ -762,7 +828,7 @@ impl Players {
                 self.y_vel = -JUMP_VEL
                     - 2 * if self.hit_enemy && self.key_alt { 1 } else { 0 }
                     - if enemies.turbo { 1 } else { 0 };
-                // 只有在真正起跳时才消费按下边沿，避免"落地前/Jumped=true时按键被吃掉"导致看起来有冷却
+                // 只有在真正起跳时才消费按下边沿，避免"落地�?Jumped=true时按键被吃掉"导致看起来有冷却
                 self.alt_pressed_once = false;
             }
         }
@@ -810,7 +876,6 @@ impl Players {
                     new_x2 * W,
                     y3 * H,
                     false,
-                    vga,
                     glitter_sys,
                     buffers,
                     music_player,
@@ -822,7 +887,6 @@ impl Players {
                     new_x2 * W,
                     y2 * H,
                     false,
-                    vga,
                     glitter_sys,
                     buffers,
                     music_player,
@@ -836,7 +900,6 @@ impl Players {
                         new_x2 * W,
                         y1 * H,
                         false,
-                        vga,
                         glitter_sys,
                         buffers,
                         music_player,
@@ -871,7 +934,7 @@ impl Players {
 
         new_ch1 = buffers.world_get(new_x1, new_y);
         new_ch2 = buffers.world_get(new_x2, new_y);
-        new_ch3 = buffers.world_get(((self.x + self.x_vel + W / 2) / W), new_y);
+        new_ch3 = buffers.world_get((self.x + self.x_vel + W / 2) / W, new_y);
 
         let hold1 = (CAN_HOLD_YOU.contains(&new_ch1)) || (CAN_STAND_ON.contains(&new_ch1));
         let hold2 = (CAN_HOLD_YOU.contains(&new_ch2)) || (CAN_STAND_ON.contains(&new_ch2));
@@ -952,7 +1015,7 @@ impl Players {
             }
 
             ST_JUMPING => {
-                // 一旦在本次跳跃过程中松开跳跃键，则不允许"重新按住"改变本次跳跃的重力节奏
+                // 一旦在本次跳跃过程中松开跳跃键，则不允许"重新按住"改变本次跳跃的重力节�?
                 if !self.key_alt && !self.hit_enemy {
                     self.jump_hold_cancelled = true;
                 }
@@ -983,7 +1046,6 @@ impl Players {
                             new_x1 * W,
                             new_y * H,
                             false,
-                            vga,
                             glitter_sys,
                             buffers,
                             music_player,
@@ -995,7 +1057,6 @@ impl Players {
                             new_x2 * W,
                             new_y * H,
                             false,
-                            vga,
                             glitter_sys,
                             buffers,
                             music_player,
@@ -1054,7 +1115,6 @@ impl Players {
                                         tmp_obj_manager.break_block(
                                             new_x2,
                                             new_y,
-                                            vga,
                                             buffers,
                                             music_player,
                                         );
@@ -1066,10 +1126,10 @@ impl Players {
 
                             // 只有mo==0时才bump+播放音效
                             if mo == 0 {
-                                blocks.bump_block(new_x2 * W, new_y * H, vga);
+                                blocks.bump_block(new_x2 * W, new_y * H, crate::sprites::SpriteId::QUEST_000);
 
-                                // 瀵归綈 Pascal锛歅C Speaker 鍚庣画闊虫晥浼氱粓姝㈠綋鍓?Beep銆?
-                                // 如果顶出金币或道具，这里跳过 110Hz，直接交给后续音效
+                                // 瀵归�?Pascal锛歅C Speaker 鍚庣画闊虫晥浼氱粓姝㈠綋�?Beep�?
+                                // 如果顶出金币或道具，这里跳过 110Hz，直接交给后续音�?
                                 let above_ch = buffers.world_get(new_x2, new_y - 1);
                                 let coin_sound = match above_ch {
                                     b' ' | 0xE3..=0xEC => !matches!(ch, b'J' | b'K'),
@@ -1092,7 +1152,6 @@ impl Players {
                                                 new_x2 * W,
                                                 new_y * H,
                                                 true,
-                                                vga,
                                                 glitter_sys,
                                                 buffers,
                                                 music_player,
@@ -1165,7 +1224,6 @@ impl Players {
                                         new_x2 * W,
                                         (new_y - 1) * H,
                                         false,
-                                        vga,
                                         glitter_sys,
                                         buffers,
                                         music_player,
@@ -1345,7 +1403,7 @@ impl Players {
         let last_key_left = self.key_left;
         let last_key_right = self.key_right;
 
-        // 键盘/手柄输入合并 (这里需要根据实际的键盘和手柄状态更新)
+        // 键盘/手柄输入合并 (这里需要根据实际的键盘和手柄状态更�?
         // self.key_left = kb_left || js_left;
         // self.key_right = kb_right || js_right;
         // self.key_up = kb_up || js_up;
@@ -1501,7 +1559,7 @@ impl Players {
 
         let old_x_view = buffers.x_view;
         
-        // Pascal 原版滚动逻辑：所有场景（包括地下室）都正常滚动
+        // Pascal 原版滚动逻辑：所有场景（包括地下室）都正常滚�?
         buffers.x_view = buffers.x_view - if self.key_left_shift { 1 } else { 0 }
             + if self.key_right_shift { 1 } else { 0 };
 
@@ -1525,13 +1583,13 @@ impl Players {
         }
 
         // 计算最大x_view，确保不小于0
-        // 当地图宽度小于或等于屏幕宽度时，max_x_view应为0（地图不允许滚动）
+        // 当地图宽度小于或等于屏幕宽度时，max_x_view应为0（地图不允许滚动�?
         let max_x_view = std::cmp::max(0, ((options.x_size as i32) - NH) * W);
         if buffers.x_view > max_x_view {
             buffers.x_view = max_x_view;
         }
 
-        // 边界检查：左右边界墙检测（所有场景通用）
+        // 边界检查：左右边界墙检测（所有场景通用�?
         if buffers.x_view < old_x_view {
             let map_x = (buffers.x_view / W) as usize;
             let map_y = NV as usize;

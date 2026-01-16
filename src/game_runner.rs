@@ -40,9 +40,35 @@ impl GameState {
         self.game.frame_update(&mut self.vga)
     }
     
-    /// 将VGA framebuffer渲染到RGBA缓冲区
+    /// 将VGA framebuffer渲染到RGBA缓冲区（已弃用，GPU模式下返回黑色）
     pub fn render_to_rgba(&self, output: &mut [u8]) {
         self.vga.render_to_rgba(output);
+    }
+    
+    /// 获取GPU精灵批次数据用于渲染
+    pub fn get_sprite_instances(&self) -> Vec<crate::gpu::SpriteInstance> {
+        self.vga.get_sprite_batch().sprite_instances()
+    }
+    
+    /// 获取GPU填充矩形数据用于渲染
+    pub fn get_fill_rects(&self) -> Vec<crate::gpu::FillRect> {
+        self.vga.get_sprite_batch().fill_rects()
+    }
+    
+    /// 获取当前调色板数据用于GPU渲染
+    /// 返回256色RGBA格式数据
+    pub fn get_palette_rgba(&self) -> [[u8; 4]; 256] {
+        let mut rgba = [[0u8; 4]; 256];
+        let palette = &self.vga.palette.palette;
+        for i in 0..256 {
+            // VGA调色板是6位色（0-63），需要转换为8位（0-255）
+            // 乘以4或使用位移来扩展范围
+            rgba[i][0] = (palette[i][0] as u16 * 255 / 63).min(255) as u8;
+            rgba[i][1] = (palette[i][1] as u16 * 255 / 63).min(255) as u8;
+            rgba[i][2] = (palette[i][2] as u16 * 255 / 63).min(255) as u8;
+            rgba[i][3] = 255; // 不透明
+        }
+        rgba
     }
     
     /// 请求退出

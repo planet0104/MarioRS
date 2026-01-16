@@ -12,7 +12,7 @@ use crate::{
     keyboard::Keyboard,
     music::MusicPlayer,
     players::Players,
-    sprites::SpriteDataManager,
+    sprites::{SpriteAtlas, SpriteDataManager},
     stars::Stars,
     status::Status,
     tmpobj::TmpObjManager,
@@ -47,6 +47,7 @@ pub struct GameContext<'a> {
     
     // 资源
     pub sprites: &'a mut SpriteDataManager,
+    pub atlas: &'a SpriteAtlas,
     pub music: &'a mut MusicPlayer,
     
     // 输入
@@ -74,6 +75,7 @@ impl<'a> GameContext<'a> {
         tmpobj: &'a mut TmpObjManager,
         status: &'a mut Status,
         sprites: &'a mut SpriteDataManager,
+        atlas: &'a SpriteAtlas,
         music: &'a mut MusicPlayer,
         keyboard: &'a mut Keyboard,
         joystick: &'a mut JoystickState,
@@ -93,6 +95,7 @@ impl<'a> GameContext<'a> {
             tmpobj,
             status,
             sprites,
+            atlas,
             music,
             keyboard,
             joystick,

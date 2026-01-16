@@ -307,7 +307,7 @@ impl Palettes {
 
     /// 动态闪烁/流水/草地/金币等调色板动画（BlinkPalette）
     pub fn blink_palette(&mut self, vga: &mut VGA, options: &WorldOptions) {
-        use crate::utils::{random_i32, random_u8};
+        use crate::utils::random_u8;
         if self.fading_up || self.fading_down {
             return;
         }
@@ -509,5 +509,155 @@ impl Palettes {
         } else {
             [0, 0, 0]
         }
+    }
+
+    /// 将当前调色板转换为GPU格式 (256x RGBA)
+    pub fn to_gpu_palette(&self) -> [[u8; 4]; 256] {
+        let mut result = [[0u8; 4]; 256];
+        for i in 0..256 {
+            // VGA调色板是6bit (0-63)，需要转换为8bit (0-255)
+            let [r, g, b] = self.palette[i];
+            result[i] = [
+                ((r as u16 * 255) / 63).min(255) as u8,
+                ((g as u16 * 255) / 63).min(255) as u8,
+                ((b as u16 * 255) / 63).min(255) as u8,
+                if i == 0 { 0 } else { 255 }, // 索引0透明
+            ];
+        }
+        result
+    }
+
+    /// 获取当前fade级别对应的GPU调色板索引
+    pub fn get_fade_palette_index(&self) -> u32 {
+        if self.fading_up || self.fading_down {
+            // fading_pos: 0-63, 映射到调色板索引 1-16
+            let level = self.fading_pos.min(63);
+            let index = (level as u32 * 16) / 64;
+            1 + index.min(15)
+        } else {
+            0 // 正常调色板
+        }
+    }
+}
+
+// ============================================================================
+// GPU 预烘焙调色板
+// ============================================================================
+
+/// 预烘焙调色板数据 - 用于GPU渲染
+pub struct PrebakedPalettes {
+    /// 所有预烘焙的调色板帧 (64帧)
+    pub frames: Vec<[[u8; 4]; 256]>,
+}
+
+impl PrebakedPalettes {
+    /// 创建预烘焙调色板
+    pub fn new(base_palette: &Palettes) -> Self {
+        let mut frames = Vec::with_capacity(64);
+        
+        // 索引0: 正常调色板
+        frames.push(base_palette.to_gpu_palette());
+        
+        // 索引1-16: 淡入/淡出帧
+        for level in 1..=16 {
+            let fade_pos = ((16 - level) * 63) / 16;
+            frames.push(Self::generate_fade_frame(base_palette, fade_pos as u8));
+        }
+        
+        // 索引17-32: 闪烁帧 (金币动画)
+        for phase in 0..16 {
+            frames.push(Self::generate_blink_frame(base_palette, phase));
+        }
+        
+        // 索引33-48: 瀑布动画帧
+        for phase in 0..16 {
+            frames.push(Self::generate_waterfall_frame(base_palette, phase));
+        }
+        
+        // 填充到64帧
+        while frames.len() < 64 {
+            frames.push(base_palette.to_gpu_palette());
+        }
+        
+        Self { frames }
+    }
+
+    /// 生成淡入/淡出帧
+    fn generate_fade_frame(base: &Palettes, fade_pos: u8) -> [[u8; 4]; 256] {
+        let mut result = [[0u8; 4]; 256];
+        for i in 0..256 {
+            let [r, g, b] = base.palette[i];
+            // 应用淡入淡出
+            let r = if r as i16 - fade_pos as i16 > 0 { r - fade_pos } else { 0 };
+            let g = if g as i16 - fade_pos as i16 > 0 { g - fade_pos } else { 0 };
+            let b = if b as i16 - fade_pos as i16 > 0 { b - fade_pos } else { 0 };
+            // 转换为8bit
+            result[i] = [
+                ((r as u16 * 255) / 63).min(255) as u8,
+                ((g as u16 * 255) / 63).min(255) as u8,
+                ((b as u16 * 255) / 63).min(255) as u8,
+                if i == 0 { 0 } else { 255 },
+            ];
+        }
+        result
+    }
+
+    /// 生成金币闪烁帧
+    fn generate_blink_frame(base: &Palettes, phase: u32) -> [[u8; 4]; 256] {
+        let mut result = base.to_gpu_palette();
+        
+        // 金币动画: 颜色12,13,14循环
+        let coin_colors = [
+            [62, 56, 20],  // 状态0
+            [60, 56, 22],  // 状态1
+            [63, 63, 36],  // 状态2
+        ];
+        
+        let offset = (phase / 5) % 3;
+        for i in 0..3 {
+            let src = (i + offset as usize) % 3;
+            let [r, g, b] = coin_colors[src];
+            result[12 + i] = [
+                ((r as u16 * 255) / 63).min(255) as u8,
+                ((g as u16 * 255) / 63).min(255) as u8,
+                ((b as u16 * 255) / 63).min(255) as u8,
+                255,
+            ];
+        }
+        
+        result
+    }
+
+    /// 生成瀑布动画帧
+    fn generate_waterfall_frame(base: &Palettes, phase: u32) -> [[u8; 4]; 256] {
+        let mut result = base.to_gpu_palette();
+        
+        // 瀑布动画: 颜色7-11变化
+        for idx in 0..5 {
+            let j = ((phase + idx as u32) % 5) as i32;
+            let k = 5 - j;
+            // 使用默认sky_type=0的颜色
+            let r = (40 + 3 * k).min(63) as u8;
+            let g = (50 + 2 * k).min(63) as u8;
+            let b = (53 + 2 * k).min(63) as u8;
+            result[7 + idx] = [
+                ((r as u16 * 255) / 63).min(255) as u8,
+                ((g as u16 * 255) / 63).min(255) as u8,
+                ((b as u16 * 255) / 63).min(255) as u8,
+                255,
+            ];
+        }
+        
+        result
+    }
+
+    /// 获取帧数据
+    pub fn get_frame(&self, index: u32) -> &[[u8; 4]; 256] {
+        &self.frames[(index as usize).min(self.frames.len() - 1)]
+    }
+
+    /// 获取所有帧数据 (用于GPU上传)
+    pub fn all_frames(&self) -> &[[[u8; 4]; 256]] {
+        &self.frames
     }
 }

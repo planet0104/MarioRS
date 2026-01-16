@@ -2,6 +2,9 @@
 //
 // 目标：把分散在 play.rs、backgr.rs、figures.rs 中的渲染调用收敛到这里，
 // 明确渲染层级顺序，避免逻辑和渲染混杂。
+//
+// GPU渲染模式：当启用时，收集渲染指令而不是直接绘制，
+// 最后由GpuRenderer统一提交到GPU
 
 use crate::backgr::BackGr;
 use crate::blocks::Blocks;
@@ -9,8 +12,10 @@ use crate::buffers::{Buffers, H, NH, NV, W};
 use crate::enemies::Enemies;
 use crate::figures::Figures;
 use crate::glitter::GlitterSystem;
+use crate::gpu::RenderCommand;
+use crate::gpu::sprite_batch::SpriteBatch;
 use crate::players::Players;
-use crate::sprites::SpriteDataManager;
+use crate::sprites::{SpriteAtlas, SpriteDataManager};
 use crate::stars::Stars;
 use crate::status::Status;
 use crate::tmpobj::TmpObjManager;
@@ -25,6 +30,7 @@ pub struct RenderContext<'a> {
     pub backgr: &'a mut BackGr,
     pub figures: &'a mut Figures,
     pub sprites: &'a mut SpriteDataManager,
+    pub atlas: &'a SpriteAtlas,
     pub blocks: &'a mut Blocks,
     pub enemies: &'a mut Enemies,
     pub players: &'a mut Players,
@@ -59,29 +65,39 @@ impl Renderer {
             only_draw: false,
         }
     }
+    
+    /// GPU模式：开始帧渲染（清空批次）
+    pub fn begin_gpu_frame(&self, vga: &mut VGA) {
+        vga.begin_gpu_frame();
+    }
+    
+    /// GPU模式：获取收集的渲染批次
+    pub fn get_sprite_batch<'a>(&self, vga: &'a VGA) -> &'a SpriteBatch {
+        vga.get_sprite_batch()
+    }
 
-    /// 渲染完整一帧（初始化阶段）
-    /// 对应 Pascal PLAY.PAS 中初始化循环的渲染部分
+    /// GPU版 - 渲染完整一帧（初始化阶段）
     pub fn render_init_frame(&mut self, ctx: &mut RenderContext, _page: i32) {
-        // 提前复制需要的值，避免借用冲突
+        // GPU模式每帧完全重绘
+        ctx.vga.begin_gpu_frame();
+        
         let has_stars = ctx.buffers.options.stars != 0;
         let opt1 = ctx.buffers.options.clone();
         
         // 1. 背景层
         self.render_background_layer(ctx);
        
-        // 2. Tile 层（地形）
+        // 2. Tile层
         self.render_tile_layer(ctx);
    
-        // 3. Overlay 层（debug、山峰、背景）
+        // 3. Overlay层
         self.render_overlay_layer(ctx);
       
         // 4. 实体层
         if has_stars {
             ctx.stars.show_stars(ctx.vga, ctx.buffers);
         }
-        ctx.enemies
-            .show_enemies(ctx.vga, ctx.buffers, ctx.sprites, ctx.glitters);
+        ctx.enemies.show_enemies(ctx.vga, ctx.buffers, ctx.sprites, ctx.glitters, ctx.atlas);
         if !self.only_draw {
             ctx.players.draw_player(
                 ctx.buffers,
@@ -91,80 +107,44 @@ impl Renderer {
                 &opt1,
                 ctx.backgr,
                 ctx.enemies,
+                ctx.atlas,
             );
         }
-
-        // 关键日志：present 前抽样 framebuffer 是否被写入
-        let sx0 = ctx.buffers.x_view + 10;
-        let s0 = ctx.vga.get_pixel_world(sx0, 40);
-        let s1 = ctx.vga.get_pixel_world(sx0, 80);
-        let s2 = ctx.vga.get_pixel_world(sx0, 120);
       
         // 5. Present
         ctx.vga.show_page();
 
-        // 确保关闭 sprite tracing
         ctx.figures.set_trace_enabled(false);
     }
 
-    /// 渲染游戏主循环帧
-    /// 对应 Pascal PLAY.PAS 主循环中的渲染部分
-    ///
-    /// 注意：show_score 需要在调用此方法前单独处理（因为需要 Play 的方法）
+    /// GPU版 - 渲染游戏主循环帧
+    /// 
+    /// GPU模式：每帧完全重绘，不需要hide/erase操作
     pub fn render_game_frame(&mut self, ctx: &mut RenderContext) {
-        let page = ctx.vga.current_page() as usize;
-        let scroll = ctx.buffers.x_view - ctx.buffers.last_x_view[page];
-        // 提前读取需要的 options 字段值，避免持久借用冲突
+        // GPU模式每帧完全重绘，开始新帧
+        ctx.vga.begin_gpu_frame();
+        
         let has_stars = ctx.buffers.options.stars != 0;
+        let x_view = ctx.buffers.x_view;
 
-        // 0. 先擦除上一帧的实体/UI（Pascal：先 PopBackGr，再 ResetStack）。
-        // 关键：敌人/临时对象改为"句柄版背景"，避免 x>255 时 Vec 版 push/pop 截断导致写回错位。
-        ctx.glitters.hide_glitter(ctx.vga);
-        if has_stars {
-            ctx.stars.hide_stars(ctx.vga, ctx.buffers);
-        }
+        // 1. 背景层：天空 + 云朵
+        self.render_background_layer(ctx);
+
+        // 2. Tile层：地形方块
+        self.render_tile_layer(ctx);
+
+        // 3. Overlay层：山峰/背景
+        self.render_overlay_layer(ctx);
+
+        // 4. 移除效果
+        ctx.tmpobj.run_remove(ctx.vga, ctx.atlas);
+
+        // 5. 实体层
         if self.show_objects {
-            ctx.tmpobj.hide_temp_obj(ctx.vga);
+            ctx.blocks.draw_blocks(ctx.vga, ctx.atlas);
+            ctx.enemies.show_enemies(ctx.vga, ctx.buffers, ctx.sprites, ctx.glitters, ctx.atlas);
         }
-        if self.show_status {
-            ctx.status.hide_status(ctx.vga);
-        }
-        ctx.players.erase_player(ctx.vga);
-        if self.show_objects {
-            ctx.enemies.hide_enemies(ctx.vga);
-            ctx.blocks.erase_blocks(ctx.vga);
-        }
-
-        // 1) 背景/地形重绘：
-        // - 非滚屏帧：只需要 DrawBackGr(FALSE)（Horizon 临时偏移）
-        // - 滚屏帧：render_scroll 内会先移动 framebuffer，再补齐新露出条带（含 sky/tile/backgr）
-        if scroll == 0 {
-            // 只在需要修改horizon时才clone
-            let mut opt_back = ctx.buffers.options.clone();
-            let base_h = opt_back.horizon as i32;
-            opt_back.horizon = (base_h + ctx.vga.get_y_offset() - YBASE) as u8;
-            ctx.backgr.draw_backgr(false, ctx.vga, ctx.buffers, &opt_back);
-        } else {
-            self.render_scroll(ctx, scroll, page);
-        }
-
-        ctx.tmpobj
-            .run_remove(ctx.vga, ctx.backgr, ctx.sprites, &ctx.buffers.options);
-
-        // 1. 重置栈（准备绘制）。
-        // - 非滚屏帧：必须在“擦除上一帧”之后调用，否则会使上一帧的 backgr handle 失效。
-        // - 滚屏帧：我们跳过了旧句柄擦除，直接重绘基底，因此这里重置即可。
-        ctx.vga.reset_stack();
-
-        // 2. 实体层（blocks + enemies + player）
-        if self.show_objects {
-            ctx.blocks
-                .draw_blocks(ctx.vga, ctx.backgr, &ctx.buffers.options, ctx.sprites);
-            ctx.enemies
-                .show_enemies(ctx.vga, ctx.buffers, ctx.sprites, ctx.glitters);
-        }
-        // 注意：draw_player 需要同时访问 &mut Buffers 和 &WorldOptions
-        // 由于借用规则，需要先 clone options
+        
         let opt_for_player = ctx.buffers.options.clone();
         ctx.players.draw_player(
             ctx.buffers,
@@ -174,19 +154,14 @@ impl Renderer {
             &opt_for_player,
             ctx.backgr,
             ctx.enemies,
+            ctx.atlas,
         );
 
-        // 3. UI 层（状态、临时对象）
-        // show_score 需要在外部调用
+        // 6. UI层：状态栏
         if self.show_status {
-            let current_page = ctx.vga.current_page() as usize;
-            let x_view = ctx.buffers.x_view;
             let player = ctx.buffers.player;
             let level_score: i32 = ctx.buffers.level_score.try_into().unwrap_or(0);
-
-            // 直接传递引用，避免不必要的 clone
             ctx.status.show_status(
-                current_page,
                 x_view,
                 player,
                 &ctx.buffers.player_name,
@@ -196,22 +171,201 @@ impl Renderer {
                 &ctx.buffers.world_number,
                 ctx.txt,
                 ctx.vga,
+                ctx.atlas,
             );
         }
+        
+        // 7. 临时对象层
         if self.show_objects {
-            ctx.tmpobj.show_temp_obj(ctx.vga, ctx.sprites);
+            ctx.tmpobj.show_temp_obj(ctx.vga, ctx.atlas);
         }
 
-        // 4. 特效层
+        // 8. 特效层
         if has_stars {
             ctx.stars.show_stars(ctx.vga, ctx.buffers);
         }
         ctx.glitters.show_glitter(ctx.vga);
+        ctx.glitters.update_glitter_gpu();  // 更新闪光计数器
 
-        // 5. 更新视口记录
+        // 9. 更新视口记录
         ctx.buffers.last_x_view[ctx.vga.current_page() as usize] = ctx.buffers.x_view;
-        // 注意1：Pascal 的 ShowTotalBack(结算文字) 发生在 ShowPage 之前。
-        // 注意2：这里不再调用 show_page；由 play.rs 在“需要绘制 show_score 后”再统一 present，保证顺序严格一致。
+    }
+
+    /// GPU模式：收集帧渲染命令
+    /// 
+    /// 替代render_game_frame，不直接绘制到VGA framebuffer，
+    /// 而是收集所有渲染命令到Vec<RenderCommand>中，
+    /// 最后由GpuRenderer统一提交到GPU
+    /// 
+    /// 渲染层级顺序:
+    /// 1. 天空填充
+    /// 2. 星星层
+    /// 3. 背景装饰层(山峰/云朵)
+    /// 4. Tilemap地形层
+    /// 5. 敌人层
+    /// 6. 玩家层
+    /// 7. 临时对象层
+    /// 8. 方块动画层
+    /// 9. UI层(状态栏)
+    /// 10. 闪光特效层
+    pub fn collect_gpu_frame(
+        &mut self,
+        ctx: &mut RenderContext,
+        atlas: &SpriteAtlas,
+    ) -> Vec<RenderCommand> {
+        let mut commands = Vec::with_capacity(2048);
+        let palette_index = ctx.vga.palette.get_fade_palette_index();
+        let x_view = ctx.buffers.x_view;
+        let y_view = ctx.buffers.y_view;
+        let has_stars = ctx.buffers.options.stars != 0;
+
+        // 1. 背景层：天空填充
+        let sky_color = match ctx.buffers.options.sky_type {
+            0 => 0x90,  // 白天蓝色
+            1 => 0x90,  // 白天
+            2 => 0x70,  // 黄昏橙色
+            3 => 0x00,  // 夜晚黑色
+            4 => 0x90,  // 水下蓝
+            5 => 0xC0,  // 城堡灰
+            6 | 7 | 8 => 0x00,  // 地下室黑色
+            _ => 0x90,
+        };
+        // 全屏天空填充
+        let fill = crate::gpu::FillRect::new(
+            0.0, 0.0,
+            crate::vga256::SCREEN_WIDTH as f32, 
+            crate::vga256::VIR_SCREEN_HEIGHT as f32,
+            sky_color, palette_index,
+        );
+        commands.push(RenderCommand::FillRect(fill));
+        
+        // 渐变层(horizon以下使用不同颜色)
+        let horizon = ctx.buffers.options.horizon as i32;
+        if horizon > 0 && horizon < crate::vga256::VIR_SCREEN_HEIGHT as i32 {
+            let ground_color = match ctx.buffers.options.sky_type {
+                0 | 1 | 4 => 0xF0,  // 草地绿
+                2 => 0xE0,          // 沙地黄
+                3 => 0x18,          // 夜晚地面
+                _ => 0xF0,
+            };
+            let fill = crate::gpu::FillRect::new(
+                0.0, horizon as f32,
+                crate::vga256::SCREEN_WIDTH as f32,
+                (crate::vga256::VIR_SCREEN_HEIGHT - horizon) as f32,
+                ground_color, palette_index,
+            );
+            commands.push(RenderCommand::FillRect(fill));
+        }
+
+        // 2. 星星层（如果有）
+        if has_stars {
+            ctx.stars.collect_stars_gpu(&mut commands, ctx.buffers, palette_index);
+        }
+
+        // 3. 背景装饰层（山峰、云朵等）
+        // 使用backgr模块的GPU收集方法
+        let cloud_sprites = ctx.backgr.collect_cloud_sprites(x_view);
+        for sprite_cmd in cloud_sprites {
+            if let Some(fill) = Self::sprite_to_fill(&sprite_cmd, palette_index) {
+                commands.push(RenderCommand::FillRect(fill));
+            }
+        }
+
+        // 4. 地形/方块层 (tilemap)
+        // 收集可见区域的tile精灵
+        let tile_start_x = x_view / W;
+        let tile_start_y = 0;
+        let visible_tiles_x = NH + 2;
+        let visible_tiles_y = NV;
+        
+        let tile_sprites = ctx.figures.collect_visible_tiles_gpu(
+            tile_start_x,
+            tile_start_y,
+            visible_tiles_x,
+            visible_tiles_y,
+            &ctx.buffers.world_map,
+            ctx.sprites,
+            atlas,
+            &ctx.buffers.options,
+            ctx.buffers,
+        );
+        for sprite_cmd in tile_sprites {
+            commands.push(RenderCommand::Sprite(sprite_cmd));
+        }
+
+        // 5. 敌人层
+        if self.show_objects {
+            ctx.enemies.collect_enemy_sprites_gpu(
+                &mut commands,
+                ctx.buffers,
+                atlas,
+            );
+        }
+
+        // 6. 玩家层
+        let player_sprites = ctx.players.collect_player_sprites_gpu(
+            ctx.buffers,
+            atlas,
+            palette_index,
+        );
+        for sprite_cmd in player_sprites {
+            commands.push(RenderCommand::Sprite(sprite_cmd));
+        }
+
+        // 7. 临时对象层
+        if self.show_objects {
+            ctx.tmpobj.collect_temp_obj_sprites_gpu(
+                &mut commands,
+                ctx.buffers,
+                atlas,
+            );
+        }
+
+        // 8. 方块动画层（bump效果）
+        if self.show_objects {
+            ctx.blocks.collect_bump_sprites_gpu(
+                &mut commands,
+                x_view,
+                y_view,
+                atlas,
+            );
+        }
+
+        // 9. 状态栏UI
+        if self.show_status {
+            let player = ctx.buffers.player;
+            let level_score: i32 = ctx.buffers.level_score.try_into().unwrap_or(0);
+            ctx.status.collect_status_gpu(
+                &mut commands,
+                x_view,
+                player,
+                &ctx.buffers.player_name,
+                &ctx.buffers.data.lives,
+                level_score,
+                &ctx.buffers.data.coins,
+                &ctx.buffers.world_number,
+                ctx.txt,
+                palette_index,
+            );
+        }
+
+        // 10. 闪光特效层
+        ctx.glitters.collect_glitter_gpu(&mut commands, x_view, y_view, palette_index);
+
+        commands
+    }
+    
+    /// 辅助函数：将云朵精灵转换为填充命令（简化版本）
+    fn sprite_to_fill(
+        sprite_cmd: &crate::gpu::sprite_batch::SpriteCommand,
+        palette_index: u32,
+    ) -> Option<crate::gpu::FillRect> {
+        // 云朵使用白色填充（调色板索引0xFF通常是白色）
+        Some(crate::gpu::FillRect::new(
+            sprite_cmd.x, sprite_cmd.y,
+            sprite_cmd.uv.width as f32, sprite_cmd.uv.height as f32,
+            0xFF, palette_index,
+        ))
     }
 
     /// 背景层渲染（天空 + 云朵）

@@ -244,6 +244,7 @@ impl Play {
             ctx.glitters,
             ctx.tmpobj,
             ctx.sprites,
+            ctx.atlas,
             ctx.keyboard,
             ctx.joystick,
             ctx.cur_player,
@@ -269,6 +270,7 @@ impl Play {
         glitters: &mut GlitterSystem,
         tmpobj: &mut TmpObjManager,
         sprites: &mut SpriteDataManager,
+        atlas: &crate::sprites::SpriteAtlas,
         keyboard: &mut Keyboard,
         joystick: &mut JoystickState,
         cur_player: u8,
@@ -607,7 +609,7 @@ impl Play {
                     vga.page = page;
                     
                     let mut ctx = RenderContext {
-                        vga, buffers, backgr, figures, sprites, blocks,
+                        vga, buffers, backgr, figures, sprites, atlas, blocks,
                         enemies, players, tmpobj, stars, glitters,
                         status: status_mgr, txt,
                     };
@@ -693,7 +695,7 @@ impl Play {
                     vga.page = page;
                     
                     let mut ctx = RenderContext {
-                        vga, buffers, backgr, figures, sprites, blocks,
+                        vga, buffers, backgr, figures, sprites, atlas, blocks,
                         enemies, players, tmpobj, stars, glitters,
                         status: status_mgr, txt,
                     };
@@ -710,7 +712,7 @@ impl Play {
             PlayPhase::GameLoop => {
                 self.game_loop_tick(
                     vga, txt, music, buffers, players, enemies, backgr, figures,
-                    stars, blocks, status_mgr, glitters, tmpobj, sprites,
+                    stars, blocks, status_mgr, glitters, tmpobj, sprites, atlas,
                     keyboard, joystick, cur_player,
                 )
             }
@@ -817,6 +819,7 @@ impl Play {
         glitters: &mut GlitterSystem,
         tmpobj: &mut TmpObjManager,
         sprites: &mut SpriteDataManager,
+        atlas: &crate::sprites::SpriteAtlas,
         keyboard: &mut Keyboard,
         joystick: &mut JoystickState,
         cur_player: u8,
@@ -854,23 +857,7 @@ impl Play {
             self.show_objects = false;
         }
         
-        // 隐藏对象
-        glitters.hide_glitter(vga);
-        if current_opt.stars != 0 {
-            stars.hide_stars(vga, buffers);
-        }
-        if self.show_objects {
-            tmpobj.hide_temp_obj(vga);
-        }
-        status_mgr.hide_status(vga);
-        if self.show_score {
-            self.hide_total_back(vga);
-        }
-        players.erase_player(vga);
-        if self.show_objects {
-            enemies.hide_enemies(vga);
-            blocks.erase_blocks(vga);
-        }
+        // GPU模式下不需要隐藏操作，每帧完全重绘
         
         buffers.lava_counter = buffers.lava_counter.wrapping_add(1);
         
@@ -1006,7 +993,7 @@ impl Play {
         
         {
             let mut ctx = RenderContext {
-                vga, buffers, backgr, figures, sprites, blocks,
+                vga, buffers, backgr, figures, sprites, atlas, blocks,
                 enemies, players, tmpobj, stars, glitters,
                 status: status_mgr, txt,
             };

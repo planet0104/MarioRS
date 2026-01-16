@@ -15,8 +15,12 @@ categories = ["games"]
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-# wgpu 渲染后端（可选）
-pixels = { version = "0.15", optional = true }
+# GPU 渲染核心依赖 (wgpu 强制启用)
+wgpu = { version = "23", default-features = false, features = ["wgsl"] }
+bytemuck = { version = "1.21", features = ["derive"] }
+futures = "0.3"
+
+# winit 窗口管理 (桌面平台)
 winit = { version = "0.30", optional = true }
 bitflags = "2.9.1"
 
@@ -114,13 +118,13 @@ rand = { version = "0.8", default-features = false, features = ["alloc", "small_
 hashbrown = "0.15"
 
 [features]
-default = ["gdi-backend", "dark-theme"]   # 默认使用 gdi 后端 + 暗黑主题适配
+default = ["gdi-backend", "dark-theme"]   # 默认使用 GPU + GDI回退 + 暗黑主题适配
 logging = ["dep:tracing", "dep:tracing-subscriber", "dep:tracing-wasm", "dep:tracing-android"]
-wgpu-backend = ["dep:pixels", "dep:winit"]  # wgpu 渲染后端（跨平台，体积大）
-gdi-backend = ["dep:windows-sys"]           # Win32 GDI 后端（仅 Windows，体积小）
-dark-theme = []                             # 暗黑主题适配（需要 Vista+ dwmapi.dll）
+wgpu-backend = ["dep:winit"]              # wgpu 渲染后端（跨平台，体积大）
+gdi-backend = ["dep:windows-sys"]         # Windows GDI（仅用于窗口创建，渲染使用GPU）
+dark-theme = []                           # 暗黑主题适配（需要 Vista+ dwmapi.dll）
 touch-panel = ["dep:image", "dep:tiny-skia"] # 触摸控制面板 (PNG解码 + 2D绘图)
-android = ["touch-panel"]                   # Android 平台后端 (自动启用 touch-panel)
+android = ["touch-panel"]                 # Android 平台后端 (自动启用 touch-panel)
 
 # ============================================================================
 # Release 编译优化 - 最小体积

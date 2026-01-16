@@ -229,6 +229,7 @@ impl Intro {
             ctx.glitters,
             ctx.tmpobj,
             ctx.sprites,
+            ctx.atlas,
             ctx.keyboard,
             ctx.joystick,
             play,
@@ -257,8 +258,9 @@ impl Intro {
         glitters: &mut GlitterSystem,
         tmpobj: &mut TmpObjManager,
         sprites: &mut SpriteDataManager,
+        atlas: &crate::sprites::SpriteAtlas,
         keyboard: &mut Keyboard,
-        joystick: &mut crate::joystick::JoystickState,
+        _joystick: &mut crate::joystick::JoystickState,
         play: &mut Play,
         config: &mut ConfigData,
         game_number: &mut i32,
@@ -408,6 +410,7 @@ impl Intro {
                         backgr,
                         figures,
                         sprites,
+                        atlas,
                         blocks,
                         enemies,
                         players,
@@ -471,10 +474,10 @@ impl Intro {
                 intro_dbg!("[INTRO] palette[0xA0]={:?}, source_palette[0xA0]={:?}", 
                     vga.palette.palette[0xA0], vga.palette.source_palette[0xA0]);
                 
-                for i in 0..=MAX_PAGE {
+                for _i in 0..=MAX_PAGE {
                     intro_dbg!("[INTRO] drawing page {}", i);
                     self.draw_intro_screen(
-                        vga, txt, sprites, buffers, players, figures, backgr, &intro_opt,
+                        vga, txt, sprites, atlas, buffers, players, figures, backgr, &intro_opt,
                     );
                     vga.show_page();
                 }
@@ -687,11 +690,63 @@ impl Intro {
         map
     }
 
+    /// GPU模式：收集Intro画面的渲染命令
+    pub fn collect_intro_sprites_gpu(
+        &self,
+        atlas: &crate::sprites::SpriteAtlas,
+        palette_index: u32,
+    ) -> Vec<crate::gpu::sprite_batch::SpriteCommand> {
+        use crate::gpu::sprite_batch::SpriteCommand;
+        use crate::sprites::SpriteId;
+        
+        let mut commands = Vec::new();
+        
+        // 1) 绘制三个INTRO图像（带阴影效果）
+        for i in (0..=1).rev() {
+            for j in (0..=1).rev() {
+                for k in (0..=1).rev() {
+                    // INTRO_000
+                    let uv = atlas.get(SpriteId::INTRO_000);
+                    let cmd = SpriteCommand::new(38 + i + j, 29 + i + k, uv)
+                        .with_palette(0, palette_index);
+                    commands.push(cmd);
+                    
+                    // INTRO_001
+                    let uv = atlas.get(SpriteId::INTRO_001);
+                    let cmd = SpriteCommand::new(159 + i + j, 29 + i + k, uv)
+                        .with_palette(0, palette_index);
+                    commands.push(cmd);
+                    
+                    // INTRO_002
+                    let uv = atlas.get(SpriteId::INTRO_002);
+                    let cmd = SpriteCommand::new(198 + i + j, 29 + i + k, uv)
+                        .with_palette(0, palette_index);
+                    commands.push(cmd);
+                }
+            }
+        }
+        
+        // 2) 绘制边框砖块
+        for i in 0..NH {
+            for j in 0..NV {
+                if i == 0 || i == NH - 1 || j == 0 || j == NV - 1 {
+                    let uv = atlas.get(SpriteId::BLOCK_000);
+                    let cmd = SpriteCommand::new(i * W, j * H, uv)
+                        .with_palette(0, palette_index);
+                    commands.push(cmd);
+                }
+            }
+        }
+        
+        commands
+    }
+
     fn draw_intro_screen(
         &mut self,
         vga: &mut VGA,
-        txt: &mut Txt,
+        _txt: &mut Txt,
         sprites: &mut SpriteDataManager,
+        atlas: &crate::sprites::SpriteAtlas,
         buffers: &mut Buffers,
         players: &mut Players,
         figures: &Figures,
@@ -752,6 +807,7 @@ impl Intro {
             options,
             backgr,
             &mut crate::enemies::Enemies::new(sprites),
+            atlas,
         );
 
         // 注意：不在这里调用present()，等fade_up之后再调用
@@ -761,7 +817,7 @@ impl Intro {
     fn update_menu_content(
         &mut self,
         buffers: &Buffers,
-        game_number: &i32,
+        _game_number: &i32,
         play: &Play,
         music: &MusicPlayer,
         config: &mut ConfigData,
@@ -1010,7 +1066,7 @@ impl Intro {
         &mut self,
         vga: &mut VGA,
         txt: &mut Txt,
-        buffers: &Buffers,
+        _buffers: &Buffers,
         options: &WorldOptions,
     ) {
         // 高频渲染不输出日志，避免刷屏

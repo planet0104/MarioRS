@@ -1,11 +1,13 @@
 // Figures module - handles sprite management and world rendering
 // Converted from FIGURES.PAS
+// GPU渲染支持：添加了收集渲染指令的方法
 
 use crate::backgr::BackGr;
 use crate::buffers::{Buffers, CAN_HOLD_YOU, EX, EY1, ImageBuffer, NV, WorldBuffer, WorldOptions};
 use crate::palettes::Palettes;
 use crate::sprites::SpriteDataManager;
 use crate::vga256::VGA;
+use crate::gpu::sprite_batch::{FillCommand, SpriteCommand};
 
 /// 调试开关：是否打印特定tile位置的精灵文件名
 /// 设置为true时，会打印指定坐标的tile绘制信息
@@ -596,6 +598,7 @@ impl Figures {
     /// 依赖：
     /// - 填充像素：`vga.fill_world`
     /// - 平滑渐变/砖块等：`backgr`（对应 Pascal BACKGR.PAS 的 SmoothFill/DrawBricks/...）
+    /// GPU版draw_sky - 使用GPU填充渲染天空/背景
     pub fn draw_sky(
         &self,
         x: i32,
@@ -605,51 +608,336 @@ impl Figures {
         vga: &mut VGA,
         options: &WorldOptions,
         backgr: &mut BackGr,
-        sprites: &SpriteDataManager,
+        _sprites: &SpriteDataManager,
     ) {
-        // Pascal FIGURES.PAS::DrawSky:
-        //   if Options.BackGrType = 0 then Fill(..., $E0)
+        // GPU模式：直接使用fill_world_gpu
         if options.backgr_type == 0 {
-            vga.fill_world(x, y, w, h, 0xE0);
+            vga.fill_world_gpu(x, y, w, h, 0xE0);
             return;
         }
 
         match self.sky {
-            // Pascal: 0,1,3,4 -> 以 Horizon 分割填充 $E0/$F0
+            // 以Horizon分割填充
             0 | 1 | 3 | 4 => {
                 let horizon = options.horizon as i32;
                 let top_h = horizon - y;
 
                 if horizon < y {
-                    vga.fill_world(x, y, w, h, 0xF0);
+                    vga.fill_world_gpu(x, y, w, h, 0xF0);
                 } else if horizon > y + h - 1 {
-                    vga.fill_world(x, y, w, h, 0xE0);
+                    vga.fill_world_gpu(x, y, w, h, 0xE0);
                 } else {
-                    vga.fill_world(x, y, w, top_h, 0xE0);
-                    vga.fill_world(x, horizon, w, h - top_h, 0xF0);
+                    vga.fill_world_gpu(x, y, w, top_h, 0xE0);
+                    vga.fill_world_gpu(x, horizon, w, h - top_h, 0xF0);
                 }
             }
 
-            // Pascal: 2,5,9,10,11,12 -> SmoothFill
+            // SmoothFill（渐变背景）
             2 | 5 | 9 | 10 | 11 | 12 => {
-                backgr.smooth_fill(x as usize, y as usize, w as usize, h as usize, options, vga);
+                backgr.smooth_fill_gpu(x as usize, y as usize, w as usize, h as usize, options, vga);
             }
 
-            // Pascal: 6,7,8 -> 根据 BackGrType 画砖/柱子/窗/大砖
+            // 地下室场景：画砖/柱子/窗/大砖
             6 | 7 | 8 => {
-                // println!("[DRAW_SKY] 地下室场景 sky={}, backgr_type={}, 区域: x={}, y={}, w={}, h={}",
-                //            self.sky, options.backgr_type, x, y, w, h);
                 match options.backgr_type {
-                    4 => backgr.draw_bricks(x, y, w, h, vga, sprites),
-                    5 => backgr.large_bricks(x, y, w, h, vga),
-                    6 => backgr.pillar(x, y, w, h, vga, sprites),
-                    7 => backgr.windows(x, y, w, h, vga),
+                    4 => backgr.draw_bricks_gpu(x, y, w, h, vga),
+                    5 => backgr.large_bricks_gpu(x, y, w, h, vga),
+                    6 => backgr.pillar_gpu(x, y, w, h, vga),
+                    7 => backgr.windows_gpu(x, y, w, h, vga),
                     _ => {}
                 }
             }
 
             _ => {}
         }
+    }
+
+    // ========== GPU渲染支持方法 ==========
+
+    /// GPU模式：收集天空/背景填充命令
+    /// 返回填充矩形命令列表，供GPU批量渲染
+    pub fn collect_sky_fills(
+        &self,
+        x: i32,
+        y: i32,
+        w: i32,
+        h: i32,
+        options: &WorldOptions,
+    ) -> Vec<FillCommand> {
+        let mut fills = Vec::new();
+        
+        if options.backgr_type == 0 {
+            fills.push(FillCommand::new(x, y, w, h, 0xE0));
+            return fills;
+        }
+
+        match self.sky {
+            0 | 1 | 3 | 4 => {
+                let horizon = options.horizon as i32;
+                let top_h = horizon - y;
+
+                if horizon < y {
+                    fills.push(FillCommand::new(x, y, w, h, 0xF0));
+                } else if horizon > y + h - 1 {
+                    fills.push(FillCommand::new(x, y, w, h, 0xE0));
+                } else {
+                    fills.push(FillCommand::new(x, y, w, top_h, 0xE0));
+                    fills.push(FillCommand::new(x, horizon, w, h - top_h, 0xF0));
+                }
+            }
+            2 | 5 | 9 | 10 | 11 | 12 => {
+                // smooth_fill - 生成渐变填充命令
+                for row in y..(y + h) {
+                    let color_idx = 0xE0 + ((row - y).min(15) as u8);
+                    fills.push(FillCommand::new(x, row, w, 1, color_idx));
+                }
+            }
+            6 | 7 | 8 => {
+                // 地下室背景 - 使用统一填充色
+                fills.push(FillCommand::new(x, y, w, h, 0x18));
+            }
+            _ => {}
+        }
+        
+        fills
+    }
+
+    /// GPU版本：收集单个tile的精灵命令
+    /// 替代redraw方法的CPU绘制，用于GPU渲染管线
+    pub fn collect_tile_sprite_gpu(
+        &self,
+        x: i32,
+        y: i32,
+        world_map: &WorldBuffer,
+        _sprites: &SpriteDataManager,
+        atlas: &crate::sprites::SpriteAtlas,
+        options: &WorldOptions,
+        buffers: &Buffers,
+    ) -> Vec<SpriteCommand> {
+        use crate::sprites::SpriteId;
+        let mut commands = Vec::new();
+        
+        let xpos = x * crate::buffers::W as i32;
+        let ypos = y * crate::buffers::H as i32;
+        
+        let get = |x: i32, y: i32| -> u8 {
+            let xx = x + EX;
+            let yy = y + EY1;
+            if xx < 0 || yy < 0 || (xx as usize) >= world_map.len() || (yy as usize) >= world_map[0].len() {
+                0
+            } else {
+                world_map[xx as usize][yy as usize]
+            }
+        };
+        
+        if x < 0 || y < 0 || y >= NV {
+            return commands;
+        }
+        
+        let ch = get(x, y);
+        if ch == b' ' {
+            return commands;
+        }
+        
+        // 根据tile字符选择精灵
+        let sprite_id: Option<SpriteId> = match ch {
+            b'?' => Some(SpriteId::QUEST_000),
+            b'@' => Some(SpriteId::QUEST_001),
+            b'I' => Some(SpriteId::BLOCK_000),
+            b'J' => Some(SpriteId::BLOCK_001),
+            b'K' => Some(SpriteId::NOTE_000),
+            b'X' => Some(SpriteId::XBLOCK_000),
+            b'W' => Some(SpriteId::WOOD_000),
+            b'0' => Some(SpriteId::PIPE_000),
+            b'1' => Some(SpriteId::PIPE_001),
+            b'2' => Some(SpriteId::PIPE_002),
+            b'3' => Some(SpriteId::PIPE_003),
+            b'*' => Some(SpriteId::COIN_000),
+            0xFE => {
+                if get(x, y - 1) == 0xFE {
+                    Some(SpriteId::EXIT_001)
+                } else {
+                    Some(SpriteId::EXIT_000)
+                }
+            }
+            0xF7 => {
+                // 草地
+                if x == 0 || get(x - 1, y) == ch {
+                    if get(x + 1, y) == ch {
+                        Some(SpriteId::GRASS2_000)
+                    } else {
+                        Some(SpriteId::GRASS3_000)
+                    }
+                } else if get(x + 1, y) == ch {
+                    Some(SpriteId::GRASS1_000)
+                } else {
+                    Some(SpriteId::GRASS3_000)
+                }
+            }
+            0xF0 => match options.design {
+                1 => {
+                    if get(x, y - 1) != ch {
+                        Some(SpriteId::FENCE_001)
+                    } else {
+                        Some(SpriteId::FENCE_000)
+                    }
+                }
+                2 => {
+                    if get(x, y - 1) != ch {
+                        Some(SpriteId::SMTREE_000)
+                    } else {
+                        Some(SpriteId::SMTREE_001)
+                    }
+                }
+                _ => None,
+            },
+            0xF6 => {
+                if options.design == 1 {
+                    Some(SpriteId::WPALM_000)
+                } else {
+                    None
+                }
+            }
+            0xFA => {
+                if options.design == 1 {
+                    Some(SpriteId::PALM0_000)
+                } else {
+                    None
+                }
+            }
+            0xF4 => {
+                if options.design == 1 {
+                    Some(SpriteId::PALM1_000)
+                } else {
+                    None
+                }
+            }
+            0xF9 => {
+                if options.design == 1 {
+                    Some(SpriteId::PALM2_000)
+                } else {
+                    None
+                }
+            }
+            0xF5 => {
+                if options.design == 1 {
+                    Some(SpriteId::PALM3_000)
+                } else {
+                    None
+                }
+            }
+            b'#' => match options.design {
+                1 => Some(SpriteId::FALL_000),
+                2 => {
+                    if get(x, y - 1) == b'#' {
+                        Some(SpriteId::TREE_001)
+                    } else {
+                        Some(SpriteId::TREE_003)
+                    }
+                }
+                3 => Some(SpriteId::WINDOW_001),
+                4 => Some(SpriteId::LAVA_000),
+                _ => None,
+            },
+            b'%' => match options.design {
+                1 => Some(SpriteId::FALL_001),
+                2 => {
+                    if get(x, y - 1) == b'%' {
+                        Some(SpriteId::TREE_000)
+                    } else {
+                        Some(SpriteId::TREE_002)
+                    }
+                }
+                3 => Some(SpriteId::WINDOW_000),
+                4 => Some(SpriteId::LAVA_001),
+                5 => {
+                    let idx = ((x + (buffers.lava_counter as i32 / 8)) % 5) as u8;
+                    Some(match idx {
+                        0 => SpriteId::LAVA2_001,
+                        1 => SpriteId::LAVA2_002,
+                        2 => SpriteId::LAVA2_003,
+                        3 => SpriteId::LAVA2_004,
+                        _ => SpriteId::LAVA2_005,
+                    })
+                }
+                _ => None,
+            },
+            b'A' => {
+                // 砖块 - 使用默认砖块样式
+                let l = get(x - 1, y) == b'A';
+                let r = get(x + 1, y) == b'A';
+                let stitch = (x + y) % 2 == 1;
+                if stitch && r {
+                    Some(SpriteId::BRICK0_001)
+                } else if !stitch && l {
+                    Some(SpriteId::BRICK0_002)
+                } else {
+                    Some(SpriteId::BRICK0_000)
+                }
+            }
+            b'=' => Some(SpriteId::PIN_000),
+            // 墙体精灵 1-13
+            1..=13 => {
+                // fig_list[0][ch] - 使用动态着色的墙体
+                // GPU版本需要使用预烘焙的着色精灵
+                let wall_id = match options.wall_type1 {
+                    100 => match ch {
+                        1 => SpriteId::BROWN_000,
+                        2 => SpriteId::BROWN_001,
+                        3 => SpriteId::BROWN_002,
+                        4 => SpriteId::BROWN_003,
+                        5 => SpriteId::BROWN_004,
+                        _ => SpriteId::BROWN_000,
+                    },
+                    101 => match ch {
+                        1 => SpriteId::GREEN_000,
+                        2 => SpriteId::GREEN_001,
+                        3 => SpriteId::GREEN_002,
+                        4 => SpriteId::GREEN_003,
+                        5 => SpriteId::GREEN_004,
+                        _ => SpriteId::GREEN_000,
+                    },
+                    _ => SpriteId::BROWN_000,
+                };
+                Some(wall_id)
+            }
+            _ => None,
+        };
+        
+        if let Some(id) = sprite_id {
+            let uv = atlas.get(id);
+            let cmd = SpriteCommand::new(xpos, ypos, uv);
+            commands.push(cmd);
+        }
+        
+        commands
+    }
+
+    /// GPU版本：收集可见区域的所有tile精灵
+    pub fn collect_visible_tiles_gpu(
+        &self,
+        x_start: i32,
+        y_start: i32,
+        width: i32,
+        height: i32,
+        world_map: &WorldBuffer,
+        sprites: &SpriteDataManager,
+        atlas: &crate::sprites::SpriteAtlas,
+        options: &WorldOptions,
+        buffers: &Buffers,
+    ) -> Vec<SpriteCommand> {
+        let mut commands = Vec::new();
+        
+        for y in y_start..(y_start + height) {
+            for x in x_start..(x_start + width) {
+                let tile_cmds = self.collect_tile_sprite_gpu(
+                    x, y, world_map, sprites, atlas, options, buffers
+                );
+                commands.extend(tile_cmds);
+            }
+        }
+        
+        commands
     }
 
     /// Rust 严格移植自 Pascal Redraw 过程（变量、分支、流程与Pascal一致）
@@ -682,13 +970,13 @@ impl Figures {
                 world_map[xx as usize][yy as usize]
             }
         };
-        let mut ch = get(x, y);
+        let ch = get(x, y);
         let mut fig = None;
         let mut fig_name: Option<&'static str> = None;
-        let mut l: bool;
-        let mut r: bool;
-        let mut ls: bool;
-        let mut rs: bool;
+        let l: bool;
+        let r: bool;
+        let ls: bool;
+        let rs: bool;
 
         // 调试日志：跟踪 (0,0) 位置的绘制过程
         // if x == 0 && y == 0 {
@@ -1353,7 +1641,7 @@ impl Figures {
     ) {
         let mut ab: u8 = b' ';
         let mut cd: u8 = b' ';
-        let mut ef: u8 = b' ';
+        let ef: u8 = b' ';
         let mut last_ab: u8 = b' ';
         let mut last_cd: u8 = b' ';
         let mut last_ef: u8 = b' ';
@@ -1366,7 +1654,7 @@ impl Figures {
             let yy = (y as i32 + EY1) as usize;
             wm[xx][yy]
         };
-        let mut set = |wm: &mut WorldBuffer, x: usize, y: usize, v: u8| {
+        let set = |wm: &mut WorldBuffer, x: usize, y: usize, v: u8| {
             let xx = (x as i32 + EX) as usize;
             let yy = (y as i32 + EY1) as usize;
             wm[xx][yy] = v;

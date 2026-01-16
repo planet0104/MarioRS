@@ -3,6 +3,7 @@
 
 use crate::{
     buffers::{Buffers, W, WorldOptions},
+    gpu::{FillRect, RenderCommand},
     vga256::VGA,
 };
 
@@ -71,26 +72,18 @@ impl Stars {
         }
     }
 
-    pub fn show_stars(&mut self, vga: &mut VGA, buffers: &mut Buffers) {
+    /// GPU版 - 显示星星
+    pub fn show_stars(&mut self, vga: &mut VGA, buffers: &Buffers) {
         use crate::utils::random_i32;
-        // 当前页号
-        let current_page = vga.current_page();
-        // 当前视口X
+        
         let x_view = buffers.x_view;
-        // 记录本页的X
-        self.last_x[current_page as usize] = x_view;
-        // 星星偏移
         let x_offset = (8 * x_view) / STAR_SPEED as i32;
-        // star_backgr: [页][像素]，每页320
-        let star_backgr = &mut buffers.star_backgr[current_page as usize];
+        
         // 随机闪烁计数器
         self.blink_counter = random_i32(320);
         let mut bx = self.blink_counter;
-        // 清空本页星星背景
-        for px in star_backgr.iter_mut() {
-            *px = 0;
-        }
-        // 主循环，模拟Pascal汇编逻辑
+        
+        // 主循环
         for i in 0..320 {
             let star_pos = self.star_map[i];
             if star_pos == 0 {
@@ -100,54 +93,65 @@ impl Stars {
             if ax < 0 || ax >= 320 {
                 continue;
             }
-            // 取屏幕像素值（framebuffer）
             let y = (star_pos as i32 / 320) as i32;
-            let dl = vga.get_pixel(ax, y);
-            let mut draw = true;
-            if dl == 0 || dl == 0xF0 {
-                draw = true;
-            } else if dl >= 0xA0 {
-                draw = false;
+            
+            // GPU模式下无法直接读取像素，假设可以绘制
+            // 选择颜色（闪烁效果）
+            let mut al = self.c1;
+            bx -= 1;
+            if bx == 0 {
+                al = self.c2;
+                bx = self.blink_counter;
             }
-            if draw {
-                // 画星星
-                let mut al = self.c1;
-                bx -= 1;
-                if bx == 0 {
-                    al = self.c2;
-                    bx = self.blink_counter;
-                }
-                star_backgr[ax as usize] = al;
-                vga.put_pixel(ax, y, al);
-            }
+            
+            // 使用GPU填充1x1像素
+            vga.fill_gpu(ax, y, 1, 1, al);
         }
     }
 
-    /// 恢复星星背景到屏幕（Pascal HideStars 过程的Rust实现）
-    pub fn hide_stars(&mut self, vga: &mut VGA, buffers: &mut Buffers) {
-        // 当前页号
-        let current_page = vga.current_page();
-        // 上次本页的X
-        let x = (8 * self.last_x[current_page as usize]) / STAR_SPEED as i32;
-        let star_backgr = &mut buffers.star_backgr[current_page as usize];
-        let width = 320;
-        // 恢复星星背景到vga.framebuffer
-        for i in 0..width {
+    // GPU模式下不需要隐藏操作，每帧重绘
+
+    /// GPU渲染: 收集星星像素
+    /// 星星是单像素效果，使用1x1的填充矩形来渲染
+    pub fn collect_stars_gpu(
+        &mut self,
+        commands: &mut Vec<RenderCommand>,
+        buffers: &Buffers,
+        palette_index: u32,
+    ) {
+        use crate::utils::random_i32;
+        
+        let x_view = buffers.x_view;
+        let x_offset = (8 * x_view) / STAR_SPEED as i32;
+        
+        // 更新闪烁计数器
+        self.blink_counter = random_i32(320);
+        let mut bx = self.blink_counter;
+        
+        for i in 0..320 {
             let star_pos = self.star_map[i];
             if star_pos == 0 {
                 continue;
             }
-            let ax = star_pos as i32 + x;
+            
+            let ax = star_pos as i32 + x_offset;
             if ax < 0 || ax >= 320 {
                 continue;
             }
-            let bx = ax as usize;
-            let al = star_backgr[i];
-            if al == 0 {
-                continue;
+            
+            let y = (star_pos as i32 / 320) as i32;
+            
+            // 选择颜色（闪烁效果）
+            let mut color = self.c1;
+            bx -= 1;
+            if bx == 0 {
+                color = self.c2;
+                bx = self.blink_counter;
             }
-            // 这里假设星星在第 al 行（或可根据实际需求调整），否则默认 y=0
-            vga.put_pixel(bx as i32, (star_pos as i32 / 320) as i32, al);
+            
+            // 使用1x1像素的填充矩形
+            let fill = FillRect::new(ax as f32, y as f32, 1.0, 1.0, color, palette_index);
+            commands.push(RenderCommand::FillRect(fill));
         }
     }
 }

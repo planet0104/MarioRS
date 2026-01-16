@@ -15,6 +15,9 @@ pub extern "C" fn android_main(app: AndroidApp) {
     platform::android_main(app);
 }
 
+// GPU渲染模块
+pub mod gpu;
+
 // 游戏核心模块
 pub mod buffers;
 pub mod config;
