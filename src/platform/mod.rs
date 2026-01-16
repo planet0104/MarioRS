@@ -16,6 +16,7 @@
 // ============================================================================
 
 pub mod audio;
+pub mod touch_panel;
 
 #[cfg(all(target_os = "windows", feature = "gdi-backend"))]
 mod windows;
@@ -283,6 +284,12 @@ pub enum GamePhase {
     GameOver,
     Exiting,
 }
+
+// ============================================================================
+// 触摸面板公共模块导出
+// ============================================================================
+
+pub use touch_panel::{TouchAction, ButtonStates, VirtualButtonsRenderer, TouchPanelInput};
 
 // ============================================================================
 // 平台实现导出 - 根据 feature 和目标平台选择

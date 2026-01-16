@@ -3,14 +3,16 @@ MarioRS Android 构建脚本
 
 功能:
   1. 检查并安装必要工具 (cargo-ndk, Rust Android targets)
-  2. 编译多架构 .so 动态库 (arm64-v8a, armeabi-v7a, x86_64)
+  2. 编译 .so 动态库 (默认仅 arm64-v8a，可选全架构)
   3. 复制 .so 文件到 android/app/src/main/jniLibs/
   4. 调用 Gradle 生成 APK
 
 使用方法:
-  .\build_android.ps1           # 构建 Debug APK
-  .\build_android.ps1 -Release  # 构建 Release APK
-  .\build_android.ps1 -SkipRust # 仅构建 APK (跳过 Rust 编译)
+  .\build_android.ps1              # 构建 Debug APK (仅 arm64)
+  .\build_android.ps1 -Release     # 构建 Release APK (仅 arm64)
+  .\build_android.ps1 -AllArch     # 构建所有架构合并的 APK (arm64, armv7, x86_64)
+  .\build_android.ps1 -SeparateApks # 构建三个独立 APK (每个架构一个)
+  .\build_android.ps1 -SkipRust    # 仅构建 APK (跳过 Rust 编译)
 
 环境要求:
   - Rust 工具链
@@ -21,6 +23,8 @@ MarioRS Android 构建脚本
 
 param(
     [switch]$Release,
+    [switch]$AllArch,
+    [switch]$SeparateApks,
     [switch]$SkipRust,
     [switch]$Help
 )
@@ -132,12 +136,24 @@ else {
     Write-Host "  cargo-ndk: installed" -ForegroundColor Gray
 }
 
-# 添加 Android targets
-$targets = @(
-    "aarch64-linux-android",      # arm64-v8a
-    "armv7-linux-androideabi",    # armeabi-v7a
-    "x86_64-linux-android"        # x86_64
-)
+# 添加 Android targets (根据参数决定)
+if ($AllArch -or $SeparateApks) {
+    $targets = @(
+        "aarch64-linux-android",      # arm64-v8a
+        "armv7-linux-androideabi",    # armeabi-v7a
+        "x86_64-linux-android"        # x86_64
+    )
+    if ($SeparateApks) {
+        Write-Host "  Building separate APKs for each architecture" -ForegroundColor Gray
+    } else {
+        Write-Host "  Building all architectures (arm64, armv7, x86_64)" -ForegroundColor Gray
+    }
+} else {
+    $targets = @(
+        "aarch64-linux-android"       # arm64-v8a only
+    )
+    Write-Host "  Building arm64 only (use -AllArch or -SeparateApks for all)" -ForegroundColor Gray
+}
 
 foreach ($target in $targets) {
     $installed = rustup target list --installed | Select-String $target
@@ -151,147 +167,228 @@ foreach ($target in $targets) {
 }
 
 # ============================================================================
-# 编译 Rust 代码
+# 公共变量和函数
 # ============================================================================
 
-if (-not $SkipRust) {
-    Write-Host "`n[3/5] Building Rust libraries with cargo-ndk..." -ForegroundColor Yellow
+$jniLibsDir = Join-Path $PSScriptRoot "android\app\src\main\jniLibs"
+$androidDir = Join-Path $PSScriptRoot "android"
+$buildType = if ($Release) { "--release" } else { "" }
+$gradleTask = if ($Release) { "assembleRelease" } else { "assembleDebug" }
 
-    $buildType = if ($Release) { "--release" } else { "" }
-    $targetDir = if ($Release) { "release" } else { "debug" }
+# 架构映射
+$allArchitectures = @("arm64-v8a", "armeabi-v7a", "x86_64")
+$libcppMappings = @{
+    "arm64-v8a" = "aarch64-linux-android"
+    "armeabi-v7a" = "arm-linux-androideabi"
+    "x86_64" = "x86_64-linux-android"
+}
+$sysroot = "$ndkHome\toolchains\llvm\prebuilt\windows-x86_64\sysroot\usr\lib"
 
-    # 使用 cargo-ndk 编译
-    # -t 指定目标架构，-o 指定输出目录
-    $jniLibsDir = Join-Path $PSScriptRoot "android\app\src\main\jniLibs"
-
-    Write-Host "  Compiling for arm64-v8a..." -ForegroundColor Gray
-    cargo ndk -t arm64-v8a -o $jniLibsDir build --no-default-features --features android $buildType
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "  Error: arm64-v8a build failed" -ForegroundColor Red
-        exit 1
-    }
-
-    Write-Host "  Compiling for armeabi-v7a..." -ForegroundColor Gray
-    cargo ndk -t armeabi-v7a -o $jniLibsDir build --no-default-features --features android $buildType
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "  Error: armeabi-v7a build failed" -ForegroundColor Red
-        exit 1
-    }
-
-    Write-Host "  Compiling for x86_64..." -ForegroundColor Gray
-    cargo ndk -t x86_64 -o $jniLibsDir build --no-default-features --features android $buildType
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "  Error: x86_64 build failed" -ForegroundColor Red
-        exit 1
-    }
-
-    Write-Host "  Rust libraries built successfully!" -ForegroundColor Green
-
-    # 复制 libc++_shared.so (cpal/oboe C++ 运行时依赖)
-    Write-Host "`n  Copying libc++_shared.so from NDK..." -ForegroundColor Gray
-    $sysroot = "$ndkHome\toolchains\llvm\prebuilt\windows-x86_64\sysroot\usr\lib"
+# 编译单个架构的 Rust 代码
+function Build-RustArch {
+    param([string]$arch)
     
-    $libcppMappings = @{
-        "arm64-v8a" = "aarch64-linux-android"
-        "armeabi-v7a" = "arm-linux-androideabi"
-        "x86_64" = "x86_64-linux-android"
+    Write-Host "  Compiling for $arch..." -ForegroundColor Gray
+    cargo ndk -t $arch -o $jniLibsDir build --no-default-features --features android $buildType
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "  Error: $arch build failed" -ForegroundColor Red
+        return $false
     }
     
-    foreach ($arch in $libcppMappings.Keys) {
+    # 复制 libc++_shared.so
+    if ($libcppMappings.ContainsKey($arch)) {
         $srcLib = "$sysroot\$($libcppMappings[$arch])\libc++_shared.so"
         $dstDir = "$jniLibsDir\$arch"
         if (Test-Path $srcLib) {
             Copy-Item $srcLib $dstDir -Force
-            Write-Host "    Copied libc++_shared.so to $arch" -ForegroundColor Gray
         }
     }
-
-    # 显示生成的文件
-    Write-Host "`n  Generated .so files:" -ForegroundColor Gray
-    Get-ChildItem -Path $jniLibsDir -Recurse -Filter "*.so" | ForEach-Object {
-        $size = [math]::Round($_.Length / 1KB, 0)
-        Write-Host "    $($_.FullName.Replace($jniLibsDir, '')) ($size KB)" -ForegroundColor Gray
-    }
-}
-else {
-    Write-Host "`n[3/5] Skipping Rust compilation (--SkipRust)" -ForegroundColor Yellow
+    return $true
 }
 
-# ============================================================================
-# 构建 APK
-# ============================================================================
-
-Write-Host "`n[4/5] Building APK with Gradle..." -ForegroundColor Yellow
-
-$androidDir = Join-Path $PSScriptRoot "android"
-$gradleTask = if ($Release) { "assembleRelease" } else { "assembleDebug" }
-
-Push-Location $androidDir
-try {
-    # 使用 gradlew 或直接调用 gradle
-    $gradlew = Join-Path $androidDir "gradlew.bat"
-    
-    # 如果没有 gradle-wrapper.jar，尝试使用系统 gradle
-    $wrapperJar = Join-Path $androidDir "gradle\wrapper\gradle-wrapper.jar"
-    if (-not (Test-Path $wrapperJar)) {
-        Write-Host "  Note: gradle-wrapper.jar not found." -ForegroundColor Yellow
-        Write-Host "  Please run 'gradle wrapper' in android/ directory first," -ForegroundColor Yellow
-        Write-Host "  or open the project in Android Studio to generate it." -ForegroundColor Yellow
+# 调用 Gradle 构建 APK
+function Build-Apk {
+    Push-Location $androidDir
+    try {
+        $gradlew = Join-Path $androidDir "gradlew.bat"
+        $wrapperJar = Join-Path $androidDir "gradle\wrapper\gradle-wrapper.jar"
         
-        # 尝试使用系统 gradle
-        $gradle = Get-Command gradle -ErrorAction SilentlyContinue
-        if ($gradle) {
-            Write-Host "  Using system gradle: $($gradle.Path)" -ForegroundColor Gray
-            & gradle $gradleTask
+        if (-not (Test-Path $wrapperJar)) {
+            $gradle = Get-Command gradle -ErrorAction SilentlyContinue
+            if ($gradle) {
+                & gradle $gradleTask
+            } else {
+                Write-Host "  Error: Neither gradle wrapper nor system gradle found." -ForegroundColor Red
+                return $false
+            }
+        } else {
+            & $gradlew $gradleTask
         }
-        else {
-            Write-Host "  Error: Neither gradle wrapper nor system gradle found." -ForegroundColor Red
-            Write-Host "  Please install Gradle or open the project in Android Studio." -ForegroundColor Red
-            exit 1
-        }
+        
+        return ($LASTEXITCODE -eq 0)
     }
-    else {
-        & $gradlew $gradleTask
-    }
-
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "  Error: Gradle build failed" -ForegroundColor Red
-        exit 1
+    finally {
+        Pop-Location
     }
 }
-finally {
-    Pop-Location
+
+# 清理 jniLibs 目录
+function Clear-JniLibs {
+    if (Test-Path $jniLibsDir) {
+        Get-ChildItem -Path $jniLibsDir -Directory | ForEach-Object {
+            Remove-Item $_.FullName -Recurse -Force
+        }
+    }
 }
 
 # ============================================================================
-# 输出结果
+# 构建逻辑
 # ============================================================================
 
-Write-Host "`n[5/5] Build completed!" -ForegroundColor Green
+# 输出目录 (与 build_win7xp.ps1 保持一致)
+$distDir = Join-Path $PSScriptRoot "dist\android"
+if (-not (Test-Path $distDir)) {
+    New-Item -ItemType Directory -Path $distDir -Force | Out-Null
+}
 
-$apkDir = if ($Release) {
+# Gradle APK 输出目录
+$gradleApkDir = if ($Release) {
     Join-Path $androidDir "app\build\outputs\apk\release"
 } else {
     Join-Path $androidDir "app\build\outputs\apk\debug"
 }
+$apkBaseName = if ($Release) { "app-release" } else { "app-debug" }
 
-$apkFile = if ($Release) { "app-release.apk" } else { "app-debug.apk" }
-$apkPath = Join-Path $apkDir $apkFile
-
-if (Test-Path $apkPath) {
-    $fileInfo = Get-Item $apkPath
-    $sizeMB = [math]::Round($fileInfo.Length / 1MB, 2)
+if ($SeparateApks) {
+    # 模式: 为每个架构生成独立的 APK
+    Write-Host "`n[3/5] Building separate APKs for each architecture..." -ForegroundColor Yellow
     
+    $outputApks = @()
+    
+    foreach ($arch in $allArchitectures) {
+        Write-Host "`n  === Building $arch ===" -ForegroundColor Cyan
+        
+        if (-not $SkipRust) {
+            # 清理所有架构，只保留当前架构
+            Clear-JniLibs
+            
+            # 编译当前架构
+            if (-not (Build-RustArch $arch)) {
+                Write-Host "  Error: Failed to build $arch" -ForegroundColor Red
+                exit 1
+            }
+        }
+        
+        # 构建 APK
+        Write-Host "  Building APK for $arch..." -ForegroundColor Gray
+        if (-not (Build-Apk)) {
+            Write-Host "  Error: Gradle build failed for $arch" -ForegroundColor Red
+            exit 1
+        }
+        
+        # 立即复制 APK 到 dist 目录 (避免被后续构建覆盖)
+        $srcApk = Join-Path $gradleApkDir "$apkBaseName.apk"
+        $dstApk = Join-Path $distDir "$apkBaseName-$arch.apk"
+        if (Test-Path $srcApk) {
+            Copy-Item $srcApk $dstApk -Force
+            $outputApks += $dstApk
+            $sizeMB = [math]::Round((Get-Item $dstApk).Length / 1MB, 2)
+            Write-Host "  Created: $apkBaseName-$arch.apk ($sizeMB MB)" -ForegroundColor Green
+        }
+    }
+    
+    # 输出结果
+    Write-Host "`n[4/5] All builds completed!" -ForegroundColor Green
     Write-Host "`n========================================" -ForegroundColor Green
-    Write-Host "  APK built successfully!" -ForegroundColor Green
+    Write-Host "  Separate APKs built successfully!" -ForegroundColor Green
     Write-Host "========================================" -ForegroundColor Green
-    Write-Host "  Output: $apkPath"
-    Write-Host "  Size: $sizeMB MB"
     Write-Host ""
-    Write-Host "  To install on device:" -ForegroundColor Cyan
-    Write-Host "    adb install -r `"$apkPath`"" -ForegroundColor Gray
-}
-else {
-    Write-Host "  Warning: APK file not found at expected location" -ForegroundColor Yellow
-    Write-Host "  Check android/app/build/outputs/apk/ for APK files" -ForegroundColor Yellow
+    Write-Host "  Output directory: $distDir" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "  Output files:" -ForegroundColor Cyan
+    foreach ($apk in $outputApks) {
+        $sizeMB = [math]::Round((Get-Item $apk).Length / 1MB, 2)
+        Write-Host "    $(Split-Path $apk -Leaf) ($sizeMB MB)" -ForegroundColor Gray
+    }
+    Write-Host ""
+    Write-Host "  Install commands:" -ForegroundColor Cyan
+    Write-Host "    ARM64:  adb install -r `"$distDir\$apkBaseName-arm64-v8a.apk`"" -ForegroundColor Gray
+    Write-Host "    ARM32:  adb install -r `"$distDir\$apkBaseName-armeabi-v7a.apk`"" -ForegroundColor Gray
+    Write-Host "    x86_64: adb install -r `"$distDir\$apkBaseName-x86_64.apk`"" -ForegroundColor Gray
+    
+} else {
+    # 模式: 生成单个 APK (可能包含多个架构)
+    
+    if (-not $SkipRust) {
+        Write-Host "`n[3/5] Building Rust libraries with cargo-ndk..." -ForegroundColor Yellow
+
+        # 编译目标架构列表
+        $archList = @("arm64-v8a")
+        if ($AllArch) {
+            $archList = @("arm64-v8a", "armeabi-v7a", "x86_64")
+        }
+        
+        foreach ($arch in $archList) {
+            if (-not (Build-RustArch $arch)) {
+                exit 1
+            }
+        }
+
+        Write-Host "  Rust libraries built successfully!" -ForegroundColor Green
+
+        # 显示生成的文件
+        Write-Host "`n  Generated .so files:" -ForegroundColor Gray
+        Get-ChildItem -Path $jniLibsDir -Recurse -Filter "*.so" | ForEach-Object {
+            $size = [math]::Round($_.Length / 1KB, 0)
+            Write-Host "    $($_.FullName.Replace($jniLibsDir, '')) ($size KB)" -ForegroundColor Gray
+        }
+    }
+    else {
+        Write-Host "`n[3/5] Skipping Rust compilation (--SkipRust)" -ForegroundColor Yellow
+    }
+
+    # ============================================================================
+    # 构建 APK
+    # ============================================================================
+
+    Write-Host "`n[4/5] Building APK with Gradle..." -ForegroundColor Yellow
+
+    if (-not (Build-Apk)) {
+        Write-Host "  Error: Gradle build failed" -ForegroundColor Red
+        exit 1
+    }
+
+    # ============================================================================
+    # 复制到 dist 目录
+    # ============================================================================
+
+    Write-Host "`n[5/5] Build completed!" -ForegroundColor Green
+
+    $srcApk = Join-Path $gradleApkDir "$apkBaseName.apk"
+    
+    # 确定输出文件名
+    if ($AllArch) {
+        $dstApkName = "$apkBaseName-universal.apk"
+    } else {
+        $dstApkName = "$apkBaseName-arm64.apk"
+    }
+    $dstApk = Join-Path $distDir $dstApkName
+
+    if (Test-Path $srcApk) {
+        Copy-Item $srcApk $dstApk -Force
+        $sizeMB = [math]::Round((Get-Item $dstApk).Length / 1MB, 2)
+        
+        Write-Host "`n========================================" -ForegroundColor Green
+        Write-Host "  APK built successfully!" -ForegroundColor Green
+        Write-Host "========================================" -ForegroundColor Green
+        Write-Host "  Output: $dstApk"
+        Write-Host "  Size: $sizeMB MB"
+        Write-Host ""
+        Write-Host "  To install on device:" -ForegroundColor Cyan
+        Write-Host "    adb install -r `"$dstApk`"" -ForegroundColor Gray
+    }
+    else {
+        Write-Host "  Warning: APK file not found at expected location" -ForegroundColor Yellow
+        Write-Host "  Check android/app/build/outputs/apk/ for APK files" -ForegroundColor Yellow
+    }
 }

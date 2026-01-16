@@ -1,4 +1,4 @@
-﻿//! Intro 欢迎界面模块
+//! Intro 欢迎界面模块
 //! 严格对应 Pascal MARIO.PAS 中的 Intro 过程
 
 use crate::{
@@ -887,8 +887,8 @@ impl Intro {
         
         let _ = cur_player;
         match scan_code {
-            1 => {
-                // ESC
+            1 | 75 => {
+                // ESC 或 Left Arrow - 返回上一级菜单
                 if self.status == IntroStatus::Menu {
                     self.intro_done = true;
                     *quit_game = true;
@@ -900,7 +900,7 @@ impl Intro {
             72 | 200 => {
                 // Up Arrow
                 self.up();
-                // Pascal：如果Up触发了MacroKey=Esc，则相当于按Esc
+                // Pascal: 如果Up触发了MacroKey=Esc则相当于按Esc
                 if self.macro_key == '\x1B' {
                     self.status = self.last_status;
                 }
@@ -914,8 +914,8 @@ impl Intro {
                 }
                 self.macro_key = 'D';
             }
-            28 | 57 => {
-                // Enter or Space
+            28 | 56 | 57 => {
+                // Enter, Alt 或 Space - 菜单确认
                 match self.status {
                     IntroStatus::Menu => match self.selected {
                         1 => self.status = IntroStatus::Start,

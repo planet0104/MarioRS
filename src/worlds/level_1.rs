@@ -58,6 +58,7 @@
 use crate::buffers::{H, MapBuffer, W, WorldOptions};
 
 // 关卡日志（已禁用）
+#[allow(unused_macros)]
 macro_rules! level_dbg {
     ($($t:tt)*) => { };
 }

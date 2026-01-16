@@ -9,11 +9,14 @@ use super::{
     AudioBackend, DisplayBackend, InputBackend,
     KeyCode as PlatformKeyCode, KeyEvent as PlatformKeyEvent,
     LogBackend, LogLevel, RandomBackend, StorageBackend, TimeBackend,
+    touch_panel::{TouchAction, TouchPanelInput, ButtonLayout, LAYOUT_SAVE_KEY},
 };
 
 use std::collections::HashSet;
-use std::sync::Arc;
 use std::time::{Duration, Instant};
+
+// FPS 显示使用的字体数据
+use crate::txt::SWISS_FONT_GLYPHS;
 
 // ============================================================================
 // Android Activity 相关导入
@@ -29,403 +32,13 @@ use ndk::native_window::NativeWindow;
 // 常量定义
 // ============================================================================
 
-// 游戏分辨率 (与 desktop.rs 保持一致)
-const GAME_WIDTH: u32 = 320;
-const GAME_HEIGHT: u32 = 200;
+// 游戏分辨率 - 从 game_runner 导入，与其他平台保持一致
+// GAME_WIDTH = 320, GAME_HEIGHT = 182 (WINDOWHEIGHT，VGA framebuffer 已经是正确尺寸)
+use crate::game_runner::{GAME_WIDTH, GAME_HEIGHT};
 
 // ============================================================================
-// 虚拟按键渲染器 - 在 framebuffer 中绘制触摸控制UI
+// Android 输入后端
 // ============================================================================
-
-/// 虚拟按键状态
-#[derive(Default, Clone, Copy)]
-pub struct ButtonStates {
-    pub left: bool,
-    pub right: bool,
-    pub up: bool,
-    pub down: bool,
-    pub a: bool,      // 跳跃 (A键 - 绿色)
-    pub b: bool,      // 功能键 (B键 - 红色)
-    pub x: bool,      // 加速 (X键 - 蓝色)
-    pub y: bool,      // 功能键 (Y键 - 黄色)
-}
-
-/// 虚拟按键渲染器 - 在游戏画面上叠加半透明按键
-pub struct VirtualButtonsRenderer {
-    // D-Pad 位置 (基于游戏分辨率 320x200)
-    dpad_x: i32,
-    dpad_y: i32,
-    dpad_size: i32,
-    
-    // 右侧按键区域 - 经典手柄布局
-    // A键 (跳跃) - 右下角，最常用位置
-    button_a_x: i32,
-    button_a_y: i32,
-    button_a_radius: i32,
-    
-    // X键 (加速) - A键左侧
-    button_x_x: i32,
-    button_x_y: i32,
-    button_x_radius: i32,
-    
-    // B键 (功能) - A键上方
-    button_b_x: i32,
-    button_b_y: i32,
-    button_b_radius: i32,
-    
-    // Y键 (功能) - X键上方
-    button_y_x: i32,
-    button_y_y: i32,
-    button_y_radius: i32,
-}
-
-impl VirtualButtonsRenderer {
-    pub fn new() -> Self {
-        // 按键位置基于游戏原始分辨率 (320x200)
-        // 右侧按键区域中心位置
-        let right_center_x = 270;
-        let right_center_y = 155;
-        let button_spacing = 35;
-        let button_radius = 18;
-        
-        Self {
-            // D-Pad 在左下角
-            dpad_x: 20,
-            dpad_y: 130,
-            dpad_size: 60,
-            
-            // A键 - 右下角核心位置 (绿色)
-            button_a_x: right_center_x,
-            button_a_y: right_center_y,
-            button_a_radius: button_radius,
-            
-            // X键 - A键左侧 (蓝色)
-            button_x_x: right_center_x - button_spacing,
-            button_x_y: right_center_y,
-            button_x_radius: button_radius - 2,
-            
-            // B键 - A键上方 (红色)
-            button_b_x: right_center_x,
-            button_b_y: right_center_y - button_spacing,
-            button_b_radius: button_radius - 2,
-            
-            // Y键 - X键上方 (黄色)
-            button_y_x: right_center_x - button_spacing,
-            button_y_y: right_center_y - button_spacing,
-            button_y_radius: button_radius - 2,
-        }
-    }
-
-    /// 在 RGBA framebuffer 上绘制半透明虚拟按键
-    pub fn render_overlay(&self, framebuffer: &mut [u8], width: u32, _height: u32, states: &ButtonStates) {
-        // 绘制 D-Pad (十字方向键)
-        self.draw_dpad(framebuffer, width, states);
-        
-        // 绘制右侧按键 - 经典手柄配色
-        self.draw_button_y(framebuffer, width, states.y);  // Y键 - 黄色
-        self.draw_button_x(framebuffer, width, states.x);  // X键 - 蓝色
-        self.draw_button_b(framebuffer, width, states.b);  // B键 - 红色
-        self.draw_button_a(framebuffer, width, states.a);  // A键 - 绿色 (最后绘制，最突出)
-    }
-
-    fn draw_dpad(&self, fb: &mut [u8], width: u32, states: &ButtonStates) {
-        let alpha = 0.35;
-        // 浅灰色 (#CCCCCC) 作为键帽基础色
-        let color_normal: (u8, u8, u8) = (204, 204, 204);
-        // 深灰色 (#555555) 作为按下状态色
-        let color_pressed: (u8, u8, u8) = (85, 85, 85);
-        
-        let btn_w = 18;
-        let btn_h = 18;
-        let gap = 2;
-        
-        // 中心点
-        let cx = self.dpad_x + self.dpad_size / 2;
-        let cy = self.dpad_y + self.dpad_size / 2;
-        
-        // 上
-        self.draw_rect_alpha(fb, width,
-            cx - btn_w / 2, cy - btn_h - gap - btn_h / 2, btn_w, btn_h,
-            if states.up { color_pressed } else { color_normal },
-            alpha);
-        // 下
-        self.draw_rect_alpha(fb, width,
-            cx - btn_w / 2, cy + gap + btn_h / 2, btn_w, btn_h,
-            if states.down { color_pressed } else { color_normal },
-            alpha);
-        // 左
-        self.draw_rect_alpha(fb, width,
-            cx - btn_w - gap - btn_w / 2, cy - btn_h / 2, btn_w, btn_h,
-            if states.left { color_pressed } else { color_normal },
-            alpha);
-        // 右
-        self.draw_rect_alpha(fb, width,
-            cx + gap + btn_w / 2, cy - btn_h / 2, btn_w, btn_h,
-            if states.right { color_pressed } else { color_normal },
-            alpha);
-        
-        // 中心圆点 - 使用深灰色
-        self.draw_circle_alpha(fb, width, cx, cy, 6, (85, 85, 85), alpha * 0.8);
-    }
-
-    // A键 - 跳跃 (绿色 - 经典配色)
-    fn draw_button_a(&self, fb: &mut [u8], width: u32, pressed: bool) {
-        let color = if pressed { 
-            (80, 220, 80)   // 按下时更亮的绿色
-        } else { 
-            (60, 180, 60)   // 正常绿色
-        };
-        self.draw_circle_alpha(fb, width, self.button_a_x, self.button_a_y, 
-                              self.button_a_radius, color, 0.5);
-        
-        // 绘制 "A" 字母
-        let letter_color = if pressed { (255, 255, 255) } else { (220, 255, 220) };
-        self.draw_letter_a(fb, width, self.button_a_x - 4, self.button_a_y - 5, 
-                          letter_color, 0.9);
-    }
-
-    // B键 - 功能键 (红色 - 经典配色)
-    fn draw_button_b(&self, fb: &mut [u8], width: u32, pressed: bool) {
-        let color = if pressed { 
-            (240, 80, 80)   // 按下时更亮的红色
-        } else { 
-            (200, 50, 50)   // 正常红色
-        };
-        self.draw_circle_alpha(fb, width, self.button_b_x, self.button_b_y, 
-                              self.button_b_radius, color, 0.45);
-        
-        // 绘制 "B" 字母
-        let letter_color = if pressed { (255, 255, 255) } else { (255, 220, 220) };
-        self.draw_letter_b(fb, width, self.button_b_x - 4, self.button_b_y - 4, 
-                          letter_color, 0.9);
-    }
-
-    // X键 - 加速 (蓝色 - 经典配色)
-    fn draw_button_x(&self, fb: &mut [u8], width: u32, pressed: bool) {
-        let color = if pressed { 
-            (80, 160, 240)  // 按下时更亮的蓝色
-        } else { 
-            (60, 120, 200)  // 正常蓝色
-        };
-        self.draw_circle_alpha(fb, width, self.button_x_x, self.button_x_y, 
-                              self.button_x_radius, color, 0.45);
-        
-        // 绘制 "X" 字母
-        let letter_color = if pressed { (255, 255, 255) } else { (220, 240, 255) };
-        self.draw_letter_x(fb, width, self.button_x_x - 4, self.button_x_y - 4, 
-                          letter_color, 0.9);
-    }
-
-    // Y键 - 功能键 (黄色 - 经典配色)
-    fn draw_button_y(&self, fb: &mut [u8], width: u32, pressed: bool) {
-        let color = if pressed { 
-            (240, 220, 80)  // 按下时更亮的黄色
-        } else { 
-            (200, 180, 50)  // 正常黄色
-        };
-        self.draw_circle_alpha(fb, width, self.button_y_x, self.button_y_y, 
-                              self.button_y_radius, color, 0.45);
-        
-        // 绘制 "Y" 字母
-        let letter_color = if pressed { (255, 255, 255) } else { (255, 255, 220) };
-        self.draw_letter_y(fb, width, self.button_y_x - 4, self.button_y_y - 4, 
-                          letter_color, 0.9);
-    }
-
-    /// Alpha 混合绘制矩形
-    fn draw_rect_alpha(&self, fb: &mut [u8], width: u32,
-        x: i32, y: i32, w: i32, h: i32,
-        color: (u8, u8, u8), alpha: f32)
-    {
-        let height = GAME_HEIGHT as i32;
-        for dy in 0..h {
-            for dx in 0..w {
-                let px = x + dx;
-                let py = y + dy;
-                if px >= 0 && py >= 0 && px < width as i32 && py < height {
-                    let idx = ((py as u32 * width + px as u32) * 4) as usize;
-                    if idx + 3 < fb.len() {
-                        fb[idx]     = self.blend(color.0, fb[idx], alpha);
-                        fb[idx + 1] = self.blend(color.1, fb[idx + 1], alpha);
-                        fb[idx + 2] = self.blend(color.2, fb[idx + 2], alpha);
-                    }
-                }
-            }
-        }
-    }
-
-    /// Alpha 混合绘制圆形
-    fn draw_circle_alpha(&self, fb: &mut [u8], width: u32,
-        cx: i32, cy: i32, radius: i32,
-        color: (u8, u8, u8), alpha: f32)
-    {
-        let height = GAME_HEIGHT as i32;
-        let r2 = (radius * radius) as i32;
-        for dy in -radius..=radius {
-            for dx in -radius..=radius {
-                if dx * dx + dy * dy <= r2 {
-                    let px = cx + dx;
-                    let py = cy + dy;
-                    if px >= 0 && py >= 0 && px < width as i32 && py < height {
-                        let idx = ((py as u32 * width + px as u32) * 4) as usize;
-                        if idx + 3 < fb.len() {
-                            fb[idx]     = self.blend(color.0, fb[idx], alpha);
-                            fb[idx + 1] = self.blend(color.1, fb[idx + 1], alpha);
-                            fb[idx + 2] = self.blend(color.2, fb[idx + 2], alpha);
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    /// 绘制简单的 "A" 字母
-    fn draw_letter_a(&self, fb: &mut [u8], width: u32, x: i32, y: i32, color: (u8, u8, u8), alpha: f32) {
-        let pattern = [
-            "  ##  ",
-            " #  # ",
-            "#    #",
-            "#    #",
-            "######",
-            "#    #",
-            "#    #",
-            "#    #",
-        ];
-        self.draw_letter_pattern(fb, width, x, y, &pattern, color, alpha);
-    }
-
-    /// 绘制 "B" 字母
-    fn draw_letter_b(&self, fb: &mut [u8], width: u32, x: i32, y: i32, color: (u8, u8, u8), alpha: f32) {
-        let pattern = [
-            "##### ",
-            "#    #",
-            "#    #",
-            "##### ",
-            "#    #",
-            "#    #",
-            "##### ",
-        ];
-        self.draw_letter_pattern(fb, width, x, y, &pattern, color, alpha);
-    }
-
-    /// 绘制 "X" 字母
-    fn draw_letter_x(&self, fb: &mut [u8], width: u32, x: i32, y: i32, color: (u8, u8, u8), alpha: f32) {
-        let pattern = [
-            "#    #",
-            " #  # ",
-            "  ##  ",
-            "  ##  ",
-            " #  # ",
-            "#    #",
-            "#    #",
-        ];
-        self.draw_letter_pattern(fb, width, x, y, &pattern, color, alpha);
-    }
-
-    /// 绘制 "Y" 字母
-    fn draw_letter_y(&self, fb: &mut [u8], width: u32, x: i32, y: i32, color: (u8, u8, u8), alpha: f32) {
-        let pattern = [
-            "#    #",
-            " #  # ",
-            "  ##  ",
-            "  ##  ",
-            "  ##  ",
-            "  ##  ",
-            "  ##  ",
-        ];
-        self.draw_letter_pattern(fb, width, x, y, &pattern, color, alpha);
-    }
-
-    /// 通用字母绘制函数
-    fn draw_letter_pattern(&self, fb: &mut [u8], width: u32, x: i32, y: i32, 
-                          pattern: &[&str], color: (u8, u8, u8), alpha: f32) {
-        let height = GAME_HEIGHT as i32;
-        for (row, line) in pattern.iter().enumerate() {
-            for (col, ch) in line.chars().enumerate() {
-                if ch == '#' {
-                    let px = x + col as i32;
-                    let py = y + row as i32;
-                    if px >= 0 && py >= 0 && px < width as i32 && py < height {
-                        let idx = ((py as u32 * width + px as u32) * 4) as usize;
-                        if idx + 3 < fb.len() {
-                            fb[idx]     = self.blend(color.0, fb[idx], alpha);
-                            fb[idx + 1] = self.blend(color.1, fb[idx + 1], alpha);
-                            fb[idx + 2] = self.blend(color.2, fb[idx + 2], alpha);
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    #[inline]
-    fn blend(&self, src: u8, dst: u8, alpha: f32) -> u8 {
-        ((src as f32 * alpha) + (dst as f32 * (1.0 - alpha))) as u8
-    }
-
-    // ========================================================================
-    // 触摸区域检测
-    // ========================================================================
-
-    /// 获取 D-Pad 中心坐标 (游戏坐标系)
-    pub fn dpad_center(&self) -> (i32, i32) {
-        (self.dpad_x + self.dpad_size / 2, self.dpad_y + self.dpad_size / 2)
-    }
-
-    /// 获取 D-Pad 半径
-    pub fn dpad_radius(&self) -> i32 {
-        self.dpad_size / 2
-    }
-
-    /// 获取A键按钮中心和半径
-    pub fn button_a(&self) -> (i32, i32, i32) {
-        (self.button_a_x, self.button_a_y, self.button_a_radius)
-    }
-
-    /// 获取B键按钮中心和半径
-    pub fn button_b(&self) -> (i32, i32, i32) {
-        (self.button_b_x, self.button_b_y, self.button_b_radius)
-    }
-
-    /// 获取X键按钮中心和半径
-    pub fn button_x(&self) -> (i32, i32, i32) {
-        (self.button_x_x, self.button_x_y, self.button_x_radius)
-    }
-
-    /// 获取Y键按钮中心和半径
-    pub fn button_y(&self) -> (i32, i32, i32) {
-        (self.button_y_x, self.button_y_y, self.button_y_radius)
-    }
-}
-
-impl Default for VirtualButtonsRenderer {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-// ============================================================================
-// 触摸输入处理
-// ============================================================================
-
-/// 触摸点类型(分配到特定虚拟控件)
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum TouchControl {
-    DPad,
-    ButtonA,
-    ButtonB,
-    ButtonX,
-    ButtonY,
-}
-
-/// 触摸点状态 (带控制类型)
-#[derive(Clone, Copy)]
-struct TouchPoint {
-    x: f32,
-    y: f32,
-    active: bool,
-    control: Option<TouchControl>,
-}
 
 /// Android 输入后端 - 支持触摸和物理键盘
 pub struct AndroidInput {
@@ -433,14 +46,8 @@ pub struct AndroidInput {
     pending_events: Vec<PlatformKeyEvent>,
     should_close: bool,
     
-    // 触摸相关
-    touch_points: [Option<TouchPoint>; 10], // 最多支持10个触摸点
-    button_states: ButtonStates,
-    virtual_buttons: VirtualButtonsRenderer,
-    
-    // 屏幕尺寸 (用于坐标转换)
-    screen_width: f32,
-    screen_height: f32,
+    // 触摸面板 (使用公共模块)
+    touch_panel: TouchPanelInput,
     
     // 是否有物理键盘
     has_physical_keyboard: bool,
@@ -452,19 +59,14 @@ impl AndroidInput {
             key_states: HashSet::new(),
             pending_events: Vec::new(),
             should_close: false,
-            touch_points: [None; 10],
-            button_states: ButtonStates::default(),
-            virtual_buttons: VirtualButtonsRenderer::new(),
-            screen_width: 1920.0,
-            screen_height: 1080.0,
+            touch_panel: TouchPanelInput::new(),
             has_physical_keyboard: false,
         }
     }
 
     /// 更新屏幕尺寸
     pub fn set_screen_size(&mut self, width: f32, height: f32) {
-        self.screen_width = width;
-        self.screen_height = height;
+        self.touch_panel.set_screen_size(width, height);
     }
 
     /// 设置是否有物理键盘
@@ -472,14 +74,14 @@ impl AndroidInput {
         self.has_physical_keyboard = has;
     }
 
-    /// 获取虚拟按键渲染器
-    pub fn virtual_buttons_renderer(&self) -> &VirtualButtonsRenderer {
-        &self.virtual_buttons
+    /// 获取触摸面板引用 (用于渲染)
+    pub fn touch_panel(&self) -> &TouchPanelInput {
+        &self.touch_panel
     }
-
-    /// 获取当前按键状态
-    pub fn get_button_states(&self) -> ButtonStates {
-        self.button_states
+    
+    /// 获取触摸面板可变引用 (用于编辑布局)
+    pub fn touch_panel_mut(&mut self) -> &mut TouchPanelInput {
+        &mut self.touch_panel
     }
 
     /// 是否应该显示虚拟按键
@@ -487,113 +89,17 @@ impl AndroidInput {
         !self.has_physical_keyboard
     }
 
-    /// 处理触摸事件
+    /// 处理触摸事件 (将 Android MotionAction 转换为通用 TouchAction)
     pub fn handle_touch(&mut self, pointer_id: usize, x: f32, y: f32, action: MotionAction) {
-        if pointer_id >= self.touch_points.len() {
-            return;
-        }
-
-        // 屏幕坐标转换为游戏坐标
-        let game_x = self.screen_to_game_x(x);
-        let game_y = self.screen_to_game_y(y);
-
-        match action {
-            MotionAction::Down | MotionAction::PointerDown => {
-                // 确定这个触摸点对应哪个控件
-                let control = self.detect_touch_control(game_x, game_y);
-                
-                self.touch_points[pointer_id] = Some(TouchPoint {
-                    x: game_x,
-                    y: game_y,
-                    active: true,
-                    control,
-                });
-            }
-            MotionAction::Move => {
-                if let Some(ref mut point) = self.touch_points[pointer_id] {
-                    point.x = game_x;
-                    point.y = game_y;
-                }
-            }
-            MotionAction::Up | MotionAction::PointerUp | MotionAction::Cancel => {
-                self.touch_points[pointer_id] = None;
-            }
-            _ => {}
-        }
-
-        // 更新虚拟按键状态
-        self.update_button_states_from_touches();
-    }
-
-    /// 检测触摸点对应的控件
-    fn detect_touch_control(&self, x: f32, y: f32) -> Option<TouchControl> {
-        // 检测顺序:优先检测小按钮,避免被D-Pad大范围覆盖
+        let touch_action = match action {
+            MotionAction::Down | MotionAction::PointerDown => TouchAction::Down,
+            MotionAction::Move => TouchAction::Move,
+            MotionAction::Up | MotionAction::PointerUp => TouchAction::Up,
+            MotionAction::Cancel => TouchAction::Cancel,
+            _ => return, // 忽略其他动作
+        };
         
-        // 检测A键 (最重要,检测范围稍大)
-        let (ax, ay, ar) = self.virtual_buttons.button_a();
-        if self.is_in_circle(x, y, ax, ay, ar, 1.6) {
-            return Some(TouchControl::ButtonA);
-        }
-        
-        // 检测B键
-        let (bx, by, br) = self.virtual_buttons.button_b();
-        if self.is_in_circle(x, y, bx, by, br, 1.5) {
-            return Some(TouchControl::ButtonB);
-        }
-        
-        // 检测X键
-        let (xx, xy, xr) = self.virtual_buttons.button_x();
-        if self.is_in_circle(x, y, xx, xy, xr, 1.5) {
-            return Some(TouchControl::ButtonX);
-        }
-        
-        // 检测Y键
-        let (yx, yy, yr) = self.virtual_buttons.button_y();
-        if self.is_in_circle(x, y, yx, yy, yr, 1.5) {
-            return Some(TouchControl::ButtonY);
-        }
-        
-        // 最后检测D-Pad (范围最大)
-        let (dpad_cx, dpad_cy) = self.virtual_buttons.dpad_center();
-        let dpad_r = self.virtual_buttons.dpad_radius();
-        if self.is_in_circle(x, y, dpad_cx, dpad_cy, dpad_r, 1.8) {
-            return Some(TouchControl::DPad);
-        }
-        
-        None
-    }
-
-    /// 计算D-Pad方向状态 (支持多方向同时激活)
-    fn calculate_dpad_directions(&self, x: f32, y: f32) -> (bool, bool, bool, bool) {
-        let (dpad_cx, dpad_cy) = self.virtual_buttons.dpad_center();
-        let dpad_r = self.virtual_buttons.dpad_radius() as f32;
-        
-        let mut left = false;
-        let mut right = false;
-        let mut up = false;
-        let mut down = false;
-        
-        // 检查是否在D-Pad范围内
-        let dx = x - dpad_cx as f32;
-        let dy = y - dpad_cy as f32;
-        let dist = (dx * dx + dy * dy).sqrt();
-        
-        if dist < dpad_r * 1.8 {
-            let threshold = dpad_r * 0.3;
-            if dx < -threshold { left = true; }
-            if dx > threshold { right = true; }
-            if dy < -threshold { up = true; }
-            if dy > threshold { down = true; }
-        }
-        
-        (left, right, up, down)
-    }
-
-    /// 检测点是否在圆形区域内
-    fn is_in_circle(&self, x: f32, y: f32, cx: i32, cy: i32, radius: i32, scale: f32) -> bool {
-        let dx = x - cx as f32;
-        let dy = y - cy as f32;
-        (dx * dx + dy * dy).sqrt() < (radius as f32 * scale)
+        self.touch_panel.handle_touch(pointer_id, x, y, touch_action);
     }
 
     /// 处理物理按键事件
@@ -612,134 +118,6 @@ impl AndroidInput {
             pressed,
         });
     }
-
-    /// 屏幕X坐标转游戏坐标
-    fn screen_to_game_x(&self, screen_x: f32) -> f32 {
-        let game_w = GAME_WIDTH as f32;
-        let game_h = GAME_HEIGHT as f32;
-        let scale = (self.screen_width / game_w).min(self.screen_height / game_h);
-        let offset_x = (self.screen_width - game_w * scale) / 2.0;
-        (screen_x - offset_x) / scale
-    }
-
-    /// 屏幕Y坐标转游戏坐标
-    fn screen_to_game_y(&self, screen_y: f32) -> f32 {
-        let game_w = GAME_WIDTH as f32;
-        let game_h = GAME_HEIGHT as f32;
-        let scale = (self.screen_width / game_w).min(self.screen_height / game_h);
-        let offset_y = (self.screen_height - game_h * scale) / 2.0;
-        (screen_y - offset_y) / scale
-    }
-
-    /// 根据所有触摸点更新按键状态
-    fn update_button_states_from_touches(&mut self) {
-        // 复制旧状态作为基础，保留物理键盘的状态
-        let mut new_states = self.button_states;
-        
-        // 重置所有由触摸控制的状态（物理键盘状态会在后续重新应用）
-        // 但我们不能直接重置，因为需要区分触摸和物理键盘的控制
-        // 改为：计算触摸应该产生的状态，然后合并到当前状态
-        
-        let mut touch_dpad_left = false;
-        let mut touch_dpad_right = false;
-        let mut touch_dpad_up = false;
-        let mut touch_dpad_down = false;
-        let mut touch_a = false;
-        let mut touch_b = false;
-        let mut touch_x = false;
-        let mut touch_y = false;
-        
-        // 收集所有触摸点的状态
-        for point in self.touch_points.iter().flatten() {
-            if let Some(control) = point.control {
-                match control {
-                    TouchControl::DPad => {
-                        // 合并所有D-Pad触摸点的方向状态
-                        let (left, right, up, down) = self.calculate_dpad_directions(point.x, point.y);
-                        touch_dpad_left = touch_dpad_left || left;
-                        touch_dpad_right = touch_dpad_right || right;
-                        touch_dpad_up = touch_dpad_up || up;
-                        touch_dpad_down = touch_dpad_down || down;
-                    }
-                    TouchControl::ButtonA => {
-                        touch_a = true;
-                    }
-                    TouchControl::ButtonB => {
-                        touch_b = true;
-                    }
-                    TouchControl::ButtonX => {
-                        touch_x = true;
-                    }
-                    TouchControl::ButtonY => {
-                        touch_y = true;
-                    }
-                }
-            }
-        }
-        
-        // 应用触摸状态到new_states（覆盖物理键盘的对应状态）
-        new_states.left = touch_dpad_left;
-        new_states.right = touch_dpad_right;
-        new_states.up = touch_dpad_up;
-        new_states.down = touch_dpad_down;
-        new_states.a = touch_a;
-        new_states.b = touch_b;
-        new_states.x = touch_x;
-        new_states.y = touch_y;
-
-        // 生成按键事件
-        self.generate_key_events_from_states(&new_states);
-        self.button_states = new_states;
-    }
-
-    /// 根据按键状态变化生成按键事件
-    fn generate_key_events_from_states(&mut self, new_states: &ButtonStates) {
-        // 复制旧状态避免借用冲突
-        let old = self.button_states;
-        
-        // D-Pad 方向键
-        if new_states.left != old.left {
-            self.update_key_state(PlatformKeyCode::Left, new_states.left);
-        }
-        if new_states.right != old.right {
-            self.update_key_state(PlatformKeyCode::Right, new_states.right);
-        }
-        if new_states.up != old.up {
-            self.update_key_state(PlatformKeyCode::Up, new_states.up);
-        }
-        if new_states.down != old.down {
-            self.update_key_state(PlatformKeyCode::Down, new_states.down);
-        }
-        
-        // A键 - 跳跃 (映射到 AltLeft)
-        if new_states.a != old.a {
-            self.update_key_state(PlatformKeyCode::AltLeft, new_states.a);
-        }
-        
-        // B键 - 功能键 (映射到 ShiftLeft)
-        if new_states.b != old.b {
-            self.update_key_state(PlatformKeyCode::ShiftLeft, new_states.b);
-        }
-        
-        // X键 - 加速/冲刺 (映射到 ControlLeft)
-        if new_states.x != old.x {
-            self.update_key_state(PlatformKeyCode::ControlLeft, new_states.x);
-        }
-        
-        // Y键 - 功能键 (映射到 Space)
-        if new_states.y != old.y {
-            self.update_key_state(PlatformKeyCode::Space, new_states.y);
-        }
-    }
-
-    fn update_key_state(&mut self, key: PlatformKeyCode, pressed: bool) {
-        if pressed {
-            self.key_states.insert(key);
-        } else {
-            self.key_states.remove(&key);
-        }
-        self.pending_events.push(PlatformKeyEvent { key, pressed });
-    }
 }
 
 impl Default for AndroidInput {
@@ -750,7 +128,10 @@ impl Default for AndroidInput {
 
 impl InputBackend for AndroidInput {
     fn poll_events(&mut self) -> Vec<PlatformKeyEvent> {
-        std::mem::take(&mut self.pending_events)
+        // 合并物理键盘事件和触摸面板事件
+        let mut events = std::mem::take(&mut self.pending_events);
+        events.extend(self.touch_panel.take_pending_events());
+        events
     }
 
     fn is_key_pressed(&self, key: PlatformKeyCode) -> bool {
@@ -826,15 +207,41 @@ fn android_keycode_to_platform(keycode: Keycode) -> PlatformKeyCode {
     }
 }
 
+/// 检查是否是游戏控制键 (用于判断是否有物理键盘)
+fn is_game_control_key(keycode: Keycode) -> bool {
+    matches!(keycode,
+        // 方向键
+        Keycode::DpadLeft | Keycode::DpadRight | Keycode::DpadUp | Keycode::DpadDown |
+        // WASD
+        Keycode::W | Keycode::A | Keycode::S | Keycode::D |
+        // 动作键
+        Keycode::Space | Keycode::Enter | Keycode::ShiftLeft | Keycode::ShiftRight |
+        Keycode::CtrlLeft | Keycode::CtrlRight | Keycode::AltLeft | Keycode::AltRight
+    )
+}
+
 // ============================================================================
 // 显示后端 - 使用软件渲染 + ANativeWindow
 // ============================================================================
+
+/// 渲染参数（用于 touch_panel 绘制）
+#[derive(Clone, Copy, Default)]
+pub struct RenderParams {
+    pub screen_width: u32,
+    pub screen_height: u32,
+    pub game_offset_x: u32,
+    pub game_offset_y: u32,
+    pub game_scaled_w: u32,
+    pub game_scaled_h: u32,
+    pub scale: f32,
+}
 
 pub struct AndroidDisplay {
     width: u32,
     height: u32,
     framebuffer: Vec<u8>,
     native_window: Option<NativeWindow>,
+    render_params: RenderParams,
 }
 
 impl AndroidDisplay {
@@ -845,7 +252,13 @@ impl AndroidDisplay {
             height,
             framebuffer: vec![0u8; buffer_size],
             native_window: None,
+            render_params: RenderParams::default(),
         }
+    }
+    
+    /// 获取渲染参数（用于 touch_panel 坐标转换）
+    pub fn render_params(&self) -> RenderParams {
+        self.render_params
     }
 
     pub fn set_native_window(&mut self, window: Option<NativeWindow>) {
@@ -853,23 +266,23 @@ impl AndroidDisplay {
         if let Some(ref w) = window {
             let win_width = w.width();
             let win_height = w.height();
-            log_info(&format!(
-                "set_native_window: window size={}x{}, game size={}x{}",
-                win_width, win_height, self.width, self.height
-            ));
+            log_info("=== set_native_window ===");
+            log_info(&format!("[Window] NativeWindow.width()={}, NativeWindow.height()={}", win_width, win_height));
+            log_info(&format!("[Window] Window aspect ratio: {:.4}", win_width as f32 / win_height as f32));
+            log_info(&format!("[Window] Game size: {}x{}", self.width, self.height));
 
             use ndk_sys::ANativeWindow_setBuffersGeometry;
-            // WINDOW_FORMAT_RGBA_8888 = 1
             const WINDOW_FORMAT_RGBA_8888: i32 = 1;
             unsafe {
+                // 使用 0,0 让系统自动选择 buffer 尺寸 (与窗口尺寸相同)
                 let result = ANativeWindow_setBuffersGeometry(
                     w.ptr().as_ptr(),
-                    0, 0, // 使用默认宽高
+                    0, 0,  // 0,0 表示使用窗口原始尺寸
                     WINDOW_FORMAT_RGBA_8888,
                 );
                 log_info(&format!(
-                    "ANativeWindow_setBuffersGeometry result={}, format={}",
-                    result, WINDOW_FORMAT_RGBA_8888
+                    "[Window] ANativeWindow_setBuffersGeometry(0, 0, RGBA8888) result={}",
+                    result
                 ));
             }
         } else {
@@ -879,41 +292,40 @@ impl AndroidDisplay {
     }
 
     /// 渲染 framebuffer 到 ANativeWindow
-    fn render_to_window(&self, window: &NativeWindow) -> Result<(), String> {
+    fn render_to_window(&mut self, window: &NativeWindow) -> Result<(), String> {
         use ndk_sys::{ANativeWindow_Buffer, ANativeWindow_lock, ANativeWindow_unlockAndPost};
         use std::ptr;
 
         let native_window_ptr = window.ptr().as_ptr();
 
         unsafe {
-            // 准备 buffer 结构
             let mut buffer: ANativeWindow_Buffer = std::mem::zeroed();
-
-            // 锁定窗口 buffer
             let lock_result = ANativeWindow_lock(native_window_ptr, &mut buffer, ptr::null_mut());
             if lock_result != 0 {
                 log_error(&format!("ANativeWindow_lock failed: {}", lock_result));
                 return Err(format!("ANativeWindow_lock failed: {}", lock_result));
             }
 
-            // 记录 buffer 信息 (只在第一帧记录,避免日志过多)
+            // 记录 buffer 信息 (只在第一帧记录)
             static LOGGED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
             if !LOGGED.load(std::sync::atomic::Ordering::Relaxed) {
                 LOGGED.store(true, std::sync::atomic::Ordering::Relaxed);
+                log_info("=== First frame render info ===");
                 log_info(&format!(
-                    "ANativeWindow_Buffer: width={}, height={}, stride={}, format={}, bits={:?}",
-                    buffer.width, buffer.height, buffer.stride, buffer.format, buffer.bits
+                    "[Buffer] ANativeWindow_Buffer: width={}, height={}, stride={}, format={}",
+                    buffer.width, buffer.height, buffer.stride, buffer.format
                 ));
                 log_info(&format!(
-                    "Game framebuffer: width={}, height={}, len={}",
+                    "[Buffer] Buffer aspect ratio: {:.3}",
+                    buffer.width as f32 / buffer.height as f32
+                ));
+                log_info(&format!(
+                    "[Game] Game framebuffer: width={}, height={}, len={}",
                     self.width, self.height, self.framebuffer.len()
                 ));
             }
 
-            // 渲染到 buffer
             self.copy_framebuffer_to_window(&buffer);
-
-            // 解锁并提交
             ANativeWindow_unlockAndPost(native_window_ptr);
         }
 
@@ -921,8 +333,7 @@ impl AndroidDisplay {
     }
 
     /// 将游戏 framebuffer 缩放复制到窗口 buffer
-    unsafe fn copy_framebuffer_to_window(&self, buffer: &ndk_sys::ANativeWindow_Buffer) {
-        // 检查 buffer 是否有效
+    unsafe fn copy_framebuffer_to_window(&mut self, buffer: &ndk_sys::ANativeWindow_Buffer) {
         if buffer.bits.is_null() {
             log_error("copy_framebuffer: buffer.bits is null");
             return;
@@ -935,8 +346,8 @@ impl AndroidDisplay {
             return;
         }
 
-        // 检查格式 - 只支持 RGBA_8888 (format = 1)
-        if buffer.format != 1 {
+        // 支持 RGBA_8888 (format = 1) 和 RGBX_8888 (format = 2)
+        if buffer.format != 1 && buffer.format != 2 {
             log_warn(&format!("Unsupported buffer format: {}", buffer.format));
             return;
         }
@@ -947,46 +358,60 @@ impl AndroidDisplay {
         let dst_height = buffer.height as usize;
         let src = &self.framebuffer;
 
-        // 计算缩放比例 (保持宽高比) - 使用 buffer 尺寸
-        let scale_x = dst_width as f32 / self.width as f32;
-        let scale_y = dst_height as f32 / self.height as f32;
+        // 游戏 framebuffer 尺寸 (已经是正确的 320x182)
+        let src_width = self.width as usize;
+        let src_height = self.height as usize;
+        
+        // 计算缩放比例 (保持宽高比，居中显示)
+        let scale_x = dst_width as f32 / src_width as f32;
+        let scale_y = dst_height as f32 / src_height as f32;
         let scale = scale_x.min(scale_y);
-
-        // 计算居中偏移
-        let scaled_w = (self.width as f32 * scale) as usize;
-        let scaled_h = (self.height as f32 * scale) as usize;
+        let scaled_w = (src_width as f32 * scale) as usize;
+        let scaled_h = (src_height as f32 * scale) as usize;
+        // 水平居中，垂直居中
         let offset_x = dst_width.saturating_sub(scaled_w) / 2;
         let offset_y = dst_height.saturating_sub(scaled_h) / 2;
 
-        // 只记录一次渲染参数
+        // 更新渲染参数（用于 touch_panel 坐标转换）
+        self.render_params = RenderParams {
+            screen_width: dst_width as u32,
+            screen_height: dst_height as u32,
+            game_offset_x: offset_x as u32,
+            game_offset_y: offset_y as u32,
+            game_scaled_w: scaled_w as u32,
+            game_scaled_h: scaled_h as u32,
+            scale,
+        };
+
+        // 记录渲染参数 (只记录一次)
         static LOGGED_RENDER: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
         if !LOGGED_RENDER.load(std::sync::atomic::Ordering::Relaxed) {
             LOGGED_RENDER.store(true, std::sync::atomic::Ordering::Relaxed);
-            log_info(&format!(
-                "Render params: dst={}x{}, stride={}, scale={:.2}, scaled={}x{}, offset=({},{})",
-                dst_width, dst_height, dst_stride, scale, scaled_w, scaled_h, offset_x, offset_y
-            ));
-            log_info(&format!(
-                "Buffer memory: dst_ptr={:?}, max_offset={}",
-                dst_ptr, (dst_height - 1) * dst_stride + (dst_width - 1)
+            log_info("=== Render calculation details ===");
+            log_info(&format!("[Render] Source (game framebuffer): {}x{}", src_width, src_height));
+            log_info(&format!("[Render] Destination (window buffer): {}x{}", dst_width, dst_height));
+            log_info(&format!("[Render] Scale factors: x={:.4}, y={:.4}", scale_x, scale_y));
+            log_info(&format!("[Render] Chosen scale (min): {:.4}", scale));
+            log_info(&format!("[Render] Scaled game size: {}x{}", scaled_w, scaled_h));
+            log_info(&format!("[Render] Offset (centering): x={}, y={}", offset_x, offset_y));
+            log_info(&format!("[Render] Margins: left={}, right={}, top={}, bottom={}",
+                offset_x, dst_width.saturating_sub(scaled_w + offset_x),
+                offset_y, dst_height.saturating_sub(scaled_h + offset_y)
             ));
         }
 
-        // 快速清空整个 buffer 为黑色 (使用行复制优化)
-        // 0xFF000000 = 不透明黑色 (ABGR)
+        // 清空整个 buffer 为黑色
         let black: u32 = 0xFF000000;
         for y in 0..dst_height {
-            let row_start = dst_ptr.add(y * dst_stride);
-            std::ptr::write_bytes(row_start, 0, dst_width);
-            // 设置 alpha 通道
+            // SAFETY: dst_ptr 在函数开始已验证非空，y * dst_stride 在 buffer 范围内
+            let row_start = unsafe { dst_ptr.add(y * dst_stride) };
             for x in 0..dst_width {
-                *row_start.add(x) = black;
+                // SAFETY: x 在 dst_width 范围内，row_start + x 在 buffer 范围内
+                unsafe { *row_start.add(x) = black; }
             }
         }
 
-        // 预计算缩放参数 (使用定点数避免浮点运算)
-        let src_width = self.width as usize;
-        let src_height = self.height as usize;
+        // 预计算缩放参数 (使用定点数)
         let scale_inv_x = (src_width << 16) / scaled_w.max(1);
         let scale_inv_y = (src_height << 16) / scaled_h.max(1);
 
@@ -994,20 +419,22 @@ impl AndroidDisplay {
         for dst_y in 0..scaled_h {
             let src_y = ((dst_y * scale_inv_y) >> 16).min(src_height - 1);
             let src_row_offset = src_y * src_width * 4;
-            let dst_row_ptr = dst_ptr.add((offset_y + dst_y) * dst_stride + offset_x);
+            // SAFETY: offset_y + dst_y 在 dst_height 范围内，指针计算在 buffer 范围内
+            let dst_row_ptr = unsafe { dst_ptr.add((offset_y + dst_y) * dst_stride + offset_x) };
 
             for dst_x in 0..scaled_w {
                 let src_x = ((dst_x * scale_inv_x) >> 16).min(src_width - 1);
                 let src_idx = src_row_offset + src_x * 4;
 
                 // RGBA -> ABGR (Android native window 格式)
-                let r = *src.get_unchecked(src_idx) as u32;
-                let g = *src.get_unchecked(src_idx + 1) as u32;
-                let b = *src.get_unchecked(src_idx + 2) as u32;
+                // SAFETY: src_idx 基于 min() 限制在源数据范围内
+                let r = unsafe { *src.get_unchecked(src_idx) as u32 };
+                let g = unsafe { *src.get_unchecked(src_idx + 1) as u32 };
+                let b = unsafe { *src.get_unchecked(src_idx + 2) as u32 };
                 let pixel = 0xFF000000 | (b << 16) | (g << 8) | r;
 
-                // 直接写入预计算的行位置
-                *dst_row_ptr.add(dst_x) = pixel;
+                // SAFETY: dst_x 在 scaled_w 范围内，dst_row_ptr + dst_x 在 buffer 范围内
+                unsafe { *dst_row_ptr.add(dst_x) = pixel; }
             }
         }
     }
@@ -1027,17 +454,213 @@ impl DisplayBackend for AndroidDisplay {
     }
 
     fn present(&mut self) -> Result<(), String> {
-        let window = match &self.native_window {
-            Some(w) => w,
-            None => return Ok(()), // 没有窗口时跳过
-        };
-
-        // 使用 unsafe 调用 ANativeWindow API
-        self.render_to_window(window)
+        self.present_with_overlay(None, &[], None)
     }
 
     fn request_redraw(&self) {
-        // Android 使用连续渲染模式,不需要显式请求重绘
+        // Android 使用连续渲染模式
+    }
+}
+
+impl AndroidDisplay {
+    /// 渲染游戏画面并混合触摸面板 overlay (优化版: 只混合指定的边界框区域)
+    /// fps_info: 可选的 (fps, frame_time_ms) 用于显示帧率信息
+    pub fn present_with_overlay(
+        &mut self, 
+        overlay: Option<&[u8]>,
+        blend_rects: &[(u32, u32, u32, u32)],
+        fps_info: Option<(u32, f32)>
+    ) -> Result<(), String> {
+        let window = match &self.native_window {
+            Some(w) => w.clone(),
+            None => return Ok(()),
+        };
+        self.render_to_window_with_overlay(&window, overlay, blend_rects, fps_info)
+    }
+    
+    /// 渲染到窗口并混合 overlay (优化版: 只混合指定的边界框区域)
+    fn render_to_window_with_overlay(
+        &mut self, 
+        window: &NativeWindow, 
+        overlay: Option<&[u8]>,
+        blend_rects: &[(u32, u32, u32, u32)],
+        fps_info: Option<(u32, f32)>
+    ) -> Result<(), String> {
+        use ndk_sys::{ANativeWindow_Buffer, ANativeWindow_lock, ANativeWindow_unlockAndPost};
+        use std::ptr;
+
+        let native_window_ptr = window.ptr().as_ptr();
+
+        unsafe {
+            let mut buffer: ANativeWindow_Buffer = std::mem::zeroed();
+            let lock_result = ANativeWindow_lock(native_window_ptr, &mut buffer, ptr::null_mut());
+            if lock_result != 0 {
+                return Err(format!("ANativeWindow_lock failed: {}", lock_result));
+            }
+
+            self.copy_framebuffer_to_window(&buffer);
+            
+            // 混合 overlay (touch_panel) - 只混合按钮区域
+            if let Some(overlay_data) = overlay {
+                self.blend_overlay_rects_to_window(&buffer, overlay_data, blend_rects);
+            }
+            
+            // 绘制 FPS 信息
+            if let Some((fps, frame_time_ms)) = fps_info {
+                self.draw_fps_to_window(&buffer, fps, frame_time_ms);
+            }
+            
+            ANativeWindow_unlockAndPost(native_window_ptr);
+        }
+
+        Ok(())
+    }
+    
+    /// 将 RGBA overlay 混合到窗口 buffer (优化版: 只混合指定的边界框区域)
+    unsafe fn blend_overlay_rects_to_window(
+        &self, 
+        buffer: &ndk_sys::ANativeWindow_Buffer, 
+        overlay: &[u8],
+        rects: &[(u32, u32, u32, u32)]  // (x, y, width, height)
+    ) {
+        let dst_ptr = buffer.bits as *mut u32;
+        let dst_stride = buffer.stride as usize;
+        let dst_width = buffer.width as u32;
+        let dst_height = buffer.height as u32;
+        let overlay_stride = dst_width as usize * 4;
+        
+        for &(rect_x, rect_y, rect_w, rect_h) in rects {
+            // 边界检查
+            let x_end = (rect_x + rect_w).min(dst_width) as usize;
+            let y_end = (rect_y + rect_h).min(dst_height) as usize;
+            let x_start = rect_x as usize;
+            let y_start = rect_y as usize;
+            
+            for y in y_start..y_end {
+                for x in x_start..x_end {
+                    let src_idx = y * overlay_stride + x * 4;
+                    if src_idx + 3 >= overlay.len() { continue; }
+                    
+                    let src_a = overlay[src_idx + 3];
+                    if src_a == 0 { continue; }  // 完全透明，跳过
+                    
+                    let dst_idx = y * dst_stride + x;
+                    // SAFETY: dst_idx 在 buffer 范围内
+                    let dst_pixel = unsafe { *dst_ptr.add(dst_idx) };
+                    
+                    let pixel = if src_a == 255 {
+                        // 完全不透明，直接覆盖
+                        let r = overlay[src_idx] as u32;
+                        let g = overlay[src_idx + 1] as u32;
+                        let b = overlay[src_idx + 2] as u32;
+                        0xFF000000 | (b << 16) | (g << 8) | r
+                    } else {
+                        // 半透明混合
+                        let alpha = src_a as u32;
+                        let inv_alpha = 255 - alpha;
+                        
+                        let src_r = overlay[src_idx] as u32;
+                        let src_g = overlay[src_idx + 1] as u32;
+                        let src_b = overlay[src_idx + 2] as u32;
+                        
+                        let dst_r = dst_pixel & 0xFF;
+                        let dst_g = (dst_pixel >> 8) & 0xFF;
+                        let dst_b = (dst_pixel >> 16) & 0xFF;
+                        
+                        let out_r = (src_r * alpha + dst_r * inv_alpha) / 255;
+                        let out_g = (src_g * alpha + dst_g * inv_alpha) / 255;
+                        let out_b = (src_b * alpha + dst_b * inv_alpha) / 255;
+                        
+                        0xFF000000 | (out_b << 16) | (out_g << 8) | out_r
+                    };
+                    
+                    // SAFETY: dst_idx 在 buffer 范围内
+                    unsafe { *dst_ptr.add(dst_idx) = pixel; }
+                }
+            }
+        }
+    }
+    
+    /// 绘制 FPS 信息到窗口 buffer
+    /// fps: 当前帧率, frame_time_ms: 每帧渲染时间(毫秒)
+    unsafe fn draw_fps_to_window(&self, buffer: &ndk_sys::ANativeWindow_Buffer, fps: u32, frame_time_ms: f32) {
+        // 格式化 FPS 文本: "FPS:XX  MS:XX.X"
+        let fps_str = format!("FPS:{} MS:{:.1}", fps, frame_time_ms);
+        
+        let dst_ptr = buffer.bits as *mut u32;
+        let dst_stride = buffer.stride as usize;
+        let dst_width = buffer.width as usize;
+        let dst_height = buffer.height as usize;
+        
+        // 起始位置 (左上角，留一点边距)
+        let mut x_pos = 10usize;
+        let y_pos = 10usize;
+        let scale = 1u32;  // 字体缩放 (1x = 原始大小)
+        
+        // 绘制颜色: 白色文字，黑色描边
+        let text_color = 0xFFFFFFFFu32;  // 白色 ARGB
+        let shadow_color = 0xFF000000u32;  // 黑色 ARGB
+        
+        for ch in fps_str.chars() {
+            // 获取字符对应的字形索引 (SWISS_FONT 从 ASCII 32 开始)
+            let ch_code = ch as usize;
+            if ch_code < 32 || ch_code > 129 {
+                x_pos += 8;  // 跳过不支持的字符
+                continue;
+            }
+            let glyph_idx = ch_code - 32;
+            if glyph_idx >= SWISS_FONT_GLYPHS.len() {
+                x_pos += 8;
+                continue;
+            }
+            
+            let glyph = &SWISS_FONT_GLYPHS[glyph_idx];
+            let glyph_w = glyph.width() as usize;
+            let glyph_h = glyph.height() as usize;
+            let bitmap = glyph.bitmap();
+            
+            // 绘制字形 (先绘制阴影再绘制文字)
+            for pass in 0..2 {
+                let (offset_x, offset_y, color) = if pass == 0 {
+                    (1usize, 1usize, shadow_color)  // 阴影偏移
+                } else {
+                    (0usize, 0usize, text_color)
+                };
+                
+                for row in 0..glyph_h {
+                    for col in 0..glyph_w {
+                        // 计算 bitmap 中的位索引
+                        let bit_index = row * glyph_w + col;
+                        let byte_index = bit_index / 8;
+                        let bit_offset = bit_index % 8;
+                        
+                        if byte_index >= bitmap.len() { continue; }
+                        
+                        let byte = bitmap[byte_index];
+                        let bit = (byte >> bit_offset) & 1;
+                        
+                        if bit == 1 {
+                            // 计算屏幕位置 (考虑缩放)
+                            for sy in 0..scale as usize {
+                                for sx in 0..scale as usize {
+                                    let px = x_pos + col * scale as usize + sx + offset_x;
+                                    let py = y_pos + row * scale as usize + sy + offset_y;
+                                    
+                                    if px < dst_width && py < dst_height {
+                                        let dst_idx = py * dst_stride + px;
+                                        // SAFETY: 边界已检查
+                                        unsafe { *dst_ptr.add(dst_idx) = color; }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // 移动到下一个字符位置
+            x_pos += glyph_w * scale as usize + 2;
+        }
     }
 }
 
@@ -1132,8 +755,7 @@ pub struct AndroidStorage {
 }
 
 impl AndroidStorage {
-    /// 创建存储后端 (无参数版本,用于 config.rs 等模块)
-    /// 使用当前目录作为基础路径
+    /// 创建存储后端 (无参数版本)
     pub fn new() -> Self {
         Self {
             base_path: PathBuf::from("."),
@@ -1155,6 +777,12 @@ impl AndroidStorage {
     }
 }
 
+impl Default for AndroidStorage {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl StorageBackend for AndroidStorage {
     fn load(&self, key: &str) -> Option<Vec<u8>> {
         let path = self.get_path(key);
@@ -1166,7 +794,6 @@ impl StorageBackend for AndroidStorage {
 
     fn save(&mut self, key: &str, data: &[u8]) -> Result<(), String> {
         let path = self.get_path(key);
-        // 确保父目录存在
         if let Some(parent) = path.parent() {
             let _ = fs::create_dir_all(parent);
         }
@@ -1185,8 +812,23 @@ impl StorageBackend for AndroidStorage {
 }
 
 // ============================================================================
-// 日志后端 - 使用 android_logger
+// 日志后端 - 使用 NDK 原生日志 API
 // ============================================================================
+
+/// 直接调用 Android NDK 日志 API (确保日志输出)
+fn android_log_write(priority: i32, message: &str) {
+    use std::ffi::CString;
+    
+    // 日志 tag
+    let tag = CString::new("MarioRS").unwrap_or_else(|_| CString::new("Mario").unwrap());
+    // 处理消息中的 null 字符
+    let msg = CString::new(message.replace('\0', "")).unwrap_or_else(|_| CString::new("(invalid message)").unwrap());
+    
+    unsafe {
+        // Android log priorities: VERBOSE=2, DEBUG=3, INFO=4, WARN=5, ERROR=6
+        ndk_sys::__android_log_write(priority, tag.as_ptr(), msg.as_ptr());
+    }
+}
 
 pub struct AndroidLog;
 
@@ -1196,12 +838,14 @@ impl AndroidLog {
     }
 
     pub fn init() {
-        // 初始化 Android 日志系统
+        // 初始化 android_logger (用于 log crate 宏)
         android_logger::init_once(
             android_logger::Config::default()
                 .with_max_level(log::LevelFilter::Debug)
                 .with_tag("MarioRS"),
         );
+        // 使用原生 API 输出初始化消息
+        android_log_write(4, "AndroidLog initialized (native API)");
     }
 }
 
@@ -1213,12 +857,14 @@ impl Default for AndroidLog {
 
 impl LogBackend for AndroidLog {
     fn log(&self, level: LogLevel, message: &str) {
-        match level {
-            LogLevel::Debug => log::debug!("{}", message),
-            LogLevel::Info => log::info!("{}", message),
-            LogLevel::Warn => log::warn!("{}", message),
-            LogLevel::Error => log::error!("{}", message),
-        }
+        // 使用原生 NDK API 直接输出 (更可靠)
+        let priority = match level {
+            LogLevel::Debug => 3,  // ANDROID_LOG_DEBUG
+            LogLevel::Info => 4,   // ANDROID_LOG_INFO
+            LogLevel::Warn => 5,   // ANDROID_LOG_WARN
+            LogLevel::Error => 6,  // ANDROID_LOG_ERROR
+        };
+        android_log_write(priority, message);
     }
 }
 
@@ -1308,30 +954,66 @@ pub fn android_main(app: AndroidApp) {
     // 创建游戏组件
     let mut display = AndroidDisplay::new(GAME_WIDTH, GAME_HEIGHT);
     let mut input = AndroidInput::new();
-    let _storage = AndroidStorage::with_app(&app);
+    let mut storage = AndroidStorage::with_app(&app);
     let mut game_state: Option<GameState> = None;
+    
+    // 加载保存的触摸面板布局
+    if let Some(data) = storage.load(LAYOUT_SAVE_KEY) {
+        if let Some(layout) = ButtonLayout::from_bytes(&data) {
+            input.touch_panel_mut().apply_layout(&layout);
+            log_info("Touch panel layout loaded");
+        }
+    }
     
     // 帧率控制
     let frame_duration = Duration::from_secs_f64(1.0 / 60.0);
     let mut next_frame = Instant::now();
     let mut running = true;
+    
+    // FPS 统计
+    let mut fps_frame_count = 0u32;
+    let mut fps_last_update = Instant::now();
+    let mut fps_display = 0u32;           // 显示的 FPS (每秒更新)
+    let mut frame_time_display = 0.0f32;  // 显示的帧渲染时间 (每秒更新)
+    let mut frame_time_accumulator = 0.0f32; // 帧时间累加器
+    let mut frame_start = Instant::now(); // 帧开始时间
 
     // Android 事件循环
     while running {
-        app.poll_events(Some(Duration::from_millis(16)), |event| {
+        // 使用非阻塞事件轮询 (timeout=0)，避免等待事件浪费帧时间
+        app.poll_events(Some(Duration::ZERO), |event| {
             match event {
                 PollEvent::Main(main_event) => {
                     match main_event {
                         MainEvent::InitWindow { .. } => {
-                            // 窗口初始化
-                            log_info("Native window initialized");
+                            log_info("=== Native window initialized ===");
                             if let Some(window) = app.native_window() {
-                                let width = window.width() as f32;
-                                let height = window.height() as f32;
-                                input.set_screen_size(width, height);
+                                let win_width = window.width();
+                                let win_height = window.height();
+                                
+                                // 打印详细的窗口信息
+                                log_info(&format!("[Screen] NativeWindow size: {}x{}", win_width, win_height));
+                                log_info(&format!("[Screen] NativeWindow aspect ratio: {:.3}", win_width as f32 / win_height as f32));
+                                log_info(&format!("[Game] Game framebuffer size: {}x{}", GAME_WIDTH, GAME_HEIGHT));
+                                log_info(&format!("[Game] Game aspect ratio: {:.3}", GAME_WIDTH as f32 / GAME_HEIGHT as f32));
+                                
+                                // 预计算缩放参数
+                                let scale_x = win_width as f32 / GAME_WIDTH as f32;
+                                let scale_y = win_height as f32 / GAME_HEIGHT as f32;
+                                let scale = scale_x.min(scale_y);
+                                let scaled_w = (GAME_WIDTH as f32 * scale) as i32;
+                                let scaled_h = (GAME_HEIGHT as f32 * scale) as i32;
+                                let offset_x = (win_width - scaled_w) / 2;
+                                let offset_y = (win_height - scaled_h) / 2;
+                                
+                                log_info(&format!("[Scale] scale_x={:.3}, scale_y={:.3}, chosen_scale={:.3}", scale_x, scale_y, scale));
+                                log_info(&format!("[Scale] scaled game size: {}x{}", scaled_w, scaled_h));
+                                log_info(&format!("[Scale] offset: ({}, {})", offset_x, offset_y));
+                                log_info(&format!("[Scale] margins: top={}, bottom={}", offset_y, win_height - scaled_h - offset_y));
+                                
+                                input.set_screen_size(win_width as f32, win_height as f32);
                                 display.set_native_window(Some(window));
                                 
-                                // 初始化游戏状态
                                 if game_state.is_none() {
                                     game_state = Some(GameState::new());
                                     log_info("Game state initialized");
@@ -1341,6 +1023,15 @@ pub fn android_main(app: AndroidApp) {
                         MainEvent::TerminateWindow { .. } => {
                             log_info("Native window terminated");
                             display.set_native_window(None);
+                        }
+                        MainEvent::WindowResized { .. } | MainEvent::ContentRectChanged { .. } => {
+                            // 窗口尺寸或内容区域变化时更新 touch_panel
+                            if let Some(window) = app.native_window() {
+                                let width = window.width() as f32;
+                                let height = window.height() as f32;
+                                log_info(&format!("Window resized: {}x{}", width, height));
+                                input.set_screen_size(width, height);
+                            }
                         }
                         MainEvent::Destroy => {
                             log_info("App destroy requested");
@@ -1361,18 +1052,48 @@ pub fn android_main(app: AndroidApp) {
                 let read_event = iter.next(|event| {
                     match event {
                         InputEvent::KeyEvent(key_event) => {
-                            input.handle_key(key_event.key_code(), key_event.action());
-                            input.set_has_physical_keyboard(true);
+                            let keycode = key_event.key_code();
+                            input.handle_key(keycode, key_event.action());
+                            // 只有游戏控制键才视为物理键盘 (忽略音量键等系统按键)
+                            if is_game_control_key(keycode) {
+                                input.set_has_physical_keyboard(true);
+                            }
                         }
                         InputEvent::MotionEvent(motion_event) => {
+                            let action = motion_event.action();
                             let pointer_count = motion_event.pointer_count();
+                            
+                            // 获取 PointerDown/PointerUp 事件对应的 pointer index
+                            // 只有该 index 的 pointer 使用原始 action，其他使用 Move
+                            let action_pointer_index = match action {
+                                MotionAction::PointerDown | MotionAction::PointerUp => {
+                                    Some(motion_event.pointer_index())
+                                }
+                                _ => None,
+                            };
+                            
                             for i in 0..pointer_count {
                                 let pointer = motion_event.pointer_at_index(i);
+                                
+                                // 确定此 pointer 应该使用的 action
+                                let pointer_action = if let Some(action_idx) = action_pointer_index {
+                                    if i == action_idx {
+                                        // 这个 pointer 是事件的主体
+                                        action
+                                    } else {
+                                        // 其他 pointer 视为 Move（位置更新）
+                                        MotionAction::Move
+                                    }
+                                } else {
+                                    // Down/Up/Move/Cancel 等事件应用到所有 pointer
+                                    action
+                                };
+                                
                                 input.handle_touch(
                                     pointer.pointer_id() as usize,
                                     pointer.x(),
                                     pointer.y(),
-                                    motion_event.action(),
+                                    pointer_action,
                                 );
                             }
                         }
@@ -1386,15 +1107,22 @@ pub fn android_main(app: AndroidApp) {
             }
         }
 
-        // 帧率限制
+        // 帧率限制 (使用 sleep 而非忙等待，节省 CPU)
         let now = Instant::now();
         if now < next_frame {
+            let sleep_time = next_frame - now;
+            if sleep_time > Duration::from_millis(1) {
+                std::thread::sleep(sleep_time - Duration::from_millis(1));
+            }
             continue;
         }
         next_frame = now + frame_duration;
 
         // 游戏帧更新
         if let Some(state) = &mut game_state {
+            // 记录帧开始时间
+            frame_start = Instant::now();
+            
             // 处理键盘事件
             for event in input.poll_events() {
                 state.handle_key_event(&event);
@@ -1403,22 +1131,47 @@ pub fn android_main(app: AndroidApp) {
             // 更新游戏逻辑
             let result = state.frame_update();
 
-            // 渲染
+            // 渲染游戏画面
             let display_frame = display.framebuffer_mut();
             state.render_to_rgba(display_frame);
-
-            // 叠加虚拟按键 (如果需要显示)
-            if input.should_show_virtual_buttons() {
-                input.virtual_buttons_renderer().render_overlay(
-                    display_frame,
-                    GAME_WIDTH,
-                    GAME_HEIGHT,
-                    &input.get_button_states(),
-                );
+            
+            // 渲染触摸面板 overlay 并提交显示 (边界框优化)
+            {
+                let (overlay, blend_rects) = if input.should_show_virtual_buttons() {
+                    let button_states = input.touch_panel().button_states();
+                    let rects = input.touch_panel().renderer().get_blend_rects();
+                    let overlay_data = input.touch_panel_mut().renderer_mut().render(&button_states);
+                    (overlay_data, rects)
+                } else {
+                    (None, Vec::new())
+                };
+                let fps_info = Some((fps_display, frame_time_display));
+                let _ = display.present_with_overlay(overlay, &blend_rects, fps_info);
             }
-
-            // 提交显示
-            let _ = display.present();
+            
+            // 累加帧渲染时间
+            let current_frame_time = frame_start.elapsed().as_secs_f32() * 1000.0;
+            frame_time_accumulator += current_frame_time;
+            
+            // 更新 FPS 和帧时间统计 (每秒更新一次，显示平均值)
+            fps_frame_count += 1;
+            let fps_elapsed = fps_last_update.elapsed();
+            if fps_elapsed >= Duration::from_secs(1) {
+                fps_display = (fps_frame_count as f32 / fps_elapsed.as_secs_f32()) as u32;
+                frame_time_display = frame_time_accumulator / fps_frame_count as f32;
+                fps_frame_count = 0;
+                frame_time_accumulator = 0.0;
+                fps_last_update = Instant::now();
+            }
+            
+            // 检查并保存触摸面板布局（在 overlay 借用结束后）
+            if input.touch_panel_mut().take_layout_changed() {
+                let layout = input.touch_panel().get_layout();
+                let data = layout.to_bytes();
+                if storage.save(LAYOUT_SAVE_KEY, &data).is_ok() {
+                    log_info("Touch panel layout saved");
+                }
+            }
 
             if result == FrameResult::Exit {
                 state.shutdown();
@@ -1431,7 +1184,6 @@ pub fn android_main(app: AndroidApp) {
 }
 
 /// 游戏运行入口 (与其他平台保持一致的接口)
-/// Android 平台不使用此函数,而是通过 lib.rs 中的 android_main 入口
 pub fn run_game() -> Result<(), Box<dyn std::error::Error>> {
     Err("Android platform should use android_main entry point".into())
 }
