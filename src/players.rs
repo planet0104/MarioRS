@@ -380,8 +380,9 @@ impl Players {
         
         // 计算调色板偏移（变身/无敌星闪烁效果）
         let palette_offset = if enemies.star || self.growing {
-            (((self.grow_counter + self.star_counter) & 1) << 4) as i32
-                - ((self.grow_counter + self.star_counter) & 0xF < 8) as i32
+            // 对齐 Oldsrc: color = (((GrowCounter + StarCounter) and 1) shl 4) - Ord(((...) and $0F) < 8)
+            let t = self.grow_counter + self.star_counter;
+            (((t & 1) << 4) as i32) - (((t & 0xF) < 8) as i32)
         } else {
             0
         };
@@ -394,9 +395,11 @@ impl Players {
         }
         
         // 添加精灵到GPU渲染队列
-        vga.draw_sprite_flipped_world_gpu(self.x, self.y, uv, flip_x, false);
+        // 对齐 Oldsrc: star/growing 时只画 recolor 版本，不能叠加画两次
         if palette_offset != 0 {
             vga.draw_sprite_recolored_world_gpu(self.x, self.y, uv, palette_offset);
+        } else {
+            vga.draw_sprite_flipped_world_gpu(self.x, self.y, uv, flip_x, false);
         }
         
         self.old_x = self.x;
@@ -469,30 +472,107 @@ impl Players {
         buffers: &Buffers,
         atlas: &crate::sprites::SpriteAtlas,
         palette_index: u32,
+        star_active: bool,
     ) -> Vec<SpriteCommand> {
         let mut commands = Vec::new();
-        
+
+        // Demo 模式必须在这里渲染（GPU 每帧全量重绘，不能像 CPU 那样依赖旧帧保留）
+        if buffers.demo != DM_NO_DEMO {
+            let sprite_id = self.get_player_sprite_id_enum(buffers);
+            let uv = atlas.get(sprite_id);
+
+            // GPU 渲染统一使用屏幕坐标
+            let sx = self.x - buffers.x_view;
+            let sy = self.y - buffers.y_view;
+
+            // 精灵资源默认是朝左的，朝右时需要水平翻转
+            let flip_x = self.direction == DIR_RIGHT;
+
+            let push_partial = |list: &mut Vec<SpriteCommand>,
+                                x: i32,
+                                y: i32,
+                                base_uv: SpriteUV,
+                                visible_height: f32| {
+                let full_h = base_uv.height as f32;
+                if visible_height <= 0.0 {
+                    return;
+                }
+                if visible_height >= full_h {
+                    list.push(
+                        SpriteCommand::new(x, y, base_uv)
+                            .with_flip(flip_x, false)
+                            .with_palette(0, palette_index),
+                    );
+                    return;
+                }
+
+                // 对齐 Oldsrc DrawPart：显示从顶部开始的 visible_height 像素
+                let clip_ratio = visible_height / full_h;
+                let clipped_h = (base_uv.height as f32 * clip_ratio) as u32;
+                if clipped_h == 0 {
+                    return;
+                }
+                let mut uv2 = base_uv;
+                uv2.height = clipped_h;
+                list.push(
+                    SpriteCommand::new(x, y, uv2)
+                        .with_flip(flip_x, false)
+                        .with_palette(0, palette_index),
+                );
+            };
+
+            match buffers.demo {
+                DM_DOWN_INTO_PIPE | DM_UP_OUT_OF_PIPE => {
+                    // 进入管道动画：玩家逐渐消失
+                    let draw_height = (2 * H - self.demo_y - 1) as f32;
+                    push_partial(&mut commands, sx, sy + self.demo_y, uv, draw_height.min(uv.height as f32));
+                }
+                DM_UP_INTO_PIPE | DM_DOWN_OUT_OF_PIPE => {
+                    // 从管道出来动画：玩家逐渐出现
+                    let visible_height = (2 * H + self.demo_y) as f32;
+                    push_partial(
+                        &mut commands,
+                        sx,
+                        sy + self.demo_y,
+                        uv,
+                        visible_height.min(uv.height as f32),
+                    );
+                }
+                DM_DEAD => {
+                    // 死亡动画（下落）
+                    commands.push(
+                        SpriteCommand::new(sx, sy, uv)
+                            .with_flip(flip_x, false)
+                            .with_palette(0, palette_index),
+                    );
+                }
+                _ => {}
+            }
+
+            return commands;
+        }
+
         // 闪烁时隔帧不渲染
         if self.blinking && (self.blink_counter % 2 != 0) {
             return commands;
         }
         
-        // Demo模式检�?
-        if buffers.demo != DM_NO_DEMO {
-            return commands; // Demo模式由其他方法处�?
-        }
-        
         let sprite_id = self.get_player_sprite_id_enum(buffers);
         let uv = atlas.get(sprite_id);
-        let flip_x = self.direction == 0; // DIR_LEFT = 0
+        // 精灵资源默认是朝左的，朝右时需要水平翻转
+        let flip_x = self.direction == DIR_RIGHT;
         
-        let mut cmd = SpriteCommand::new(self.x, self.y, uv)
+        // GPU渲染统一使用屏幕坐标
+        let sx = self.x - buffers.x_view;
+        let sy = self.y - buffers.y_view;
+        let mut cmd = SpriteCommand::new(sx, sy, uv)
             .with_flip(flip_x, false)
             .with_palette(0, palette_index);
         
         // 变身/无敌星闪烁效�?
-        if self.growing || self.star_counter > 0 {
-            let color_offset = (((self.grow_counter + self.star_counter) & 1) << 4) as i32;
+        if self.growing || star_active {
+            let t = self.grow_counter + self.star_counter;
+            let color_offset = (((t & 1) << 4) as i32) - (((t & 0xF) < 8) as i32);
             cmd = cmd.with_palette(color_offset, palette_index);
         }
         
@@ -637,19 +717,12 @@ impl Players {
             }
             DM_DOWN_OUT_OF_PIPE => {
                 self.demo_y = -2 * H;
-                // 关键修复：对于向下管道，Mario应该从管道底部开�?
-                // (MapY-1)*H 给出的是管道tile的顶部Y坐标
-                // 管道底部应该�?MapY*H
-                // 
-                // Pascal原始计算：Inc (Y, H - 7 * Byte (Data.Mode [Player] in [mdSmall]) - 2);
-                // 小Mario: offset = 14 - 7 - 2 = 5
-                // 大Mario: offset = 14 - 0 - 2 = 12
-                //
-                // 但这会导致Mario偏离管道底部�?
-                // 
-                // 正确的做法：调整Y到管道底�?= (MapY-1)*H + H = MapY*H
-                // 即：Y += H，而不�?Y += (H - 7*small - 2)
-                self.y += H; // 将Y从管道顶部调整到管道底部
+                // 对齐 Oldsrc:
+                // Pascal: Inc (Y, H - 7 * Byte (Data.Mode [Player] in [mdSmall]) - 2);
+                // 小Mario: offset = H - 7 - 2 = 5
+                // 大Mario: offset = H - 0 - 2 = 12
+                let small = if mode == MD_SMALL { 1 } else { 0 };
+                self.y += H - 7 * small - 2;
             }
             DM_DEAD => {
                 self.y_vel = -3;

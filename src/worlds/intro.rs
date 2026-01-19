@@ -258,7 +258,7 @@ impl Intro {
         glitters: &mut GlitterSystem,
         tmpobj: &mut TmpObjManager,
         sprites: &mut SpriteDataManager,
-        atlas: &crate::sprites::SpriteAtlas,
+        atlas: &mut crate::sprites::SpriteAtlas,
         keyboard: &mut Keyboard,
         _joystick: &mut crate::joystick::JoystickState,
         play: &mut Play,
@@ -380,6 +380,9 @@ impl Intro {
                 }
                 
                 figures.build_world(&mut buffers.world_map, &current_opt, sprites);
+                // 关键：BuildWorld 会重着色/转换草地等，会修改 sprites 内容
+                // GPU 图集必须同步更新，否则 Intro 地面/草/砖块颜色与 Oldsrc 不一致
+                *atlas = sprites.build_atlas();
                 
                 // 设置天空调色板和草地调色板
                 {
@@ -410,7 +413,7 @@ impl Intro {
                         backgr,
                         figures,
                         sprites,
-                        atlas,
+                        atlas: &*atlas,
                         blocks,
                         enemies,
                         players,
@@ -434,7 +437,8 @@ impl Intro {
             
             IntroPhase::InitBackground => {
                 intro_dbg!("[INTRO] 初始化背景");
-                backgr.init_backgr(3, 0);
+                // 对齐 Oldsrc/Pascal：Intro 背景使用 Options_0.BackGrType，不应在这里强行改成 3
+                backgr.init_backgr(self.intro_opt.backgr_type, self.intro_opt.clouds);
                 self.phase = IntroPhase::SetPalette;
                 IntroResult::Continue
             }
@@ -442,9 +446,12 @@ impl Intro {
             IntroPhase::SetPalette => {
                 intro_dbg!("[INTRO] 设置Intro调色板到source_palette");
                 // 直接修改 source_palette，不修改 palette（保持全黑）
-                vga.palette.source_palette[0xA0] = [35, 45, 50];
-                vga.palette.source_palette[0xA1] = [45, 55, 60];
-                vga.palette.source_palette[0xEF] = [30, 40, 30];
+                // 严格对齐 Oldsrc：只改 0xA0/0xA1 等少量索引，不覆盖 0xE0..0xEF 的天空渐变
+                // 颜色对齐 Oldsrc 实机观感：
+                // - 云：#E3E4F8 约等于 6bit [56,56,61]
+                // - 山：#86B1C2 约等于 6bit [33,44,48]
+                vga.palette.source_palette[0xA0] = [56, 56, 61];
+                vga.palette.source_palette[0xA1] = [33, 44, 48];
                 vga.palette.source_palette[0x18] = [10, 15, 25];
                 vga.palette.source_palette[0x8D] = [28, 38, 50];
                 vga.palette.source_palette[0x8F] = [40, 50, 63];
@@ -477,7 +484,21 @@ impl Intro {
                 for _i in 0..=MAX_PAGE {
                     intro_dbg!("[INTRO] drawing page {}", i);
                     self.draw_intro_screen(
-                        vga, txt, sprites, atlas, buffers, players, figures, backgr, &intro_opt,
+                        vga,
+                        txt,
+                        buffers,
+                        players,
+                        enemies,
+                        backgr,
+                        figures,
+                        stars,
+                        blocks,
+                        status_mgr,
+                        glitters,
+                        tmpobj,
+                        sprites,
+                        atlas,
+                        &intro_opt,
                     );
                     vga.show_page();
                 }
@@ -551,7 +572,23 @@ impl Intro {
                 
                 // 渲染菜单
                 let intro_opt = self.intro_opt.clone();
-                self.render_menu_frame(vga, txt, buffers, &intro_opt);
+                self.render_menu_frame(
+                    vga,
+                    txt,
+                    buffers,
+                    players,
+                    enemies,
+                    backgr,
+                    figures,
+                    stars,
+                    blocks,
+                    status_mgr,
+                    glitters,
+                    tmpobj,
+                    sprites,
+                    atlas,
+                    &intro_opt,
+                );
                 
                 self.counter += 1;
                 
@@ -744,74 +781,57 @@ impl Intro {
     fn draw_intro_screen(
         &mut self,
         vga: &mut VGA,
-        _txt: &mut Txt,
-        sprites: &mut SpriteDataManager,
-        atlas: &crate::sprites::SpriteAtlas,
+        txt: &mut Txt,
         buffers: &mut Buffers,
         players: &mut Players,
-        figures: &Figures,
+        enemies: &mut Enemies,
         backgr: &mut BackGr,
-        options: &WorldOptions,
+        figures: &mut Figures,
+        stars: &mut Stars,
+        blocks: &mut Blocks,
+        status_mgr: &mut Status,
+        glitters: &mut GlitterSystem,
+        tmpobj: &mut TmpObjManager,
+        sprites: &mut SpriteDataManager,
+        atlas: &crate::sprites::SpriteAtlas,
+        _options: &WorldOptions,
     ) {
-        intro_dbg!("[INTRO] draw_intro_screen 开始");
-        // 注意：不要清空屏幕。底图由PlayWorld(#0,#0,Intro_0...)绘制完成。
-
-        // Pascal 顺序：先叠加 INTRO 标题，再绘制装饰块，再画边框砖块，最后画玩家。
-        // 这里严格按原版顺序，避免覆盖关系差异导致像素不一致。
-
-        // 1) 绘制三个INTRO图像（带阴影效果）
-        intro_dbg!("[INTRO] 准备绘制INTRO图像");
-
-        // Pascal: for i := 1 downto 0 do for j := 1 downto 0 do for k := 1 downto 0 do
-        // 这会绘制8次（2x2x2），创建阴影效果
-        for i in (0..=1).rev() {
-            for j in (0..=1).rev() {
-                for k in (0..=1).rev() {
-                    // 第一个INTRO（108×28）
-                    vga.draw_sprite(38 + i + j, 29 + i + k, &sprites.INTRO_000);
-                    // 第二个INTRO（24×28）
-                    vga.draw_sprite(159 + i + j, 29 + i + k, &sprites.INTRO_001);
-                    // 第三个INTRO（84×28）
-                    vga.draw_sprite(198 + i + j, 29 + i + k, &sprites.INTRO_002);
-                }
-            }
+        // GPU模式：严格走 GPU 命令收集与提交（vga 的旧 CPU API 在 GPU 版是空实现）
+        {
+            let mut ctx = crate::renderer::RenderContext {
+                vga,
+                buffers,
+                backgr,
+                figures,
+                sprites,
+                atlas,
+                blocks,
+                enemies,
+                players,
+                tmpobj,
+                stars,
+                glitters,
+                status: status_mgr,
+                txt,
+            };
+            let mut renderer = crate::renderer::Renderer::new();
+            renderer.only_draw = true;
+            renderer.show_status = false;
+            renderer.show_objects = true;
+            renderer.render_game_frame(&mut ctx);
         }
-        intro_dbg!("[INTRO] INTRO图像绘制完成");
 
-        // 2) DrawBackGrMap - 绘制背景装饰块
-        intro_dbg!("[INTRO] 绘制背景装饰块");
-        backgr.draw_backgr_map(10 * H + 6, 11 * H - 1, 54, 0xA0, vga);
-        backgr.draw_backgr_map(10 * H + 6, 11 * H - 1, 55, 0xA1, vga);
-        backgr.draw_backgr_map(10 * H + 6, 11 * H - 1, 53, 0xA1, vga);
-
-        // 3) 绘制边框砖块：必须使用与 Pascal include 文件一致的 BLOCK_000
-        // 不能用全局 get_sprite("BLOCK_000")（硬编码数组可能与 Pascal 不一致）
-        let mut border_count = 0;
-        for i in 0..NH {
-            for j in 0..NV {
-                if i == 0 || i == NH - 1 || j == 0 || j == NV - 1 {
-                    vga.draw_image_imagebuffer_world(i * W, j * H, &sprites.BLOCK_000);
-                    border_count += 1;
-                }
-            }
+        // 叠加 INTRO 标题/边框（对齐 Oldsrc DrawIntroScreen）
+        let palette_index: u32 = 0;
+        let sprite_cmds = self.collect_intro_sprites_gpu(atlas, palette_index);
+        let batch = vga.get_sprite_batch_mut();
+        for s in sprite_cmds {
+            batch.push_sprite(s);
         }
-        intro_dbg!("[INTRO] 边框绘制完成，绘制了 {} 个方块", border_count);
-
-        // 4) DrawPlayer
-        intro_dbg!("[INTRO] 绘制玩家");
-        players.draw_player(
-            buffers,
-            vga,
-            sprites,
-            figures,
-            options,
-            backgr,
-            &mut crate::enemies::Enemies::new(sprites),
-            atlas,
-        );
-
-        // 注意：不在这里调用present()，等fade_up之后再调用
-        intro_dbg!("[INTRO] draw_intro_screen 完成");
+        // Oldsrc 最后 DrawPlayer，GPU 这里再绘制一次以保证层级一致
+        for p in players.collect_player_sprites_gpu(buffers, atlas, palette_index, enemies.star) {
+            batch.push_sprite(p);
+        }
     }
 
     fn update_menu_content(
@@ -1066,9 +1086,61 @@ impl Intro {
         &mut self,
         vga: &mut VGA,
         txt: &mut Txt,
-        _buffers: &Buffers,
+        buffers: &mut Buffers,
+        players: &mut Players,
+        enemies: &mut Enemies,
+        backgr: &mut BackGr,
+        figures: &mut Figures,
+        stars: &mut Stars,
+        blocks: &mut Blocks,
+        status_mgr: &mut Status,
+        glitters: &mut GlitterSystem,
+        tmpobj: &mut TmpObjManager,
+        sprites: &mut SpriteDataManager,
+        atlas: &crate::sprites::SpriteAtlas,
         options: &WorldOptions,
     ) {
+        // GPU模式下每帧完全重绘，避免批次累积导致内存和性能问题
+        // 先绘制底图（天空、地形、玩家等），再叠加 INTRO 标题和菜单文字
+        {
+            let mut ctx = crate::renderer::RenderContext {
+                vga,
+                buffers,
+                backgr,
+                figures,
+                sprites,
+                atlas,
+                blocks,
+                enemies,
+                players,
+                tmpobj,
+                stars,
+                glitters,
+                status: status_mgr,
+                txt,
+            };
+            let mut renderer = crate::renderer::Renderer::new();
+            renderer.only_draw = true;
+            renderer.show_status = false;
+            renderer.show_objects = true;
+            renderer.render_game_frame(&mut ctx);
+        }
+
+        // 叠加INTRO标题和边框
+        {
+            let palette_index: u32 = 0;
+            let sprite_cmds = self.collect_intro_sprites_gpu(atlas, palette_index);
+            let batch = vga.get_sprite_batch_mut();
+            for s in sprite_cmds {
+                batch.push_sprite(s);
+            }
+
+            // Oldsrc 最后 DrawPlayer，GPU 这里再绘制一次以保证层级一致
+            for p in players.collect_player_sprites_gpu(buffers, atlas, palette_index, enemies.star) {
+                batch.push_sprite(p);
+            }
+        }
+
         // 高频渲染不输出日志，避免刷屏
         // 计算菜单宽度和位置
         let mut wd = 0;
@@ -1082,14 +1154,7 @@ impl Intro {
                 }
             }
         }
-        let ht = 8;
-
-        // 弹出旧背景
-        for k in 0..5 {
-            if self.bg[self.page][k] != 0 {
-                vga.pop_backgr_address(self.bg[self.page][k] as i32);
-            }
-        }
+        let _ht = 8;
 
         // 绘制菜单项
         for k in 0..5 {
@@ -1097,8 +1162,6 @@ impl Intro {
                 let i = xp;
                 // Pascal: j := 56 + 14 * k;  (k从1..5)
                 let j = 56 + 14 * (k as i32 + 1);
-                self.bg[self.page][k] = vga.push_backgr_address(50, j, 220, ht) as u16;
-
                 // 高频渲染不输出日志，避免刷屏
                 if (k + 1) as i32 == self.selected {
                     // 红色(用于选择指示符)
@@ -1122,7 +1185,6 @@ impl Intro {
         vga.palette_blink_wrapper(options);
         vga.reset_stack();
 
-        // 关键：实际渲染到窗口
-        vga.present();
+        // 实际渲染到窗口由平台层（wgpu backend）负责
     }
 }

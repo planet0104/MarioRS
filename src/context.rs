@@ -47,7 +47,7 @@ pub struct GameContext<'a> {
     
     // 资源
     pub sprites: &'a mut SpriteDataManager,
-    pub atlas: &'a SpriteAtlas,
+    pub atlas: &'a mut SpriteAtlas,
     pub music: &'a mut MusicPlayer,
     
     // 输入
@@ -75,7 +75,7 @@ impl<'a> GameContext<'a> {
         tmpobj: &'a mut TmpObjManager,
         status: &'a mut Status,
         sprites: &'a mut SpriteDataManager,
-        atlas: &'a SpriteAtlas,
+        atlas: &'a mut SpriteAtlas,
         music: &'a mut MusicPlayer,
         keyboard: &'a mut Keyboard,
         joystick: &'a mut JoystickState,

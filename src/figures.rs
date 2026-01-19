@@ -3,7 +3,7 @@
 // GPU渲染支持：添加了收集渲染指令的方法
 
 use crate::backgr::BackGr;
-use crate::buffers::{Buffers, CAN_HOLD_YOU, EX, EY1, ImageBuffer, NV, WorldBuffer, WorldOptions};
+use crate::buffers::{Buffers, EX, EY1, ImageBuffer, NV, WorldBuffer, WorldOptions};
 use crate::palettes::Palettes;
 use crate::sprites::SpriteDataManager;
 use crate::vga256::VGA;
@@ -111,8 +111,8 @@ impl Figures {
     ) {
         // [RECOLOR_DEBUG] 添加调试日志查看重着色过程
         let mut changed_count = 0;
-        let mut sample_before = 0u8;
-        let mut sample_after = 0u8;
+        let mut _sample_before = 0u8;
+        let mut _sample_after = 0u8;
         
         match dst {
             Some(dst_buf) => {
@@ -123,8 +123,8 @@ impl Figures {
                         dst_buf[y][x] = new_val;
                         if val != new_val {
                             if changed_count == 0 {
-                                sample_before = val;
-                                sample_after = new_val;
+                                _sample_before = val;
+                                _sample_after = new_val;
                             }
                             changed_count += 1;
                         }
@@ -136,11 +136,11 @@ impl Figures {
                     for x in 0..WW {
                         if src[y][x] > 0x10 {
                             if changed_count == 0 {
-                                sample_before = src[y][x];
+                                _sample_before = src[y][x];
                             }
                             src[y][x] = (src[y][x] & 0x07) + c;
                             if changed_count == 0 {
-                                sample_after = src[y][x];
+                                _sample_after = src[y][x];
                             }
                             changed_count += 1;
                         }
@@ -686,9 +686,20 @@ impl Figures {
                 }
             }
             2 | 5 | 9 | 10 | 11 | 12 => {
-                // smooth_fill - 生成渐变填充命令
+                // smooth_fill - 对齐 Oldsrc BACKGR.smooth_fill 的颜色变化（不包含抖动像素）
+                // 规则：每6行下降1级，从0xEF开始，最低到0xE0；接近horizon后切换为0xF0
+                let horizon = options.horizon.saturating_sub(4) as i32;
                 for row in y..(y + h) {
-                    let color_idx = 0xE0 + ((row - y).min(15) as u8);
+                    let color_idx = if row >= horizon {
+                        0xF0
+                    } else {
+                        let q = (row / 6).max(0) as u8;
+                        let mut v = 0xEFu8.wrapping_sub(q);
+                        if v < 0xE0 {
+                            v = 0xE0;
+                        }
+                        v
+                    };
                     fills.push(FillCommand::new(x, row, w, 1, color_idx));
                 }
             }
@@ -717,8 +728,9 @@ impl Figures {
         use crate::sprites::SpriteId;
         let mut commands = Vec::new();
         
-        let xpos = x * crate::buffers::W as i32;
-        let ypos = y * crate::buffers::H as i32;
+        // GPU渲染统一使用屏幕坐标
+        let xpos = x * crate::buffers::W as i32 - buffers.x_view;
+        let ypos = y * crate::buffers::H as i32 - buffers.y_view;
         
         let get = |x: i32, y: i32| -> u8 {
             let xx = x + EX;
@@ -737,6 +749,19 @@ impl Figures {
         let ch = get(x, y);
         if ch == b' ' {
             return commands;
+        }
+
+        // Oldsrc 特例：如果上方 tile 是 18，则先叠加 FigList[0][5]（不透明）
+        // 对齐 Oldsrc FIGURES.redraw 中的特殊覆盖
+        if get(x, y - 1) == 18 {
+            let (base_id, rotation, flip_x, flip_y) = Self::wall_variant_to_sprite(options.wall_type1, 5);
+            let uv = atlas.get(base_id);
+            commands.push(
+                SpriteCommand::new(xpos, ypos, uv)
+                    .with_rotation(rotation)
+                    .with_flip(flip_x, flip_y)
+                    .with_opaque(true),
+            );
         }
         
         // 根据tile字符选择精灵
@@ -761,7 +786,22 @@ impl Figures {
                 }
             }
             0xF7 => {
-                // 草地
+                // 草地逻辑对齐 Oldsrc 的 redraw:
+                // 1. 若左右邻居存在墙体(1..=26)，先绘制无边缘墙体背景(GREEN_003)
+                let left = get(x - 1, y);
+                let right = get(x + 1, y);
+                if (1..=26).contains(&left) || (1..=26).contains(&right) {
+                    let uv = atlas.get(SpriteId::GREEN_003);
+                    commands.push(SpriteCommand::new(xpos, ypos, uv));
+                }
+
+                // 2. 若上方是树干(0xF0)且 design=2，先叠加一层 SMTREE_001
+                if get(x, y - 1) == 0xF0 && options.design == 2 {
+                    let uv = atlas.get(SpriteId::SMTREE_001);
+                    commands.push(SpriteCommand::new(xpos, ypos, uv));
+                }
+
+                // 3. 再绘制草地本体(透明覆盖)
                 if x == 0 || get(x - 1, y) == ch {
                     if get(x + 1, y) == ch {
                         Some(SpriteId::GRASS2_000)
@@ -827,12 +867,34 @@ impl Figures {
                 }
             }
             b'#' => match options.design {
-                1 => Some(SpriteId::FALL_000),
-                2 => {
-                    if get(x, y - 1) == b'#' {
-                        Some(SpriteId::TREE_001)
-                    } else {
-                        Some(SpriteId::TREE_003)
+                // 设计1（Level1）：'#' '%' 用于树干/树叶组合（对齐 Oldsrc），不是瀑布
+                1 | 2 => {
+                    // 对齐 Oldsrc:
+                    // - 上方也是 '#': Put TREE_001 (opaque)
+                    // - 上方是 '%': Put TREE_000 (opaque) 然后 Draw TREE_003 (transparent leaves)
+                    // - 其它: Oldsrc 只 Draw TREE_003，但 CPU 版不是每帧全量重绘，树干像素会“留在背景”里。
+                    //   GPU 全量重绘需要显式补一层树干底图，避免树叶动画帧透明处露出背景。
+                    match get(x, y - 1) {
+                        b'#' => {
+                            let uv = atlas.get(SpriteId::TREE_001);
+                            commands.push(SpriteCommand::new(xpos, ypos, uv).with_opaque(true));
+                            None
+                        }
+                        b'%' => {
+                            let uv = atlas.get(SpriteId::TREE_000);
+                            commands.push(SpriteCommand::new(xpos, ypos, uv).with_opaque(true));
+                            let uv = atlas.get(SpriteId::TREE_003);
+                            commands.push(SpriteCommand::new(xpos, ypos, uv));
+                            None
+                        }
+                        _ => {
+                            // TREE_003 的底图应为 TREE_001（TREE001 与 TREE003 使用同一套颜色索引区间）
+                            let uv = atlas.get(SpriteId::TREE_001);
+                            commands.push(SpriteCommand::new(xpos, ypos, uv).with_opaque(true));
+                            let uv = atlas.get(SpriteId::TREE_003);
+                            commands.push(SpriteCommand::new(xpos, ypos, uv));
+                            None
+                        }
                     }
                 }
                 3 => Some(SpriteId::WINDOW_001),
@@ -840,12 +902,33 @@ impl Figures {
                 _ => None,
             },
             b'%' => match options.design {
-                1 => Some(SpriteId::FALL_001),
-                2 => {
-                    if get(x, y - 1) == b'%' {
-                        Some(SpriteId::TREE_000)
-                    } else {
-                        Some(SpriteId::TREE_002)
+                // 设计1（Level1）：'#' '%' 用于树干/树叶组合（对齐 Oldsrc），不是瀑布
+                1 | 2 => {
+                    // 对齐 Oldsrc:
+                    // - 上方也是 '%': Put TREE_000 (opaque)
+                    // - 上方是 '#': Put TREE_001 (opaque) 然后 Draw TREE_002 (transparent leaves)
+                    // - 其它: Oldsrc 只 Draw TREE_002，但 CPU 版背景会保留树干像素；GPU 需要补树干底图
+                    match get(x, y - 1) {
+                        b'%' => {
+                            let uv = atlas.get(SpriteId::TREE_000);
+                            commands.push(SpriteCommand::new(xpos, ypos, uv).with_opaque(true));
+                            None
+                        }
+                        b'#' => {
+                            let uv = atlas.get(SpriteId::TREE_001);
+                            commands.push(SpriteCommand::new(xpos, ypos, uv).with_opaque(true));
+                            let uv = atlas.get(SpriteId::TREE_002);
+                            commands.push(SpriteCommand::new(xpos, ypos, uv));
+                            None
+                        }
+                        _ => {
+                            // TREE_002 的底图应为 TREE_000（TREE000 与 TREE002 使用同一套颜色索引区间）
+                            let uv = atlas.get(SpriteId::TREE_000);
+                            commands.push(SpriteCommand::new(xpos, ypos, uv).with_opaque(true));
+                            let uv = atlas.get(SpriteId::TREE_002);
+                            commands.push(SpriteCommand::new(xpos, ypos, uv));
+                            None
+                        }
                     }
                 }
                 3 => Some(SpriteId::WINDOW_000),
@@ -876,41 +959,112 @@ impl Figures {
                 }
             }
             b'=' => Some(SpriteId::PIN_000),
-            // 墙体精灵 1-13
-            1..=13 => {
-                // fig_list[0][ch] - 使用动态着色的墙体
-                // GPU版本需要使用预烘焙的着色精灵
-                let wall_id = match options.wall_type1 {
-                    100 => match ch {
-                        1 => SpriteId::BROWN_000,
-                        2 => SpriteId::BROWN_001,
-                        3 => SpriteId::BROWN_002,
-                        4 => SpriteId::BROWN_003,
-                        5 => SpriteId::BROWN_004,
-                        _ => SpriteId::BROWN_000,
-                    },
-                    101 => match ch {
-                        1 => SpriteId::GREEN_000,
-                        2 => SpriteId::GREEN_001,
-                        3 => SpriteId::GREEN_002,
-                        4 => SpriteId::GREEN_003,
-                        5 => SpriteId::GREEN_004,
-                        _ => SpriteId::GREEN_000,
-                    },
-                    _ => SpriteId::BROWN_000,
-                };
-                Some(wall_id)
+            // 墙体精灵 1-26：对齐 Oldsrc 的 redraw 分支（14-26 会先减13再参与选择）
+            1..=26 => {
+                // 对齐 Oldsrc 的 FigList 变体逻辑：
+                // - ch>13: ch:=ch-13
+                // - 否则根据左右邻居 14..=26 + 当前 ch in [1,4,7]/[3,6,9] 做 overlay（不透明 put）
+                // - 然后绘制 FigList[0][ch_modified]：若 ch_modified 不在 [1,3,4,6,7,9] 则不透明 put，否则透明 draw
+                let mut ch_modified = ch;
+                if ch_modified > 13 {
+                    ch_modified = ch_modified - 13;
+                } else {
+                    let left = get(x - 1, y);
+                    if (14..=26).contains(&left) && [1, 4, 7].contains(&ch_modified) {
+                        let overlay_idx = left - 13;
+                        let (base_id, rotation, flip_x, flip_y) =
+                            Self::wall_variant_to_sprite(options.wall_type1, overlay_idx);
+                        let uv = atlas.get(base_id);
+                        commands.push(
+                            SpriteCommand::new(xpos, ypos, uv)
+                                .with_rotation(rotation)
+                                .with_flip(flip_x, flip_y)
+                                .with_opaque(true),
+                        );
+                    } else {
+                        let right = get(x + 1, y);
+                        if (14..=26).contains(&right) && [3, 6, 9].contains(&ch_modified) {
+                            let overlay_idx = right - 13;
+                            let (base_id, rotation, flip_x, flip_y) =
+                                Self::wall_variant_to_sprite(options.wall_type1, overlay_idx);
+                            let uv = atlas.get(base_id);
+                            commands.push(
+                                SpriteCommand::new(xpos, ypos, uv)
+                                    .with_rotation(rotation)
+                                    .with_flip(flip_x, flip_y)
+                                    .with_opaque(true),
+                            );
+                        }
+                    }
+                }
+
+                let (base_id, rotation, flip_x, flip_y) =
+                    Self::wall_variant_to_sprite(options.wall_type1, ch_modified);
+                let uv = atlas.get(base_id);
+
+                // Pascal: if not (Ch in [#1,#3,#4,#6,#7,#9]) then PutImage else DrawImage
+                let opaque = ![1, 3, 4, 6, 7, 9].contains(&ch_modified);
+                commands.push(
+                    SpriteCommand::new(xpos, ypos, uv)
+                        .with_rotation(rotation)
+                        .with_flip(flip_x, flip_y)
+                        .with_opaque(opaque),
+                );
+                None
             }
             _ => None,
         };
         
         if let Some(id) = sprite_id {
             let uv = atlas.get(id);
-            let cmd = SpriteCommand::new(xpos, ypos, uv);
+            // 默认对齐 DrawImage 语义: 索引0透明
+            // 但部分 tile 在 Oldsrc 用 PutImage（索引0也要绘制），否则边框/底色会缺失
+            let force_opaque = matches!(
+                ch,
+                b'W' | b'0' | b'1' | b'2' | b'3' | b'I' | b'J' | b'K' | b'X' | b'A' | b'?' | b'@'
+            );
+            let cmd = SpriteCommand::new(xpos, ypos, uv).with_opaque(force_opaque);
             commands.push(cmd);
         }
         
         commands
+    }
+
+    /// 把 FigList[0][idx]（1..=13）映射到基础精灵 + 旋转/翻转（GPU 侧做旋转，避免生成额外贴图）
+    /// 只覆盖 Oldsrc InitWalls 生成的变体索引：
+    /// 1,2,4,5,10 为基础；3,6,7,8,9,11,12,13 为镜像/旋转组合。
+    fn wall_variant_to_sprite(
+        wall_type1: u8,
+        idx: u8,
+    ) -> (crate::sprites::SpriteId, u8, bool, bool) {
+        use crate::sprites::SpriteId;
+
+        let (s1, s2, s4, s5, s10) = match wall_type1 {
+            0 => (SpriteId::GREEN_000, SpriteId::GREEN_001, SpriteId::GREEN_002, SpriteId::GREEN_003, SpriteId::GREEN_004),
+            1 => (SpriteId::SAND_000, SpriteId::SAND_001, SpriteId::SAND_002, SpriteId::SAND_003, SpriteId::SAND_004),
+            2 => (SpriteId::GREEN_000, SpriteId::GREEN_001, SpriteId::GREEN_002, SpriteId::GREEN_003, SpriteId::GREEN_004),
+            3 => (SpriteId::BROWN_000, SpriteId::BROWN_001, SpriteId::BROWN_002, SpriteId::BROWN_003, SpriteId::BROWN_004),
+            4 => (SpriteId::GRASS_000, SpriteId::GRASS_001, SpriteId::GRASS_002, SpriteId::GRASS_003, SpriteId::GRASS_004),
+            5 => (SpriteId::DES_000, SpriteId::DES_001, SpriteId::DES_002, SpriteId::DES_003, SpriteId::DES_004),
+            _ => (SpriteId::GREEN_000, SpriteId::GREEN_001, SpriteId::GREEN_002, SpriteId::GREEN_003, SpriteId::GREEN_004),
+        };
+
+        match idx {
+            1 => (s1, 0, false, false),
+            2 => (s2, 0, false, false),
+            3 => (s1, 0, true, false), // mirror(1)
+            4 => (s4, 0, false, false),
+            5 => (s5, 0, false, false),
+            6 => (s4, 1, false, false), // rotate(4)
+            7 => (s1, 1, false, true), // rotate(mirror(1)) == rot90 + flip_y
+            8 => (s2, 1, false, false), // rotate(2)
+            9 => (s1, 1, false, false), // rotate(1)
+            10 => (s10, 0, false, false),
+            11 => (s10, 0, true, false), // mirror(10)
+            12 => (s10, 1, false, true), // rotate(mirror(10)) == rot90 + flip_y
+            13 => (s10, 3, false, false), // mirror(rotate(mirror(10))) == rot270
+            _ => (s5, 0, false, false),
+        }
     }
 
     /// GPU版本：收集可见区域的所有tile精灵
@@ -940,544 +1094,8 @@ impl Figures {
         commands
     }
 
-    /// Rust 严格移植自 Pascal Redraw 过程（变量、分支、流程与Pascal一致）
-    pub fn redraw(
-        &self,
-        x: i32,
-        y: i32,
-        world_map: &WorldBuffer,
-        vga: &mut VGA,
-        backgr: &mut BackGr,
-        sprites: &mut SpriteDataManager,
-        options: &WorldOptions,
-        buffers: &Buffers,
-    ) {
-        // xpos/ypos 为“世界坐标像素”，最终写入 VGA 时必须减去 XView/YView。
-        let xpos = x * crate::buffers::W as i32;
-        let ypos = y * crate::buffers::H as i32;
-        // Pascal: WorldMap^[X,Y] 的有效索引范围包含负数（X:-EX.., Y:-EY1..），通过“内存偏移”实现。
-        // Rust 用 Vec 存储时必须显式加上偏移，否则会读到错误位置（通常是0/空格），导致0xF0/0xF7等装饰tile永远不会被处理。
-        let get = |x: i32, y: i32| -> u8 {
-            let xx = x + EX;
-            let yy = y + EY1;
-            if xx < 0
-                || yy < 0
-                || (xx as usize) >= world_map.len()
-                || (yy as usize) >= world_map[0].len()
-            {
-                0
-            } else {
-                world_map[xx as usize][yy as usize]
-            }
-        };
-        let ch = get(x, y);
-        let mut fig = None;
-        let mut fig_name: Option<&'static str> = None;
-        let l: bool;
-        let r: bool;
-        let ls: bool;
-        let rs: bool;
-
-        // 调试日志：跟踪 (0,0) 位置的绘制过程
-        // if x == 0 && y == 0 {
-        //     println!("[TILE_0_0] redraw() called: ch={:#04X} '{}'", ch, if ch >= 32 && ch < 127 { ch as char } else { '?' });
-        //     println!("[TILE_0_0] world coords: x={}, y={} => pixel pos: xpos={}, ypos={}", x, y, xpos, ypos);
-        //     println!("[TILE_0_0] options: design={}, backgr_type={}, wall_type1={}", options.design, options.backgr_type, options.wall_type1);
-        // }
-
-        if x >= 0 && y >= 0 && y < crate::buffers::NV {
-            // 背景
-            // 注意：Pascal Redraw 每次都会先 DrawSky 做底色（哪怕是地下室）。
-            // 之前这里为了避免覆盖精灵做了 skip_sky，会导致地下室初帧“底色没铺”，看起来像黑屏，
-            // 直到滚屏触发其它重绘路径后才恢复。
-            // 为对齐 Pascal 行为，这里不再跳过。
-            if ch != 0 {
-                if ch == b'%' && options.design == 4 {
-                    self.draw_sky(
-                        xpos,
-                        ypos,
-                        crate::buffers::W as i32,
-                        crate::buffers::H as i32 / 2,
-                        vga,
-                        options,
-                        backgr,
-                        sprites,
-                    );
-                } else {
-                    self.draw_sky(
-                        xpos,
-                        ypos,
-                        crate::buffers::W as i32,
-                        crate::buffers::H as i32,
-                        vga,
-                        options,
-                        backgr,
-                        sprites,
-                    );
-                }
-            }
-            if ch == b' ' {
-                // if x == 0 && y == 0 {
-                //     println!("[TILE_0_0] EARLY RETURN: character is SPACE, skipping drawing");
-                // }
-                return;
-            }
-            if get(x, y - 1) == 18 {
-                fig = Some(&self.fig_list[0][5]);
-                fig_name = Some("FIG_LIST[0][5] (special above==18 overlay)");
-                self.trace_sprite(x, y, fig_name.unwrap());
-                vga.put_image_imagebuffer_world(xpos, ypos, fig.as_ref().unwrap());
-            }
-            fig = None;
-            fig_name = None;
-            match ch {
-                1..=26 => {
-                    // Pascal 严格对齐：
-                    // Pascal: if Ch > #13 then Ch := Chr(Ord(Ch) - 13)
-                    // 后续都使用 FigList[1, ...] (Pascal 1-based = Rust 0-based)
-                    let mut ch_modified = ch;
-                    
-                    // Pascal: if Ch > #13 then Ch := Chr (Ord (Ch) - 13)
-                    if ch_modified > 13 {
-                        ch_modified = ch_modified - 13;
-                    } else {
-                        // Pascal: else if WorldMap^ [X - 1, Y] in [#14..#26] then ...
-                        let left = get(x - 1, y);
-                        if (14..=26).contains(&left) {
-                            if [1, 4, 7].contains(&ch_modified) {
-                                // Pascal: Fig := @FigList [1, Ord (WorldMap^ [X - 1, Y]) - 13];
-                                // Pascal FigList[1, x] = Rust fig_list[0][x]
-                                fig = Some(&self.fig_list[0][(left - 13) as usize]);
-                                fig_name = Some("FIG_LIST[0, left-13] overlay");
-                                self.trace_sprite(x, y, fig_name.unwrap());
-                                vga.put_image_imagebuffer_world(xpos, ypos, fig.as_ref().unwrap());
-                            }
-                        } else {
-                            // Pascal: else if WorldMap^ [X + 1, Y] in [#14..#26] then ...
-                            let right = get(x + 1, y);
-                            if (14..=26).contains(&right) && [3, 6, 9].contains(&ch_modified) {
-                                // Pascal: Fig := @FigList [1, Ord (WorldMap^ [X + 1, Y]) - 13];
-                                // Pascal FigList[1, x] = Rust fig_list[0][x]
-                                fig = Some(&self.fig_list[0][(right - 13) as usize]);
-                                fig_name = Some("FIG_LIST[0, right-13] overlay");
-                                self.trace_sprite(x, y, fig_name.unwrap());
-                                vga.put_image_imagebuffer_world(xpos, ypos, fig.as_ref().unwrap());
-                            }
-                        }
-                    }
-
-                    // Pascal: Fig := @FigList [1, Ord (Ch)];
-                    // Pascal FigList[1, x] = Rust fig_list[0][x]
-                    fig = Some(&self.fig_list[0][ch_modified as usize]);
-
-                    // Pascal: if not (Ch in [#1, #3, #4, #6, #7, #9]) then
-                    if ![1, 3, 4, 6, 7, 9].contains(&ch_modified) {
-                        fig_name = Some("FIG_LIST[0, ch_modified]");
-                        self.trace_sprite(x, y, fig_name.unwrap());
-                        vga.put_image_imagebuffer_world(xpos, ypos, fig.as_ref().unwrap());
-                        fig = None;
-                        fig_name = None;
-                    }
-                }
-                b'?' => {
-                    fig = Some(&sprites.QUEST_000);
-                    fig_name = Some("QUEST_000");
-                }
-                b'@' => {
-                    fig = Some(&sprites.QUEST_001);
-                    fig_name = Some("QUEST_001");
-                }
-                b'A' => {
-                    l = get(x - 1, y) == b'A';
-                    r = get(x + 1, y) == b'A';
-                    if (x + y) % 2 == 1 {
-                        rs = true;
-                        ls = false;
-                    } else {
-                        ls = true;
-                        rs = false;
-                    }
-
-                    // 砖块精灵来自 assets/sprites 目录:
-                    // wall_type1==100 -> BRICK0_000/001/002
-                    // wall_type1==101 -> BRICK1_000/001/002
-                    // wall_type1==102 -> BRICK2_000/001/002
-                    // (在 build_world 中重新着色为 self.bricks[0..2])
-                    if ls && r {
-                        fig = Some(&self.bricks[1]);
-                        fig_name = Some(match options.wall_type1 {
-                            100 => "BRICK0_001 (A stitch)",
-                            101 => "BRICK1_001 (A stitch)",
-                            102 => "BRICK2_001 (A stitch)",
-                            _ => "BRICK?_001 (A stitch)",
-                        });
-                    } else if rs && l {
-                        fig = Some(&self.bricks[2]);
-                        fig_name = Some(match options.wall_type1 {
-                            100 => "BRICK0_002 (A stitch)",
-                            101 => "BRICK1_002 (A stitch)",
-                            102 => "BRICK2_002 (A stitch)",
-                            _ => "BRICK?_002 (A stitch)",
-                        });
-                    } else {
-                        fig = Some(&self.bricks[0]);
-                        fig_name = Some(match options.wall_type1 {
-                            100 => "BRICK0_000 (A)",
-                            101 => "BRICK1_000 (A)",
-                            102 => "BRICK2_000 (A)",
-                            _ => "BRICK?_000 (A)",
-                        });
-                    }
-                }
-                b'I' => {
-                    fig = Some(&sprites.BLOCK_000);
-                    fig_name = Some("BLOCK_000");
-                }
-                b'J' => {
-                    fig = Some(&sprites.BLOCK_001);
-                    fig_name = Some("BLOCK_001");
-                }
-                b'K' => {
-                    fig = Some(&sprites.NOTE_000);
-                    fig_name = Some("NOTE_000");
-                }
-                b'X' => {
-                    fig = Some(&sprites.XBLOCK_000);
-                    fig_name = Some("XBLOCK_000");
-                }
-                b'W' => {
-                    fig = Some(&sprites.WOOD_000);
-                    fig_name = Some("WOOD_000");
-                }
-                b'=' => {
-                    fig = Some(&sprites.PIN_000);
-                    fig_name = Some("PIN_000 (draw/upside down)");
-                    self.trace_sprite(x, y, fig_name.unwrap());
-                    if CAN_HOLD_YOU.contains(&get(x, y + 1)) {
-                        vga.draw_image_imagebuffer_world(xpos, ypos, fig.as_ref().unwrap());
-                    } else {
-                        vga.up_side_down_imagebuffer_world(xpos, ypos, fig.as_ref().unwrap());
-                    }
-                    fig = None;
-                    fig_name = None;
-                }
-                b'0' => {
-                    fig = Some(&sprites.PIPE_000);
-                    fig_name = Some("PIPE_000");
-                }
-                b'1' => {
-                    fig = Some(&sprites.PIPE_001);
-                    fig_name = Some("PIPE_001");
-                }
-                b'2' => {
-                    fig = Some(&sprites.PIPE_002);
-                    fig_name = Some("PIPE_002");
-                }
-                b'3' => {
-                    fig = Some(&sprites.PIPE_003);
-                    fig_name = Some("PIPE_003");
-                }
-                b'*' => {
-                    fig = Some(&sprites.COIN_000);
-                    fig_name = Some("COIN_000");
-                }
-                0xFE => {
-                    if get(x, y - 1) == 0xFE {
-                        fig = Some(&sprites.EXIT_001);
-                        fig_name = Some("EXIT_001");
-                    } else {
-                        fig = Some(&sprites.EXIT_000);
-                        fig_name = Some("EXIT_000");
-                    }
-                }
-                0xF7 => {
-                    // 严格对齐 Pascal FIGURES.PAS 的草地渲染逻辑
-                    // 关键：草地精灵是透明的（使用DrawImage），透明像素会显示下方已绘制的内容
-                    // 因此如果草地周围有墙体，需要先绘制墙体作为背景，然后草地覆盖在上面
-                    
-                    // 0 检查周围是否有墙体（#1..#26），如果有则先绘制墙体背景
-                    // 这样草地的透明部分会显示墙体颜色而不是天空颜色
-                    let left = get(x - 1, y);
-                    let right = get(x + 1, y);
-                    
-                    // 如果左边或右边有墙体块（C/D被build_wall转换成的#1..#26），先绘制墙体
-                    if (1..=26).contains(&left) || (1..=26).contains(&right) {
-                        // 关键：草地背景应该使用无边缘的中央墙块（编号5，对应GREEN.003）
-                        // 而不是周围墙体的实际编号（可能是带边缘的墙块）
-                        // Pascal: 当A+B+L+R=0（四周都被墙体包围）时，WorldMap^[X,Y]:=Chr(5+N)
-                        // 对于C/D墙体（N=13），无边缘墙块是 5（对应fig_list[0][5]=GREEN.003）
-                        let wall_fig = &self.fig_list[0][5];  // 固定使用编号5（GREEN.003无边缘墙块）
-                        self.trace_sprite(x, y, "WALL_BACKGROUND (GREEN.003 for grass)");
-                        vga.put_image_imagebuffer_world(xpos, ypos, wall_fig);
-                    }
-                    
-                    // 1 如果上方是树干并且设计为 2 则先叠加一层 SmTree001
-                    if get(x, y - 1) == 0xF0 && options.design == 2 {
-                        fig = Some(&sprites.SMTREE_001);
-                        fig_name = Some("SMTREE_001 (overlay on grass)");
-                        self.trace_sprite(x, y, fig_name.unwrap());
-                        vga.draw_image_imagebuffer_world(xpos, ypos, fig.as_ref().unwrap());
-                    }
-                    // 2 如果上方是棕榈树干并且设计为 1 则叠加一层 WPalm000
-                    if get(x, y - 1) == 0xF6 && options.design == 1 {
-                        fig = Some(&sprites.WPALM_000);
-                        fig_name = Some("WPALM_000 (overlay on grass)");
-                        self.trace_sprite(x, y, fig_name.unwrap());
-                        vga.draw_image_imagebuffer_world(xpos, ypos, fig.as_ref().unwrap());
-                    }
-                    
-                    // 3 根据左右邻居选择 Grass1 Grass2 Grass3 以实现边缘拼接
-                    if x == 0 || get(x - 1, y) == ch {
-                        if get(x + 1, y) == ch {
-                            fig = Some(&sprites.GRASS2_000);
-                            fig_name = Some("GRASS2_000");
-                        } else {
-                            fig = Some(&sprites.GRASS3_000);
-                            fig_name = Some("GRASS3_000");
-                        }
-                    } else if get(x + 1, y) == ch {
-                        fig = Some(&sprites.GRASS1_000);
-                        fig_name = Some("GRASS1_000");
-                    } else {
-                        fig = Some(&sprites.GRASS3_000);
-                        fig_name = Some("GRASS3_000");
-                    }
-                }
-                0xF0 => match options.design {
-                    1 => {
-                        if get(x, y - 1) != ch {
-                            fig = Some(&sprites.FENCE_001);
-                            fig_name = Some("FENCE_001");
-                        } else {
-                            fig = Some(&sprites.FENCE_000);
-                            fig_name = Some("FENCE_000");
-                        }
-                    }
-                    2 => {
-                        if get(x, y - 1) != ch {
-                            fig = Some(&sprites.SMTREE_000);
-                            fig_name = Some("SMTREE_000");
-                        } else {
-                            fig = Some(&sprites.SMTREE_001);
-                            fig_name = Some("SMTREE_001");
-                        }
-                        // 关键调试：树干 tile 理论上不应出现大量 0（否则会被 DrawImage 当成透明造成“撕裂”）
-                        // 这里只打印你反馈的 Intro 坐标附近，避免刷屏。
-                        if self.trace_enabled
-                            && matches!((x, y), (3, 9) | (4, 9) | (11, 9) | (12, 9))
-                        {
-                            let buf = fig.unwrap();
-                            let mut zeros = 0usize;
-                            for yy in 0..crate::buffers::H as usize {
-                                for xx in 0..crate::buffers::W as usize {
-                                    if buf[yy][xx] == 0 {
-                                        zeros += 1;
-                                    }
-                                }
-                            }
-                            let _ = zeros; // 保留变量避免警告
-                        }
-                    }
-                    // 处理Level_1b地下室的装饰字符
-                    // 这些字符在Level_1b地图中用于地下室的装饰物
-                    // 在Pascal中，这些字符可能直接作为背景图形渲染，而不是精灵
-                    0xE8 | 0xE0 | 0xE1 => {
-                        // 使用地下室地板装饰 - 与地下室的背景类型4匹配
-                        // 当backgr_type == 4时，figures.rs会设置0xE0-0xFF范围的调色板颜色
-                        fig = Some(&sprites.BRICK2_000);
-                        fig_name = Some("BASEMENT_DECOR");
-                    }
-                    _ => {}
-                },
-                0xF6 => {
-                    if options.design == 1 {
-                        fig = Some(&sprites.WPALM_000);
-                        fig_name = Some("WPALM_000");
-                    }
-                }
-                0xFA => {
-                    if options.design == 1 {
-                        if get(x - 1, y) == 0xF9 {
-                            fig = Some(&sprites.PALM3_000);
-                            fig_name = Some("PALM3_000 (overlay)");
-                            self.trace_sprite(x, y, fig_name.unwrap());
-                            vga.draw_image_imagebuffer_world(xpos, ypos, fig.as_ref().unwrap());
-                        } else if get(x + 1, y) == 0xF9 {
-                            fig = Some(&sprites.PALM1_000);
-                            fig_name = Some("PALM1_000 (overlay)");
-                            self.trace_sprite(x, y, fig_name.unwrap());
-                            vga.draw_image_imagebuffer_world(xpos, ypos, fig.as_ref().unwrap());
-                        }
-                        fig = Some(&sprites.PALM0_000);
-                        fig_name = Some("PALM0_000");
-                    }
-                }
-                0xF4 => {
-                    if options.design == 1 {
-                        if get(x, y + 1) == 0xF6 {
-                            fig = Some(&sprites.WPALM_000);
-                            fig_name = Some("WPALM_000 (overlay)");
-                            self.trace_sprite(x, y, fig_name.unwrap());
-                            vga.draw_image_imagebuffer_world(xpos, ypos, fig.as_ref().unwrap());
-                        }
-                        fig = Some(&sprites.PALM1_000);
-                        fig_name = Some("PALM1_000");
-                    }
-                }
-                0xF9 => {
-                    if options.design == 1 {
-                        fig = Some(&sprites.PALM2_000);
-                        fig_name = Some("PALM2_000");
-                    }
-                }
-                0xF5 => {
-                    if options.design == 1 {
-                        if get(x, y + 1) == 0xF6 {
-                            fig = Some(&sprites.WPALM_000);
-                            fig_name = Some("WPALM_000 (overlay)");
-                            self.trace_sprite(x, y, fig_name.unwrap());
-                            vga.draw_image_imagebuffer_world(xpos, ypos, fig.as_ref().unwrap());
-                        }
-                        fig = Some(&sprites.PALM3_000);
-                        fig_name = Some("PALM3_000");
-                    }
-                }
-                b'#' => match options.design {
-                    1 => {
-                        fig = Some(&sprites.FALL_000);
-                        fig_name = Some("FALL_000");
-                    }
-                    2 => match get(x, y - 1) {
-                        b'#' => {
-                            self.trace_sprite(x, y, "TREE_001 (put)");
-                            vga.put_image_imagebuffer_world(xpos, ypos, &sprites.TREE_001)
-                        }
-                        b'%' => {
-                            fig = Some(&sprites.TREE_000);
-                            fig_name = Some("TREE_000 (put)");
-                            self.trace_sprite(x, y, fig_name.unwrap());
-                            vga.put_image_imagebuffer_world(xpos, ypos, fig.as_ref().unwrap());
-                            fig = Some(&sprites.TREE_003);
-                            fig_name = Some("TREE_003");
-                        }
-                        _ => {
-                            fig = Some(&sprites.TREE_003);
-                            fig_name = Some("TREE_003");
-                        }
-                    },
-                    3 => {
-                        fig = Some(&sprites.WINDOW_001);
-                        fig_name = Some("WINDOW_001");
-                    }
-                    4 => {
-                        fig = Some(&sprites.LAVA_000);
-                        fig_name = Some("LAVA_000");
-                    }
-                    5 => {
-                        vga.fill_world(
-                            xpos,
-                            ypos,
-                            crate::buffers::W as i32,
-                            crate::buffers::H as i32,
-                            5,
-                        );
-                    }
-                    // 处理Level_1b地下室的装饰字符
-                    // 这些字符在Level_1b地图中用于地下室的装饰物
-                    // 在Pascal中，这些字符可能直接作为背景图形渲染，而不是精灵
-                    0xE8 | 0xE0 | 0xE1 => {
-                        // 使用地下室地板装饰 - 与地下室的背景类型4匹配
-                        // 当backgr_type == 4时，figures.rs会设置0xE0-0xFF范围的调色板颜色
-                        fig = Some(&sprites.BRICK2_000);
-                        fig_name = Some("BASEMENT_DECOR");
-                    }
-                    _ => {}
-                },
-                b'%' => match options.design {
-                    1 => {
-                        fig = Some(&sprites.FALL_001);
-                        fig_name = Some("FALL_001");
-                    }
-                    2 => match get(x, y - 1) {
-                        b'%' => {
-                            self.trace_sprite(x, y, "TREE_000 (put)");
-                            vga.put_image_imagebuffer_world(xpos, ypos, &sprites.TREE_000)
-                        }
-                        b'#' => {
-                            fig = Some(&sprites.TREE_001);
-                            fig_name = Some("TREE_001 (put)");
-                            self.trace_sprite(x, y, fig_name.unwrap());
-                            vga.put_image_imagebuffer_world(xpos, ypos, fig.unwrap());
-                            fig = Some(&sprites.TREE_002);
-                            fig_name = Some("TREE_002");
-                        }
-                        _ => {
-                            fig = Some(&sprites.TREE_002);
-                            fig_name = Some("TREE_002");
-                        }
-                    },
-                    3 => {
-                        fig = Some(&sprites.WINDOW_000);
-                        fig_name = Some("WINDOW_000");
-                    }
-                    4 => {
-                        fig = Some(&sprites.LAVA_001);
-                        fig_name = Some("LAVA_001");
-                    }
-                    5 => {
-                        let idx = ((x + (buffers.lava_counter as i32 / 8)) % 5) as u8;
-                        fig = Some(match idx {
-                            0 => {
-                                fig_name = Some("LAVA2_001");
-                                &sprites.LAVA2_001
-                            }
-                            1 => {
-                                fig_name = Some("LAVA2_002");
-                                &sprites.LAVA2_002
-                            }
-                            2 => {
-                                fig_name = Some("LAVA2_003");
-                                &sprites.LAVA2_003
-                            }
-                            3 => {
-                                fig_name = Some("LAVA2_004");
-                                &sprites.LAVA2_004
-                            }
-                            4 => {
-                                fig_name = Some("LAVA2_005");
-                                &sprites.LAVA2_005
-                            }
-                            _ => {
-                                fig_name = Some("LAVA2_001");
-                                &sprites.LAVA2_001
-                            }
-                        });
-                    }
-                    // 处理Level_1b地下室的装饰字符
-                    // 这些字符在Level_1b地图中用于地下室的装饰物
-                    // 在Pascal中，这些字符可能直接作为背景图形渲染，而不是精灵
-                    0xE8 | 0xE0 | 0xE1 => {
-                        // 使用地下室地板装饰 - 与地下室的背景类型4匹配
-                        // 当backgr_type == 4时，figures.rs会设置0xE0-0xFF范围的调色板颜色
-                        fig = Some(&sprites.BRICK2_000);
-                        fig_name = Some("BASEMENT_DECOR");
-                    }
-                    _ => {}
-                },
-                _ => {}
-            }
-            if let Some(f) = fig {
-                if let Some(name) = fig_name {
-                    self.trace_sprite(x, y, name);
-                } else {
-                    self.trace_sprite(x, y, "UNKNOWN");
-                }
-                
-                // Pascal: if Fig <> Nil then DrawImage(...)
-                vga.draw_image_imagebuffer_world(xpos, ypos, f);
-            }
-        }
-    }
+    // CPU Redraw 路径已彻底删除：纯 GPU 渲染通过 `collect_tile_sprite_gpu/collect_visible_tiles_gpu`
+    // 生成 `SpriteCommand`，由 `renderer` 统一提交到 wgpu。
 
     /// Rust 严格移植自 Pascal BuildWall 过程（变量、流程、分支与Pascal一致）
     ///
@@ -1879,121 +1497,4 @@ impl Figures {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::buffers::{H, ImageBuffer, W, WorldOptions};
-    use crate::mpal256;
-    use crate::sprites::SpriteDataManager;
-    use image::Rgba;
-
-    // 假设有一个 save_image 函数用于保存ImageBuffer为png
-    fn save_image(buf: &ImageBuffer, path: &str) {
-        let mut palette = Palettes::new();
-        palette.new_palette(mpal256::mpal256_palette());
-        let mut img = image::ImageBuffer::<Rgba<u8>, Vec<u8>>::new(W as u32, H as u32);
-        for y in 0..H as usize {
-            for x in 0..W as usize {
-                let color_idx = buf[y][x];
-                let rgb = palette.get_rgb(color_idx);
-                img.put_pixel(x as u32, y as u32, Rgba([rgb[0], rgb[1], rgb[2], 255]));
-            }
-        }
-        img.save(path).unwrap();
-    }
-
-    #[test]
-    fn test_init_wall_to_image() {
-        // 构造测试用SpriteDataManager和WorldOptions
-        let sprites = SpriteDataManager::new();
-        let options = WorldOptions::default();
-
-        // 正确初始化嵌套数组
-        let empty_img: ImageBuffer =
-            [[0u8; crate::buffers::W as usize]; crate::buffers::H as usize];
-        let mut figures = Figures {
-            fig_list: [[empty_img.clone(); N2]; N1],
-            bricks: [empty_img.clone(); 4],
-            sky: 0,
-            trace_enabled: false,
-        };
-
-        // 测试不同类型的墙
-        for wall_type in 0..=5u8 {
-            figures.init_wall(1, wall_type, &sprites, &options);
-            for idx in 0..N2 {
-                let filename = format!("./output/test_walltype{}_fig{}.png", wall_type, idx + 1);
-                save_image(&figures.fig_list[0][idx], &filename);
-            }
-        }
-    }
-
-    #[test]
-    fn test_set_sky_palette_and_draw_sky() {
-        use crate::backgr::BackGr;
-        use crate::vga256::VGA;
-        use image::Rgba;
-
-        let options = WorldOptions::default();
-        let empty_img: ImageBuffer =
-            [[0u8; crate::buffers::W as usize]; crate::buffers::H as usize];
-        let sprites = SpriteDataManager::new();
-        let mut figures = Figures {
-            fig_list: [[empty_img.clone(); N2]; N1],
-            bricks: [empty_img.clone(); 4],
-            sky: 0,
-            trace_enabled: false,
-        };
-
-        // 测试所有天空类型（0..=12）
-        for sky_type in 0..=12u8 {
-            figures.init_sky(sky_type);
-            let mut palette = Palettes::new();
-            palette.new_palette(mpal256::mpal256_palette());
-            figures.set_sky_palette(&mut palette, &options);
-
-            // 创建一个 VGA 显存对象和 BackGrState
-            let mut vga = VGA::new_offscreen(320, 200);
-            vga.palette = palette.clone();
-            let max_world_size = 236;
-            let w_const = 20;
-            let nv = 13;
-            let h_const = 14;
-            let mut backgr = BackGr::new(max_world_size, w_const, nv, h_const);
-
-            // 绘制天空到 VGA 显存
-            figures.draw_sky(
-                0,
-                0,
-                vga.width as i32,
-                vga.height as i32,
-                &mut vga,
-                &options,
-                &mut backgr,
-                &sprites,
-            );
-
-            // 将 VGA 显存转换为动态二维数组
-            let mut img_buf = vec![vec![0u8; vga.width]; vga.height];
-            for y in 0..vga.height {
-                for x in 0..vga.width {
-                    img_buf[y][x] = vga.get_pixel(x as i32, y as i32);
-                }
-            }
-
-            // 保存图片
-            let mut img =
-                image::ImageBuffer::<Rgba<u8>, Vec<u8>>::new(vga.width as u32, vga.height as u32);
-            for y in 0..vga.height {
-                for x in 0..vga.width {
-                    let color_idx = img_buf[y][x];
-                    let rgb = palette.get_rgb(color_idx);
-                    img.put_pixel(x as u32, y as u32, Rgba([rgb[0], rgb[1], rgb[2], 255]));
-                }
-            }
-            let filename = format!("./output/test_skytype{}.png", sky_type);
-            img.save(&filename).unwrap();
-        }
-        // 可人工比对生成的天空图片
-    }
-}
+// tests removed: pure wgpu mode does not keep CPU framebuffer snapshots.

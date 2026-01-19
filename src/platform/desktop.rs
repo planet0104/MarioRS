@@ -6,7 +6,7 @@
 // 重要:只有这个模块依赖 winit,其他游戏模块通过 platform.rs 抽象访问
 
 use super::{
-    AudioBackend, DisplayBackend, InputBackend, 
+    DisplayBackend, InputBackend, 
     KeyCode as PlatformKeyCode, KeyEvent as PlatformKeyEvent,
     LogBackend, LogLevel, RandomBackend, StorageBackend, TimeBackend,
 };
@@ -153,7 +153,7 @@ impl DesktopDisplay {
         surface.configure(&device, &config);
         
         // 创建GPU渲染器
-        let gpu_renderer = GpuRenderer::new(device.clone(), queue.clone());
+        let gpu_renderer = GpuRenderer::new(device.clone(), queue.clone(), config.format);
         
         self.window = Some(window);
         self.wgpu_surface = Some(surface);
@@ -667,7 +667,6 @@ impl ApplicationHandler for GameApp {
                 // 这里打日志并兜底调用 resize,避免 surface 尺寸没跟上导致画面偏小或黑边异常
                 if let Some(window) = &self.display.window {
                     let inner = window.inner_size();
-                    let outer = window.outer_size();
                     if inner.width > 0 && inner.height > 0 {
                         if let Err(e) = self.display.resize(inner.width, inner.height) {
                             eprintln!("调整窗口大小失败: {}", e);
@@ -704,8 +703,6 @@ impl ApplicationHandler for GameApp {
                 // 窗口大小改变时,调整 surface texture 尺寸
                 // pixels 库会自动处理等比例缩放和 letterbox
                 if new_size.width > 0 && new_size.height > 0 {
-                    if let Some(window) = &self.display.window {
-                    }
                     if let Err(e) = self.display.resize(new_size.width, new_size.height) {
                         eprintln!("调整窗口大小失败: {}", e);
                     }
@@ -729,6 +726,10 @@ impl ApplicationHandler for GameApp {
                         // 获取精灵批次数据
                         let sprite_instances = state.get_sprite_instances();
                         let fill_rects = state.get_fill_rects();
+                        
+                        // 上传图集（BuildWorld 可能会重建/重着色 sprites）
+                        let (atlas_data, atlas_width, atlas_height) = state.get_atlas_data();
+                        gpu_renderer.upload_atlas(atlas_data, atlas_width, atlas_height);
                         
                         // 上传调色板
                         let palette = state.get_palette_rgba();

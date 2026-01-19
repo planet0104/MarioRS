@@ -221,41 +221,114 @@ fn is_game_control_key(keycode: Keycode) -> bool {
     )
 }
 
-// ============================================================================
-// 显示后端 - 使用软件渲染 + ANativeWindow
-// ============================================================================
+fn draw_fps_to_overlay_rgba(overlay: &mut [u8], width: u32, height: u32, fps: u32, frame_time_ms: f32) {
+    if width == 0 || height == 0 {
+        return;
+    }
+    let w = width as usize;
+    let h = height as usize;
+    if overlay.len() < w.saturating_mul(h).saturating_mul(4) {
+        return;
+    }
 
-/// 渲染参数（用于 touch_panel 绘制）
-#[derive(Clone, Copy, Default)]
-pub struct RenderParams {
-    pub screen_width: u32,
-    pub screen_height: u32,
-    pub game_offset_x: u32,
-    pub game_offset_y: u32,
-    pub game_scaled_w: u32,
-    pub game_scaled_h: u32,
-    pub scale: f32,
+    let text = format!("FPS:{} MS:{:.1}", fps, frame_time_ms);
+    let mut x_pos = 10usize;
+    let y_pos = 10usize;
+    let scale = 1usize;
+
+    let draw_glyph = |overlay: &mut [u8],
+                      x_pos: usize,
+                      y_pos: usize,
+                      glyph_w: usize,
+                      glyph_h: usize,
+                      bitmap: &[u8],
+                      color: [u8; 4],
+                      dx: usize,
+                      dy: usize| {
+        for row in 0..glyph_h {
+            for col in 0..glyph_w {
+                let bit_index = row * glyph_w + col;
+                let byte_index = bit_index / 8;
+                let bit_offset = bit_index % 8;
+                if byte_index >= bitmap.len() {
+                    continue;
+                }
+                let byte = bitmap[byte_index];
+                let bit = (byte >> bit_offset) & 1;
+                if bit != 1 {
+                    continue;
+                }
+                for sy in 0..scale {
+                    for sx in 0..scale {
+                        let px = x_pos + col * scale + sx + dx;
+                        let py = y_pos + row * scale + sy + dy;
+                        if px >= w || py >= h {
+                            continue;
+                        }
+                        let idx = (py * w + px) * 4;
+                        overlay[idx] = color[0];
+                        overlay[idx + 1] = color[1];
+                        overlay[idx + 2] = color[2];
+                        overlay[idx + 3] = color[3];
+                    }
+                }
+            }
+        }
+    };
+
+    let shadow = [0u8, 0u8, 0u8, 255u8];
+    let white = [255u8, 255u8, 255u8, 255u8];
+
+    for ch in text.chars() {
+        let ch_code = ch as usize;
+        if ch_code < 32 || ch_code > 129 {
+            x_pos += 8;
+            continue;
+        }
+        let glyph_idx = ch_code - 32;
+        if glyph_idx >= SWISS_FONT_GLYPHS.len() {
+            x_pos += 8;
+            continue;
+        }
+        let glyph = &SWISS_FONT_GLYPHS[glyph_idx];
+        let glyph_w = glyph.width() as usize;
+        let glyph_h = glyph.height() as usize;
+        let bitmap = glyph.bitmap();
+
+        draw_glyph(overlay, x_pos, y_pos, glyph_w, glyph_h, bitmap, shadow, 1, 1);
+        draw_glyph(overlay, x_pos, y_pos, glyph_w, glyph_h, bitmap, white, 0, 0);
+
+        x_pos += glyph_w * scale + 2;
+    }
 }
+
+// ============================================================================
+// 显示后端 - Android: wgpu surface + GpuRenderer
+// ============================================================================
 
 pub struct AndroidDisplay {
     width: u32,
     height: u32,
-    framebuffer: Vec<u8>,
     native_window: Option<NativeWindow>,
-    render_params: RenderParams,
-    // GPU渲染器
+    // wgpu surface 与设备
+    wgpu_surface: Option<wgpu::Surface<'static>>,
+    wgpu_device: Option<std::sync::Arc<wgpu::Device>>,
+    wgpu_queue: Option<std::sync::Arc<wgpu::Queue>>,
+    wgpu_config: Option<wgpu::SurfaceConfiguration>,
+    // GPU 渲染器
     gpu_renderer: Option<GpuRenderer>,
 }
 
 impl AndroidDisplay {
     pub fn new(width: u32, height: u32) -> Self {
-        let buffer_size = (width * height * 4) as usize;
         Self {
             width,
             height,
-            framebuffer: vec![0u8; buffer_size],
             native_window: None,
-            render_params: RenderParams::default(),
+            wgpu_surface: None,
+            wgpu_device: None,
+            wgpu_queue: None,
+            wgpu_config: None,
             gpu_renderer: None,
         }
     }
@@ -270,187 +343,123 @@ impl AndroidDisplay {
         self.gpu_renderer.as_mut()
     }
     
-    /// 获取渲染参数（用于 touch_panel 坐标转换）
-    pub fn render_params(&self) -> RenderParams {
-        self.render_params
-    }
-
     pub fn set_native_window(&mut self, window: Option<NativeWindow>) {
-        // 设置窗口格式为 RGBA_8888
-        if let Some(ref w) = window {
-            let win_width = w.width();
-            let win_height = w.height();
-            log_info("=== set_native_window ===");
-            log_info(&format!("[Window] NativeWindow.width()={}, NativeWindow.height()={}", win_width, win_height));
-            log_info(&format!("[Window] Window aspect ratio: {:.4}", win_width as f32 / win_height as f32));
-            log_info(&format!("[Window] Game size: {}x{}", self.width, self.height));
-
-            use ndk_sys::ANativeWindow_setBuffersGeometry;
-            const WINDOW_FORMAT_RGBA_8888: i32 = 1;
-            unsafe {
-                // 使用 0,0 让系统自动选择 buffer 尺寸 (与窗口尺寸相同)
-                let result = ANativeWindow_setBuffersGeometry(
-                    w.ptr().as_ptr(),
-                    0, 0,  // 0,0 表示使用窗口原始尺寸
-                    WINDOW_FORMAT_RGBA_8888,
-                );
-                log_info(&format!(
-                    "[Window] ANativeWindow_setBuffersGeometry(0, 0, RGBA8888) result={}",
-                    result
-                ));
-            }
-        } else {
-            log_info("set_native_window: window=None");
-        }
-        self.native_window = window;
-    }
-
-    /// 渲染 framebuffer 到 ANativeWindow
-    fn render_to_window(&mut self, window: &NativeWindow) -> Result<(), String> {
-        use ndk_sys::{ANativeWindow_Buffer, ANativeWindow_lock, ANativeWindow_unlockAndPost};
-        use std::ptr;
-
-        let native_window_ptr = window.ptr().as_ptr();
-
-        unsafe {
-            let mut buffer: ANativeWindow_Buffer = std::mem::zeroed();
-            let lock_result = ANativeWindow_lock(native_window_ptr, &mut buffer, ptr::null_mut());
-            if lock_result != 0 {
-                log_error(&format!("ANativeWindow_lock failed: {}", lock_result));
-                return Err(format!("ANativeWindow_lock failed: {}", lock_result));
-            }
-
-            // 记录 buffer 信息 (只在第一帧记录)
-            static LOGGED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-            if !LOGGED.load(std::sync::atomic::Ordering::Relaxed) {
-                LOGGED.store(true, std::sync::atomic::Ordering::Relaxed);
-                log_info("=== First frame render info ===");
-                log_info(&format!(
-                    "[Buffer] ANativeWindow_Buffer: width={}, height={}, stride={}, format={}",
-                    buffer.width, buffer.height, buffer.stride, buffer.format
-                ));
-                log_info(&format!(
-                    "[Buffer] Buffer aspect ratio: {:.3}",
-                    buffer.width as f32 / buffer.height as f32
-                ));
-                log_info(&format!(
-                    "[Game] Game framebuffer: width={}, height={}, len={}",
-                    self.width, self.height, self.framebuffer.len()
-                ));
-            }
-
-            self.copy_framebuffer_to_window(&buffer);
-            ANativeWindow_unlockAndPost(native_window_ptr);
-        }
-
-        Ok(())
-    }
-
-    /// 将游戏 framebuffer 缩放复制到窗口 buffer
-    unsafe fn copy_framebuffer_to_window(&mut self, buffer: &ndk_sys::ANativeWindow_Buffer) {
-        if buffer.bits.is_null() {
-            log_error("copy_framebuffer: buffer.bits is null");
-            return;
-        }
-        if buffer.width <= 0 || buffer.height <= 0 || buffer.stride <= 0 {
-            log_error(&format!(
-                "copy_framebuffer: invalid dimensions: width={}, height={}, stride={}",
-                buffer.width, buffer.height, buffer.stride
-            ));
+        self.native_window = window.clone();
+        if window.is_none() {
+            self.wgpu_surface = None;
+            self.wgpu_device = None;
+            self.wgpu_queue = None;
+            self.wgpu_config = None;
+            self.gpu_renderer = None;
             return;
         }
 
-        // 支持 RGBA_8888 (format = 1) 和 RGBX_8888 (format = 2)
-        if buffer.format != 1 && buffer.format != 2 {
-            log_warn(&format!("Unsupported buffer format: {}", buffer.format));
-            return;
+        let window = window.expect("window is Some");
+        let win_width = window.width().max(1) as u32;
+        let win_height = window.height().max(1) as u32;
+
+        // wgpu 初始化（与 desktop/windows 路径保持一致）
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+            backends: wgpu::Backends::VULKAN | wgpu::Backends::GL,
+            ..Default::default()
+        });
+
+        // 从 ANativeWindow 创建 Surface
+        use std::ffi::c_void;
+        use wgpu::rwh::{
+            AndroidDisplayHandle, AndroidNdkWindowHandle, HasDisplayHandle, HasWindowHandle,
+            RawDisplayHandle, RawWindowHandle,
+        };
+        struct AndroidHandle {
+            a_native_window: *mut c_void,
+        }
+        impl HasWindowHandle for AndroidHandle {
+            fn window_handle(
+                &self,
+            ) -> Result<wgpu::rwh::WindowHandle<'_>, wgpu::rwh::HandleError> {
+                let mut handle = AndroidNdkWindowHandle::empty();
+                handle.a_native_window = self.a_native_window;
+                handle.api_version = 0;
+                let raw = RawWindowHandle::AndroidNdk(handle);
+                Ok(unsafe { wgpu::rwh::WindowHandle::borrow_raw(raw) })
+            }
+        }
+        impl HasDisplayHandle for AndroidHandle {
+            fn display_handle(
+                &self,
+            ) -> Result<wgpu::rwh::DisplayHandle<'_>, wgpu::rwh::HandleError> {
+                let raw = RawDisplayHandle::Android(AndroidDisplayHandle::empty());
+                Ok(unsafe { wgpu::rwh::DisplayHandle::borrow_raw(raw) })
+            }
         }
 
-        let dst_ptr = buffer.bits as *mut u32;
-        let dst_stride = buffer.stride as usize;
-        let dst_width = buffer.width as usize;
-        let dst_height = buffer.height as usize;
-        let src = &self.framebuffer;
-
-        // 游戏 framebuffer 尺寸 (已经是正确的 320x182)
-        let src_width = self.width as usize;
-        let src_height = self.height as usize;
-        
-        // 计算缩放比例 (保持宽高比，居中显示)
-        let scale_x = dst_width as f32 / src_width as f32;
-        let scale_y = dst_height as f32 / src_height as f32;
-        let scale = scale_x.min(scale_y);
-        let scaled_w = (src_width as f32 * scale) as usize;
-        let scaled_h = (src_height as f32 * scale) as usize;
-        // 水平居中，垂直居中
-        let offset_x = dst_width.saturating_sub(scaled_w) / 2;
-        let offset_y = dst_height.saturating_sub(scaled_h) / 2;
-
-        // 更新渲染参数（用于 touch_panel 坐标转换）
-        self.render_params = RenderParams {
-            screen_width: dst_width as u32,
-            screen_height: dst_height as u32,
-            game_offset_x: offset_x as u32,
-            game_offset_y: offset_y as u32,
-            game_scaled_w: scaled_w as u32,
-            game_scaled_h: scaled_h as u32,
-            scale,
+        let android_handle = AndroidHandle {
+            a_native_window: window.ptr().as_ptr() as *mut c_void,
         };
 
-        // 记录渲染参数 (只记录一次)
-        static LOGGED_RENDER: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-        if !LOGGED_RENDER.load(std::sync::atomic::Ordering::Relaxed) {
-            LOGGED_RENDER.store(true, std::sync::atomic::Ordering::Relaxed);
-            log_info("=== Render calculation details ===");
-            log_info(&format!("[Render] Source (game framebuffer): {}x{}", src_width, src_height));
-            log_info(&format!("[Render] Destination (window buffer): {}x{}", dst_width, dst_height));
-            log_info(&format!("[Render] Scale factors: x={:.4}, y={:.4}", scale_x, scale_y));
-            log_info(&format!("[Render] Chosen scale (min): {:.4}", scale));
-            log_info(&format!("[Render] Scaled game size: {}x{}", scaled_w, scaled_h));
-            log_info(&format!("[Render] Offset (centering): x={}, y={}", offset_x, offset_y));
-            log_info(&format!("[Render] Margins: left={}, right={}, top={}, bottom={}",
-                offset_x, dst_width.saturating_sub(scaled_w + offset_x),
-                offset_y, dst_height.saturating_sub(scaled_h + offset_y)
-            ));
-        }
-
-        // 清空整个 buffer 为黑色
-        let black: u32 = 0xFF000000;
-        for y in 0..dst_height {
-            // SAFETY: dst_ptr 在函数开始已验证非空，y * dst_stride 在 buffer 范围内
-            let row_start = unsafe { dst_ptr.add(y * dst_stride) };
-            for x in 0..dst_width {
-                // SAFETY: x 在 dst_width 范围内，row_start + x 在 buffer 范围内
-                unsafe { *row_start.add(x) = black; }
+        let surface = match instance.create_surface(&android_handle) {
+            Ok(s) => s,
+            Err(e) => {
+                log_error(&format!("[GPU] create_surface_failed {:?}", e));
+                return;
             }
-        }
+        };
 
-        // 预计算缩放参数 (使用定点数)
-        let scale_inv_x = (src_width << 16) / scaled_w.max(1);
-        let scale_inv_y = (src_height << 16) / scaled_h.max(1);
-
-        // 缩放复制 framebuffer
-        for dst_y in 0..scaled_h {
-            let src_y = ((dst_y * scale_inv_y) >> 16).min(src_height - 1);
-            let src_row_offset = src_y * src_width * 4;
-            // SAFETY: offset_y + dst_y 在 dst_height 范围内，指针计算在 buffer 范围内
-            let dst_row_ptr = unsafe { dst_ptr.add((offset_y + dst_y) * dst_stride + offset_x) };
-
-            for dst_x in 0..scaled_w {
-                let src_x = ((dst_x * scale_inv_x) >> 16).min(src_width - 1);
-                let src_idx = src_row_offset + src_x * 4;
-
-                // RGBA -> ABGR (Android native window 格式)
-                // SAFETY: src_idx 基于 min() 限制在源数据范围内
-                let r = unsafe { *src.get_unchecked(src_idx) as u32 };
-                let g = unsafe { *src.get_unchecked(src_idx + 1) as u32 };
-                let b = unsafe { *src.get_unchecked(src_idx + 2) as u32 };
-                let pixel = 0xFF000000 | (b << 16) | (g << 8) | r;
-
-                // SAFETY: dst_x 在 scaled_w 范围内，dst_row_ptr + dst_x 在 buffer 范围内
-                unsafe { *dst_row_ptr.add(dst_x) = pixel; }
+        let adapter = match futures::executor::block_on(instance.request_adapter(
+            &wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::HighPerformance,
+                compatible_surface: Some(&surface),
+                force_fallback_adapter: false,
+            },
+        )) {
+            Some(a) => a,
+            None => {
+                log_error("[GPU] request_adapter_failed");
+                return;
             }
-        }
+        };
+
+        let (device, queue) = match futures::executor::block_on(adapter.request_device(
+            &wgpu::DeviceDescriptor {
+                label: Some("Mario Android Device"),
+                required_features: wgpu::Features::empty(),
+                required_limits: wgpu::Limits::default(),
+                memory_hints: wgpu::MemoryHints::Performance,
+            },
+            None,
+        )) {
+            Ok(v) => v,
+            Err(e) => {
+                log_error(&format!("[GPU] request_device_failed {:?}", e));
+                return;
+            }
+        };
+
+        let device = std::sync::Arc::new(device);
+        let queue = std::sync::Arc::new(queue);
+
+        let caps = surface.get_capabilities(&adapter);
+        let surface_format = caps.formats[0];
+        let config = wgpu::SurfaceConfiguration {
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            format: surface_format,
+            width: win_width,
+            height: win_height,
+            present_mode: wgpu::PresentMode::Fifo,
+            alpha_mode: caps.alpha_modes[0],
+            view_formats: vec![],
+            desired_maximum_frame_latency: 2,
+        };
+        surface.configure(&device, &config);
+
+        let mut gpu_renderer = GpuRenderer::new(device.clone(), queue.clone(), config.format);
+        gpu_renderer.update_scale(config.width, config.height);
+
+        self.wgpu_surface = Some(unsafe { std::mem::transmute(surface) });
+        self.wgpu_device = Some(device);
+        self.wgpu_queue = Some(queue);
+        self.wgpu_config = Some(config);
+        self.gpu_renderer = Some(gpu_renderer);
     }
 }
 
@@ -464,7 +473,22 @@ impl DisplayBackend for AndroidDisplay {
     }
 
     fn present(&mut self) -> Result<(), String> {
-        self.present_with_overlay(None, &[], None)
+        let (surface, gpu_renderer, config) = match (&self.wgpu_surface, &mut self.gpu_renderer, &self.wgpu_config) {
+            (Some(s), Some(g), Some(c)) => (s, g, c),
+            _ => return Ok(()),
+        };
+
+        let output = match surface.get_current_texture() {
+            Ok(t) => t,
+            Err(e) => return Err(e.to_string()),
+        };
+        let view = output.texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+        gpu_renderer.update_scale(config.width, config.height);
+        gpu_renderer.render_to_surface(&view);
+
+        output.present();
+        Ok(())
     }
 
     fn request_redraw(&self) {
@@ -473,203 +497,16 @@ impl DisplayBackend for AndroidDisplay {
 }
 
 impl AndroidDisplay {
-    /// 渲染游戏画面并混合触摸面板 overlay (优化版: 只混合指定的边界框区域)
-    /// fps_info: 可选的 (fps, frame_time_ms) 用于显示帧率信息
-    pub fn present_with_overlay(
-        &mut self, 
-        overlay: Option<&[u8]>,
-        blend_rects: &[(u32, u32, u32, u32)],
-        fps_info: Option<(u32, f32)>
-    ) -> Result<(), String> {
-        let window = match &self.native_window {
-            Some(w) => w.clone(),
-            None => return Ok(()),
+    pub fn resize(&mut self, new_width: u32, new_height: u32) {
+        let (surface, device, config) = match (&self.wgpu_surface, &self.wgpu_device, &mut self.wgpu_config) {
+            (Some(s), Some(d), Some(c)) => (s, d, c),
+            _ => return,
         };
-        self.render_to_window_with_overlay(&window, overlay, blend_rects, fps_info)
-    }
-    
-    /// 渲染到窗口并混合 overlay (优化版: 只混合指定的边界框区域)
-    fn render_to_window_with_overlay(
-        &mut self, 
-        window: &NativeWindow, 
-        overlay: Option<&[u8]>,
-        blend_rects: &[(u32, u32, u32, u32)],
-        fps_info: Option<(u32, f32)>
-    ) -> Result<(), String> {
-        use ndk_sys::{ANativeWindow_Buffer, ANativeWindow_lock, ANativeWindow_unlockAndPost};
-        use std::ptr;
-
-        let native_window_ptr = window.ptr().as_ptr();
-
-        unsafe {
-            let mut buffer: ANativeWindow_Buffer = std::mem::zeroed();
-            let lock_result = ANativeWindow_lock(native_window_ptr, &mut buffer, ptr::null_mut());
-            if lock_result != 0 {
-                return Err(format!("ANativeWindow_lock failed: {}", lock_result));
-            }
-
-            self.copy_framebuffer_to_window(&buffer);
-            
-            // 混合 overlay (touch_panel) - 只混合按钮区域
-            if let Some(overlay_data) = overlay {
-                self.blend_overlay_rects_to_window(&buffer, overlay_data, blend_rects);
-            }
-            
-            // 绘制 FPS 信息
-            if let Some((fps, frame_time_ms)) = fps_info {
-                self.draw_fps_to_window(&buffer, fps, frame_time_ms);
-            }
-            
-            ANativeWindow_unlockAndPost(native_window_ptr);
-        }
-
-        Ok(())
-    }
-    
-    /// 将 RGBA overlay 混合到窗口 buffer (优化版: 只混合指定的边界框区域)
-    unsafe fn blend_overlay_rects_to_window(
-        &self, 
-        buffer: &ndk_sys::ANativeWindow_Buffer, 
-        overlay: &[u8],
-        rects: &[(u32, u32, u32, u32)]  // (x, y, width, height)
-    ) {
-        let dst_ptr = buffer.bits as *mut u32;
-        let dst_stride = buffer.stride as usize;
-        let dst_width = buffer.width as u32;
-        let dst_height = buffer.height as u32;
-        let overlay_stride = dst_width as usize * 4;
-        
-        for &(rect_x, rect_y, rect_w, rect_h) in rects {
-            // 边界检查
-            let x_end = (rect_x + rect_w).min(dst_width) as usize;
-            let y_end = (rect_y + rect_h).min(dst_height) as usize;
-            let x_start = rect_x as usize;
-            let y_start = rect_y as usize;
-            
-            for y in y_start..y_end {
-                for x in x_start..x_end {
-                    let src_idx = y * overlay_stride + x * 4;
-                    if src_idx + 3 >= overlay.len() { continue; }
-                    
-                    let src_a = overlay[src_idx + 3];
-                    if src_a == 0 { continue; }  // 完全透明，跳过
-                    
-                    let dst_idx = y * dst_stride + x;
-                    // SAFETY: dst_idx 在 buffer 范围内
-                    let dst_pixel = unsafe { *dst_ptr.add(dst_idx) };
-                    
-                    let pixel = if src_a == 255 {
-                        // 完全不透明，直接覆盖
-                        let r = overlay[src_idx] as u32;
-                        let g = overlay[src_idx + 1] as u32;
-                        let b = overlay[src_idx + 2] as u32;
-                        0xFF000000 | (b << 16) | (g << 8) | r
-                    } else {
-                        // 半透明混合
-                        let alpha = src_a as u32;
-                        let inv_alpha = 255 - alpha;
-                        
-                        let src_r = overlay[src_idx] as u32;
-                        let src_g = overlay[src_idx + 1] as u32;
-                        let src_b = overlay[src_idx + 2] as u32;
-                        
-                        let dst_r = dst_pixel & 0xFF;
-                        let dst_g = (dst_pixel >> 8) & 0xFF;
-                        let dst_b = (dst_pixel >> 16) & 0xFF;
-                        
-                        let out_r = (src_r * alpha + dst_r * inv_alpha) / 255;
-                        let out_g = (src_g * alpha + dst_g * inv_alpha) / 255;
-                        let out_b = (src_b * alpha + dst_b * inv_alpha) / 255;
-                        
-                        0xFF000000 | (out_b << 16) | (out_g << 8) | out_r
-                    };
-                    
-                    // SAFETY: dst_idx 在 buffer 范围内
-                    unsafe { *dst_ptr.add(dst_idx) = pixel; }
-                }
-            }
-        }
-    }
-    
-    /// 绘制 FPS 信息到窗口 buffer
-    /// fps: 当前帧率, frame_time_ms: 每帧渲染时间(毫秒)
-    unsafe fn draw_fps_to_window(&self, buffer: &ndk_sys::ANativeWindow_Buffer, fps: u32, frame_time_ms: f32) {
-        // 格式化 FPS 文本: "FPS:XX  MS:XX.X"
-        let fps_str = format!("FPS:{} MS:{:.1}", fps, frame_time_ms);
-        
-        let dst_ptr = buffer.bits as *mut u32;
-        let dst_stride = buffer.stride as usize;
-        let dst_width = buffer.width as usize;
-        let dst_height = buffer.height as usize;
-        
-        // 起始位置 (左上角，留一点边距)
-        let mut x_pos = 10usize;
-        let y_pos = 10usize;
-        let scale = 1u32;  // 字体缩放 (1x = 原始大小)
-        
-        // 绘制颜色: 白色文字，黑色描边
-        let text_color = 0xFFFFFFFFu32;  // 白色 ARGB
-        let shadow_color = 0xFF000000u32;  // 黑色 ARGB
-        
-        for ch in fps_str.chars() {
-            // 获取字符对应的字形索引 (SWISS_FONT 从 ASCII 32 开始)
-            let ch_code = ch as usize;
-            if ch_code < 32 || ch_code > 129 {
-                x_pos += 8;  // 跳过不支持的字符
-                continue;
-            }
-            let glyph_idx = ch_code - 32;
-            if glyph_idx >= SWISS_FONT_GLYPHS.len() {
-                x_pos += 8;
-                continue;
-            }
-            
-            let glyph = &SWISS_FONT_GLYPHS[glyph_idx];
-            let glyph_w = glyph.width() as usize;
-            let glyph_h = glyph.height() as usize;
-            let bitmap = glyph.bitmap();
-            
-            // 绘制字形 (先绘制阴影再绘制文字)
-            for pass in 0..2 {
-                let (offset_x, offset_y, color) = if pass == 0 {
-                    (1usize, 1usize, shadow_color)  // 阴影偏移
-                } else {
-                    (0usize, 0usize, text_color)
-                };
-                
-                for row in 0..glyph_h {
-                    for col in 0..glyph_w {
-                        // 计算 bitmap 中的位索引
-                        let bit_index = row * glyph_w + col;
-                        let byte_index = bit_index / 8;
-                        let bit_offset = bit_index % 8;
-                        
-                        if byte_index >= bitmap.len() { continue; }
-                        
-                        let byte = bitmap[byte_index];
-                        let bit = (byte >> bit_offset) & 1;
-                        
-                        if bit == 1 {
-                            // 计算屏幕位置 (考虑缩放)
-                            for sy in 0..scale as usize {
-                                for sx in 0..scale as usize {
-                                    let px = x_pos + col * scale as usize + sx + offset_x;
-                                    let py = y_pos + row * scale as usize + sy + offset_y;
-                                    
-                                    if px < dst_width && py < dst_height {
-                                        let dst_idx = py * dst_stride + px;
-                                        // SAFETY: 边界已检查
-                                        unsafe { *dst_ptr.add(dst_idx) = color; }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            
-            // 移动到下一个字符位置
-            x_pos += glyph_w * scale as usize + 2;
+        config.width = new_width.max(1);
+        config.height = new_height.max(1);
+        surface.configure(device, config);
+        if let Some(gpu) = &mut self.gpu_renderer {
+            gpu.update_scale(config.width, config.height);
         }
     }
 }
@@ -1007,26 +844,27 @@ pub fn android_main(app: AndroidApp) {
                                 log_info(&format!("[Game] Game framebuffer size: {}x{}", GAME_WIDTH, GAME_HEIGHT));
                                 log_info(&format!("[Game] Game aspect ratio: {:.3}", GAME_WIDTH as f32 / GAME_HEIGHT as f32));
                                 
-                                // 预计算缩放参数
-                                let scale_x = win_width as f32 / GAME_WIDTH as f32;
-                                let scale_y = win_height as f32 / GAME_HEIGHT as f32;
-                                let scale = scale_x.min(scale_y);
-                                let scaled_w = (GAME_WIDTH as f32 * scale) as i32;
-                                let scaled_h = (GAME_HEIGHT as f32 * scale) as i32;
-                                let offset_x = (win_width - scaled_w) / 2;
-                                let offset_y = (win_height - scaled_h) / 2;
-                                
-                                log_info(&format!("[Scale] scale_x={:.3}, scale_y={:.3}, chosen_scale={:.3}", scale_x, scale_y, scale));
-                                log_info(&format!("[Scale] scaled game size: {}x{}", scaled_w, scaled_h));
-                                log_info(&format!("[Scale] offset: ({}, {})", offset_x, offset_y));
-                                log_info(&format!("[Scale] margins: top={}, bottom={}", offset_y, win_height - scaled_h - offset_y));
-                                
                                 input.set_screen_size(win_width as f32, win_height as f32);
                                 display.set_native_window(Some(window));
-                                
+
+                                // 初始化 GameState，并上传 atlas/palette 到 GPU
                                 if game_state.is_none() {
-                                    game_state = Some(GameState::new());
+                                    let state = GameState::new();
+                                    if let Some(gpu) = display.gpu_renderer_mut() {
+                                        let (atlas_data, atlas_w, atlas_h) = state.get_atlas_data();
+                                        gpu.upload_atlas(atlas_data, atlas_w, atlas_h);
+                                        let palette = state.get_palette_rgba();
+                                        gpu.upload_palette(0, &palette);
+                                    }
+                                    game_state = Some(state);
                                     log_info("Game state initialized");
+                                } else if let Some(state) = game_state.as_ref() {
+                                    if let Some(gpu) = display.gpu_renderer_mut() {
+                                        let (atlas_data, atlas_w, atlas_h) = state.get_atlas_data();
+                                        gpu.upload_atlas(atlas_data, atlas_w, atlas_h);
+                                        let palette = state.get_palette_rgba();
+                                        gpu.upload_palette(0, &palette);
+                                    }
                                 }
                             }
                         }
@@ -1041,6 +879,7 @@ pub fn android_main(app: AndroidApp) {
                                 let height = window.height() as f32;
                                 log_info(&format!("Window resized: {}x{}", width, height));
                                 input.set_screen_size(width, height);
+                                display.resize(window.width() as u32, window.height() as u32);
                             }
                         }
                         MainEvent::Destroy => {
@@ -1141,23 +980,54 @@ pub fn android_main(app: AndroidApp) {
             // 更新游戏逻辑
             let result = state.frame_update();
 
-            // 渲染到framebuffer
-            let display_frame = display.framebuffer_mut();
-            state.render_to_rgba(display_frame);
-            
-            // 渲染触摸面板 overlay 并提交显示 (边界框优化)
-            {
-                let (overlay, blend_rects) = if input.should_show_virtual_buttons() {
+            // GPU 渲染流程：Sprite/Fills -> GpuRenderer -> Surface present
+            let (ow, oh) = match display.wgpu_config.as_ref() {
+                Some(c) => (c.width, c.height),
+                None => (0, 0),
+            };
+
+            let mut overlay_vec_opt: Option<Vec<u8>> = None;
+            if ow > 0 && oh > 0 {
+                let mut overlay_vec = if input.should_show_virtual_buttons() {
                     let button_states = input.touch_panel().button_states();
-                    let rects = input.touch_panel().renderer().get_blend_rects();
-                    let overlay_data = input.touch_panel_mut().renderer_mut().render(&button_states);
-                    (overlay_data, rects)
+                    match input.touch_panel_mut().renderer_mut().render(&button_states) {
+                        Some(s) => s.to_vec(),
+                        None => vec![0u8; (ow * oh * 4) as usize],
+                    }
                 } else {
-                    (None, Vec::new())
+                    vec![0u8; (ow * oh * 4) as usize]
                 };
-                let fps_info = Some((fps_display, frame_time_display));
-                let _ = display.present_with_overlay(overlay, &blend_rects, fps_info);
+                draw_fps_to_overlay_rgba(&mut overlay_vec, ow, oh, fps_display, frame_time_display);
+                overlay_vec_opt = Some(overlay_vec);
             }
+
+            if let Some(gpu_renderer) = display.gpu_renderer_mut() {
+                let sprite_instances = state.get_sprite_instances();
+                let fill_rects = state.get_fill_rects();
+                let palette = state.get_palette_rgba();
+
+                // 上传图集（BuildWorld 可能会重建/重着色 sprites）
+                let (atlas_data, atlas_w, atlas_h) = state.get_atlas_data();
+                gpu_renderer.upload_atlas(atlas_data, atlas_w, atlas_h);
+
+                gpu_renderer.upload_palette(0, &palette);
+                gpu_renderer.begin_frame();
+                for f in fill_rects {
+                    gpu_renderer.draw_fill(f);
+                }
+                for s in sprite_instances {
+                    gpu_renderer.draw_sprite(s);
+                }
+                gpu_renderer.render_frame();
+
+                if let Some(overlay_vec) = overlay_vec_opt.as_ref() {
+                    gpu_renderer.upload_overlay_rgba(ow, oh, overlay_vec);
+                } else {
+                    gpu_renderer.clear_overlay();
+                }
+            }
+
+            let _ = display.present();
             
             // 累加帧渲染时间
             let current_frame_time = frame_start.elapsed().as_secs_f32() * 1000.0;

@@ -232,10 +232,7 @@ impl Palettes {
                     }
                 }
             }
-            vga.wait_display();
-            vga.wait_retrace();
             self.read_palette(vga, &temp_pal);
-            vga.present();
         }
         // 淡入完成后，palette恢复为source_palette
         self.palette = self.source_palette;
@@ -262,10 +259,7 @@ impl Palettes {
                     }
                 }
             }
-            vga.wait_display();
-            vga.wait_retrace();
             self.read_palette(vga, &temp_pal);
-            vga.present();
         }
         // 淡出完成后，palette保持在变暗状态（k=n-1时的值）
         self.palette = temp_pal;
@@ -521,7 +515,7 @@ impl Palettes {
                 ((r as u16 * 255) / 63).min(255) as u8,
                 ((g as u16 * 255) / 63).min(255) as u8,
                 ((b as u16 * 255) / 63).min(255) as u8,
-                if i == 0 { 0 } else { 255 }, // 索引0透明
+                255, // 索引0透明由shader控制，palette这里保持不透明以支持PutImage语义
             ];
         }
         result

@@ -96,7 +96,7 @@ impl TestApp {
         surface.configure(&device, &config);
 
         // 创建GPU渲染器
-        let gpu_renderer = GpuRenderer::new(device.clone(), queue.clone());
+        let gpu_renderer = GpuRenderer::new(device.clone(), queue.clone(), config.format);
 
         // 加载精灵
         let sprites = SpriteDataManager::new();

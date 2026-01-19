@@ -84,8 +84,6 @@ struct EnemyRec {
     counter: i32,
     status: i32,
     dir_counter: u8,
-    // Pascal: BackGr: array[0..MAX_PAGE] of Integer; 0 表示无效（句柄版，避免 x>255 截断）
-    back_gr: Vec<i32>,
 }
 
 impl Default for EnemyRec {
@@ -106,7 +104,6 @@ impl Default for EnemyRec {
             counter: 0,
             status: ENEMY_GROUNDED,
             dir_counter: 0,
-            back_gr: vec![0; MAX_PAGE as usize + 1],
         }
     }
 }
@@ -233,7 +230,7 @@ impl Enemies {
         &self,
         x: i32,
         y: i32,
-        vga: &mut VGA,
+        _vga: &mut VGA,
         buffers: &mut Buffers,
         tmp_obj_manager: &mut TmpObjManager,
         music_player: &MusicPlayer,
@@ -248,7 +245,7 @@ impl Enemies {
         &self,
         x: i32,
         y: i32,
-        vga: &mut VGA,
+        _vga: &mut VGA,
         buffers: &mut Buffers,
         tmp_obj_manager: &mut TmpObjManager,
         music_player: &MusicPlayer,
@@ -411,7 +408,7 @@ impl Enemies {
         enemy.delay_counter = 0;
         enemy.dir_counter = 0;
         enemy.status = ENEMY_GROUNDED;
-        enemy.back_gr = vec![0; MAX_PAGE as usize + 1];
+        // GPU渲染每帧完全重绘，不需要背景保存/恢复
         enemy.counter = 0;
 
         match init_type {
@@ -465,26 +462,24 @@ impl Enemies {
             
             match enemy.tp {
                 TP_CHIBIBO => {
-                    let frame = (enemy.dir_counter % 32 < 16) as usize;
-                    let sprite_id = match (enemy.sub_tp, frame) {
-                        (0, 0) => SpriteId::CHIBIBO_000,
-                        (0, 1) => SpriteId::CHIBIBO_001,
-                        (_, 0) => SpriteId::CHIBIBO_002,
-                        (_, _) => SpriteId::CHIBIBO_003,
-                    };
-                    let flip_x = enemy.x_vel < 0;
+                    // 对齐 Oldsrc: TP_CHIBIBO 使用 FigList[1 + 3*sub_tp] 的单个图像，
+                    // 并用 dir_counter 在左右镜像之间切换（作为走路动画效果）。
+                    let sprite_id = if enemy.sub_tp == 0 { SpriteId::CHIBIBO_000 } else { SpriteId::CHIBIBO_002 };
+                    let flip_x = !(enemy.dir_counter % 32 < 16);
                     let uv = atlas.get(sprite_id);
                     vga.draw_sprite_flipped_world_gpu(enemy.x_pos, enemy.y_pos, uv, flip_x, false);
                 }
                 TP_FLAT_CHIBIBO => {
+                    // 对齐 Oldsrc: TP_FLAT_CHIBIBO 使用 FigList[2 + 3*sub_tp]（扁平帧）
                     let sprite_id = if enemy.sub_tp == 0 { SpriteId::CHIBIBO_001 } else { SpriteId::CHIBIBO_003 };
-                    let flip_x = enemy.x_vel < 0;
+                    let flip_x = !(enemy.dir_counter % 32 < 16);
                     let uv = atlas.get(sprite_id);
                     vga.draw_sprite_flipped_world_gpu(enemy.x_pos, enemy.y_pos, uv, flip_x, false);
                 }
                 TP_DEAD_CHIBIBO => {
+                    // Oldsrc 使用 enemy_pictures[1][LEFT] 的 upside_down，这里用 CHIBIBO_000 + flip_x=true 对齐
                     let uv = atlas.get(SpriteId::CHIBIBO_000);
-                    vga.draw_sprite_upside_down_world_gpu(enemy.x_pos, enemy.y_pos, uv);
+                    vga.draw_sprite_flipped_world_gpu(enemy.x_pos, enemy.y_pos, uv, true, true);
                 }
                 TP_RISING_CHAMP => {
                     if enemy.y_pos != (enemy.map_y * H) {
@@ -617,6 +612,7 @@ impl Enemies {
                     vga.draw_sprite_flipped_world_gpu(enemy.x_pos, enemy.y_pos, uv, flip_x, true);
                 }
                 TP_KOOPA => {
+                    // 对齐 Oldsrc: 乌龟本体（有头）用 koopa_list + y_pos-10
                     let sprite_id = match (enemy.sub_tp, enemy.dir_counter % 16 <= 8) {
                         (0, true) => SpriteId::GRKOOPA_000,
                         (0, false) => SpriteId::GRKOOPA_001,
@@ -628,19 +624,25 @@ impl Enemies {
                     vga.draw_sprite_flipped_world_gpu(enemy.x_pos, enemy.y_pos - 10, uv, flip_x, false);
                 }
                 TP_WAKING_KOOPA | TP_RUNNING_KOOPA => {
-                    let sprite_id = if enemy.sub_tp == 0 { SpriteId::GRKP_000 } else { SpriteId::RDKP_000 };
-                    let flip_x = enemy.x_vel > 0;
+                    // 对齐 Oldsrc: shell 跑动/抖动时，会在 GRKP_000/001 之间切换，
+                    // 并用 dir_counter 再切换左右镜像（作为旋转/抖动帧）。
+                    let base0 = if enemy.sub_tp == 0 { SpriteId::GRKP_000 } else { SpriteId::RDKP_000 };
+                    let base1 = if enemy.sub_tp == 0 { SpriteId::GRKP_001 } else { SpriteId::RDKP_001 };
+                    let sprite_id = if enemy.dir_counter % 16 <= 8 { base1 } else { base0 };
+                    let flip_x = !(enemy.dir_counter % 32 <= 16);
                     let uv = atlas.get(sprite_id);
                     vga.draw_sprite_flipped_world_gpu(enemy.x_pos, enemy.y_pos, uv, flip_x, false);
                 }
                 TP_SLEEPING_KOOPA => {
+                    // Oldsrc: enemy_pictures[8 + 2*sub_tp][0]（固定使用镜像帧）
                     let sprite_id = if enemy.sub_tp == 0 { SpriteId::GRKP_000 } else { SpriteId::RDKP_000 };
                     let uv = atlas.get(sprite_id);
-                    vga.draw_sprite_world_gpu(enemy.x_pos, enemy.y_pos, uv);
+                    vga.draw_sprite_flipped_world_gpu(enemy.x_pos, enemy.y_pos, uv, true, false);
                 }
                 TP_DEAD_KOOPA => {
+                    // Oldsrc: up_side_down(enemy_pictures[8 + 2*sub_tp][(dir_counter%16<=8)])
                     let sprite_id = if enemy.sub_tp == 0 { SpriteId::GRKP_000 } else { SpriteId::RDKP_000 };
-                    let flip_x = enemy.x_vel > 0;
+                    let flip_x = !(enemy.dir_counter % 16 <= 8);
                     let uv = atlas.get(sprite_id);
                     vga.draw_sprite_flipped_world_gpu(enemy.x_pos, enemy.y_pos, uv, flip_x, true);
                 }
@@ -665,23 +667,6 @@ impl Enemies {
                     enemy.counter += 1;
                 }
                 _ => {}
-            }
-        }
-    }
-
-    pub fn hide_enemies(&mut self, vga: &mut VGA) {
-        let page = vga.current_page() as usize;
-        // 逆序遍历当前活跃敌人（Pascal 常用倒序安全删除；这里主要是保持绘制/擦除顺序一致）
-        for &j in self.active_enemies.iter().rev() {
-            let j = j as usize;
-            if j >= self.enemies.len() {
-                continue;
-            }
-            let enemy = &mut self.enemies[j];
-            let addr = *enemy.back_gr.get(page).unwrap_or(&0);
-            if addr != 0 {
-                vga.pop_backgr_address(addr);
-                enemy.back_gr[page] = 0;
             }
         }
     }
@@ -719,29 +704,23 @@ impl Enemies {
             
             match enemy.tp {
                 TP_CHIBIBO => {
-                    // 栗子怪：帧0=CHIBIBO_000, 帧1=CHIBIBO_001 (普通) 或 CHIBIBO_002/003 (变种)
-                    let frame = (enemy.dir_counter % 32 < 16) as usize;
-                    let sprite_id = match (enemy.sub_tp, frame) {
-                        (0, 0) => SpriteId::CHIBIBO_000,
-                        (0, 1) => SpriteId::CHIBIBO_001,
-                        (_, 0) => SpriteId::CHIBIBO_002,
-                        (_, _) => SpriteId::CHIBIBO_003,
-                    };
-                    // 根据x_vel决定是否水平翻转
-                    let flip_x = enemy.x_vel < 0;
+                    // 对齐 Oldsrc: TP_CHIBIBO 使用 FigList[1 + 3*sub_tp] 的单个图像，
+                    // 并用 dir_counter 在左右镜像之间切换（作为走路动画效果）。
+                    let sprite_id = if enemy.sub_tp == 0 { SpriteId::CHIBIBO_000 } else { SpriteId::CHIBIBO_002 };
+                    let flip_x = !(enemy.dir_counter % 32 < 16);
                     let inst = self.create_enemy_sprite(atlas, sprite_id, sx, sy, flip_x, false);
                     commands.push(RenderCommand::DrawSprite(inst));
                 }
                 TP_FLAT_CHIBIBO => {
                     // 被踩扁的栗子怪
                     let sprite_id = if enemy.sub_tp == 0 { SpriteId::CHIBIBO_001 } else { SpriteId::CHIBIBO_003 };
-                    let flip_x = enemy.x_vel < 0;
+                    let flip_x = !(enemy.dir_counter % 32 < 16);
                     let inst = self.create_enemy_sprite(atlas, sprite_id, sx, sy, flip_x, false);
                     commands.push(RenderCommand::DrawSprite(inst));
                 }
                 TP_DEAD_CHIBIBO => {
                     // 死亡栗子怪 (上下翻转)
-                    let inst = self.create_enemy_sprite(atlas, SpriteId::CHIBIBO_000, sx, sy, false, true);
+                    let inst = self.create_enemy_sprite(atlas, SpriteId::CHIBIBO_000, sx, sy, true, true);
                     commands.push(RenderCommand::DrawSprite(inst));
                 }
                 TP_RISING_CHAMP => {
@@ -855,31 +834,36 @@ impl Enemies {
                     commands.push(RenderCommand::DrawSprite(inst));
                 }
                 TP_KOOPA => {
+                    // 对齐 Oldsrc: 乌龟本体（有头）使用 GRKOOPA/RDKOOPA + y_pos-10
                     let sprite_id = match (enemy.sub_tp, enemy.dir_counter % 16 <= 8) {
-                        (0, true) => SpriteId::GRKP_000,  // 绿龟帧0
-                        (0, false) => SpriteId::GRKP_001, // 绿龟帧1
-                        (_, true) => SpriteId::RDKP_000,  // 红龟帧0
-                        (_, false) => SpriteId::RDKP_001, // 红龟帧1
+                        (0, true) => SpriteId::GRKOOPA_000,
+                        (0, false) => SpriteId::GRKOOPA_001,
+                        (_, true) => SpriteId::RDKOOPA_000,
+                        (_, false) => SpriteId::RDKOOPA_001,
                     };
                     let flip_x = enemy.x_vel > 0;
                     let inst = self.create_enemy_sprite(atlas, sprite_id, sx, sy - 10.0, flip_x, false);
                     commands.push(RenderCommand::DrawSprite(inst));
                 }
                 TP_WAKING_KOOPA | TP_RUNNING_KOOPA => {
-                    // 龟壳状态
-                    let sprite_id = if enemy.sub_tp == 0 { SpriteId::GRKP_000 } else { SpriteId::RDKP_000 };
-                    let flip_x = enemy.x_vel > 0;
+                    // 对齐 Oldsrc: shell 跑动/抖动帧 = GRKP_000/001 + 左右镜像切换
+                    let base0 = if enemy.sub_tp == 0 { SpriteId::GRKP_000 } else { SpriteId::RDKP_000 };
+                    let base1 = if enemy.sub_tp == 0 { SpriteId::GRKP_001 } else { SpriteId::RDKP_001 };
+                    let sprite_id = if enemy.dir_counter % 16 <= 8 { base1 } else { base0 };
+                    let flip_x = !(enemy.dir_counter % 32 <= 16);
                     let inst = self.create_enemy_sprite(atlas, sprite_id, sx, sy, flip_x, false);
                     commands.push(RenderCommand::DrawSprite(inst));
                 }
                 TP_SLEEPING_KOOPA => {
+                    // Oldsrc: enemy_pictures[8 + 2*sub_tp][0]（固定使用镜像帧）
                     let sprite_id = if enemy.sub_tp == 0 { SpriteId::GRKP_000 } else { SpriteId::RDKP_000 };
-                    let inst = self.create_enemy_sprite(atlas, sprite_id, sx, sy, false, false);
+                    let inst = self.create_enemy_sprite(atlas, sprite_id, sx, sy, true, false);
                     commands.push(RenderCommand::DrawSprite(inst));
                 }
                 TP_DEAD_KOOPA => {
+                    // Oldsrc: up_side_down(enemy_pictures[8 + 2*sub_tp][(dir_counter%16<=8)])
                     let sprite_id = if enemy.sub_tp == 0 { SpriteId::GRKP_000 } else { SpriteId::RDKP_000 };
-                    let flip_x = enemy.x_vel > 0;
+                    let flip_x = !(enemy.dir_counter % 16 <= 8);
                     let inst = self.create_enemy_sprite(atlas, sprite_id, sx, sy, flip_x, true);
                     commands.push(RenderCommand::DrawSprite(inst));
                 }

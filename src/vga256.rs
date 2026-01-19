@@ -183,14 +183,6 @@ impl VGA {
         &mut self.sprite_batch
     }
 
-    // ========================================================================
-    // 兼容旧API的空操作方法（GPU模式下不执行任何操作）
-    // 这些方法保留是为了让现有代码编译通过，后续逐步移除
-    // ========================================================================
-
-    /// 请求窗口重绘（空操作）
-    pub fn request_redraw(&self) {}
-
     /// 翻页（保留页面状态管理）
     pub fn swap_pages(&mut self) {
         match self.page {
@@ -220,30 +212,6 @@ impl VGA {
     pub fn clear(&mut self) {
         self.sprite_batch.clear();
     }
-
-    pub fn detect_vga() -> bool { true }
-    pub fn get_mode() -> u8 { 0x13 }
-    pub fn set_mode(&mut self, new_mode: u8) {
-        if new_mode == 0x13 { self.in_graphics_mode = true; }
-    }
-    pub fn set_width(&mut self, _new_width: i32) {}
-
-    pub fn init_vga(&mut self) {
-        self.clear_palette();
-        self.set_mode(0x13);
-        self.clear_palette();
-        self.in_graphics_mode = true;
-    }
-
-    pub fn old_mode(&mut self) {
-        self.clear_palette();
-        self.set_mode(0x03);
-        self.in_graphics_mode = false;
-    }
-
-    pub fn wait_display(&self) {}
-    pub fn wait_retrace(&self) {}
-    pub fn present(&mut self) {}
 
     pub fn set_palette(&mut self, color: u8, red: u8, green: u8, blue: u8) {
         if self.palette.lock_palette { return; }
@@ -376,93 +344,4 @@ impl VGA {
     pub fn scroll_screen_x(&mut self, _dx: i32) {
         // GPU模式下不需要移动像素，每帧完整重绘
     }
-
-    // ========================================================================
-    // 以下是保留的兼容性空方法，供编译通过
-    // 实际绘制已移至GPU
-    // ========================================================================
-
-    /// 像素写入（空操作，GPU模式下使用fill_gpu）
-    pub fn put_pixel(&mut self, _x: i32, _y: i32, _attr: u8) {}
-    pub fn put_pixel_world(&mut self, _x: i32, _y: i32, _attr: u8) {}
-    
-    /// 像素读取（始终返回0）
-    pub fn get_pixel(&self, _x: i32, _y: i32) -> u8 { 0 }
-    pub fn get_pixel_world(&self, _x: i32, _y: i32) -> u8 { 0 }
-    
-    /// 填充矩形（转发到GPU）
-    pub fn fill(&mut self, x: i32, y: i32, w: i32, h: i32, attr: u8) {
-        self.fill_gpu(x, y, w, h, attr);
-    }
-    pub fn fill_world(&mut self, x_world: i32, y_world: i32, w: i32, h: i32, attr: u8) {
-        self.fill_world_gpu(x_world, y_world, w, h, attr);
-    }
-
-    /// 图像绘制（空操作，使用draw_sprite_*_gpu代替）
-    pub fn draw_image(&mut self, _xpos: i32, _ypos: i32, _width: i32, _height: i32, _bitmap: &[u8]) {}
-    pub fn draw_image_world(&mut self, _x: i32, _y: i32, _w: i32, _h: i32, _bitmap: &[u8]) {}
-    pub fn put_image(&mut self, _xpos: i32, _ypos: i32, _width: i32, _height: i32, _bitmap: &[u8]) {}
-    pub fn put_image_world(&mut self, _x: i32, _y: i32, _w: i32, _h: i32, _bitmap: &[u8]) {}
-    
-    pub fn draw_image_imagebuffer<const WW: usize, const HH: usize>(&mut self, _x: i32, _y: i32, _bitmap: &[[u8; WW]; HH]) {}
-    pub fn draw_image_imagebuffer_world<const WW: usize, const HH: usize>(&mut self, _x: i32, _y: i32, _bitmap: &[[u8; WW]; HH]) {}
-    pub fn put_image_imagebuffer<const WW: usize, const HH: usize>(&mut self, _x: i32, _y: i32, _bitmap: &[[u8; WW]; HH]) {}
-    pub fn put_image_imagebuffer_world<const WW: usize, const HH: usize>(&mut self, _x: i32, _y: i32, _bitmap: &[[u8; WW]; HH]) {}
-    
-    pub fn draw_image_imagebuffer_partial<const WW: usize, const HH: usize>(&mut self, _x: i32, _y: i32, _w: usize, _h: usize, _bitmap: &[[u8; WW]; HH]) {}
-    pub fn put_image_imagebuffer_partial<const WW: usize, const HH: usize>(&mut self, _x: i32, _y: i32, _w: usize, _h: usize, _bitmap: &[[u8; WW]; HH]) {}
-    pub fn put_image_imagebuffer_partial_world<const WW: usize, const HH: usize>(&mut self, _x: i32, _y: i32, _w: usize, _h: usize, _bitmap: &[[u8; WW]; HH]) {}
-    
-    pub fn draw_part_imagebuffer<const WW: usize, const HH: usize>(&mut self, _x: i32, _y: i32, _y1: usize, _y2: usize, _bitmap: &[[u8; WW]; HH]) {}
-    pub fn draw_part_imagebuffer_world<const WW: usize, const HH: usize>(&mut self, _x: i32, _y: i32, _y1: usize, _y2: usize, _bitmap: &[[u8; WW]; HH]) {}
-    
-    pub fn up_side_down_imagebuffer<const WW: usize, const HH: usize>(&mut self, _x: i32, _y: i32, _bitmap: &[[u8; WW]; HH]) {}
-    pub fn up_side_down_imagebuffer_world<const WW: usize, const HH: usize>(&mut self, _x: i32, _y: i32, _bitmap: &[[u8; WW]; HH]) {}
-    pub fn up_side_down(&mut self, _x: i32, _y: i32, _w: i32, _h: i32, _bitmap: &[u8]) {}
-    
-    pub fn draw_part(&mut self, _x: i32, _y: i32, _w: i32, _h: i32, _y1: i32, _y2: i32, _bitmap: &[u8]) {}
-    
-    pub fn recolor_image<const WW: usize, const HH: usize>(&mut self, _x: i32, _y: i32, _bitmap: &[[u8; WW]; HH], _color: i32) {}
-    pub fn recolor_image_world<const WW: usize, const HH: usize>(&mut self, _x: i32, _y: i32, _bitmap: &[[u8; WW]; HH], _color: i32) {}
-    pub fn recolor_image_pascal(&mut self, _x: i32, _y: i32, _w: i32, _h: i32, _bitmap: &[u8], _diff: u8) {}
-    
-    pub fn draw_sprite<const W: usize, const H: usize>(&mut self, _x: i32, _y: i32, _sprite: &crate::sprites::Sprite<W, H>) {}
-    pub fn draw_sprite_world<const W: usize, const H: usize>(&mut self, _x: i32, _y: i32, _sprite: &crate::sprites::Sprite<W, H>) {}
-    
-    pub fn get_image(&self, _x: i32, _y: i32, _w: i32, _h: i32, _bitmap: &mut [u8]) {}
-    pub fn get_image_world(&self, _x: i32, _y: i32, _w: i32, _h: i32, _bitmap: &mut [u8]) {}
-    pub fn get_image_imagebuffer<const WW: usize, const HH: usize>(&self, _x: i32, _y: i32, _buf: &mut [[u8; WW]; HH]) {}
-    pub fn get_image_imagebuffer_world<const WW: usize, const HH: usize>(&self, _x: i32, _y: i32, _buf: &mut [[u8; WW]; HH]) {}
-    
-    pub fn draw_bitmap(&mut self, _x: i32, _y: i32, _bitmap: &[u8], _attr: u8) {}
-
-    /// 背景保存/恢复（空操作，GPU每帧完整重绘）
-    pub fn push_backgr(&self, _x: i32, _y: i32, _w: i32, _h: i32) -> Vec<u8> { Vec::new() }
-    pub fn push_backgr_world(&self, _x: i32, _y: i32, _w: i32, _h: i32) -> Vec<u8> { Vec::new() }
-    pub fn push_backgr_address(&mut self, _x: i32, _y: i32, _w: i32, _h: i32) -> i32 { 0 }
-    pub fn push_backgr_address_world(&mut self, _x: i32, _y: i32, _w: i32, _h: i32) -> i32 { 0 }
-    pub fn pop_backgr(&mut self, _buf: &Vec<u8>) {}
-    pub fn pop_backgr_address(&mut self, _address: i32) {}
-
-    // ========================================================================
-    // render_to_rgba保留用于过渡期（返回黑色画面）
-    // ========================================================================
-    
-    /// 渲染到RGBA（过渡用，返回黑色）
-    pub fn render_to_rgba(&self, output: &mut [u8]) {
-        // GPU模式下framebuffer为空，填充黑色
-        for chunk in output.chunks_exact_mut(4) {
-            chunk[0] = 0; chunk[1] = 0; chunk[2] = 0; chunk[3] = 255;
-        }
-    }
-}
-
-// 兼容旧代码的BackgroundData结构
-#[derive(Clone)]
-pub struct BackgroundData {
-    pub x: i32,
-    pub y: i32,
-    pub width: i32,
-    pub height: i32,
-    pub data: Vec<u8>,
 }

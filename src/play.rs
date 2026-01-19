@@ -1,4 +1,4 @@
-﻿// play.rs
+// play.rs
 // Rust 严格结构体骨架移植自 Pascal Play.pas
 
 use crate::context::GameContext;
@@ -89,8 +89,6 @@ pub struct Play {
     // 其它全局变量
     pub waiting: bool,
     pub text_status: bool,
-    // Pascal: TotalBackGrAddr: array[0..MAX_PAGE] of Integer; 0表示无效
-    pub total_backgr_addr: Vec<i32>,
     pub show_score: bool,
     pub counting_score: bool,
     pub show_objects: bool,
@@ -108,7 +106,6 @@ pub struct Play {
     // 暂停状态相关
     pub pause_state: PauseState,
     pub pause_cheat: String,
-    pub pause_back: i32,
     pub pause_old_scan_code: u8,
     pub pause_text: String,
     pub pause_tab_mode: bool,
@@ -130,7 +127,6 @@ impl Play {
             cheats_used: 0,
             waiting: false,
             text_status: false,
-            total_backgr_addr: vec![0; MAX_PAGE as usize + 1],
             show_score: false,
             counting_score: false,
             show_objects: true,
@@ -143,7 +139,6 @@ impl Play {
             // 暂停相关初始化
             pause_state: PauseState::Init,
             pause_cheat: String::new(),
-            pause_back: 0,
             pause_old_scan_code: 0,
             pause_text: String::from("PAUSE"),
             pause_tab_mode: false,
@@ -270,7 +265,7 @@ impl Play {
         glitters: &mut GlitterSystem,
         tmpobj: &mut TmpObjManager,
         sprites: &mut SpriteDataManager,
-        atlas: &crate::sprites::SpriteAtlas,
+        atlas: &mut crate::sprites::SpriteAtlas,
         keyboard: &mut Keyboard,
         joystick: &mut JoystickState,
         cur_player: u8,
@@ -435,7 +430,7 @@ impl Play {
                 // 设置世界编号
                 buffers.world_number = world_number.to_string();
                 buffers.init_level_score();
-                self.total_backgr_addr = vec![0; MAX_PAGE as usize + 1];
+                // GPU渲染每帧完全重绘，不需要背景保存/恢复
                 
                 // 设置视口
                 buffers.x_view = 0;
@@ -468,6 +463,9 @@ impl Play {
                 }
                 
                 figures.build_world(&mut buffers.world_map, current_opt, sprites);
+                // BuildWorld 会重着色/转换草地等，会修改 sprites 内容
+                // GPU 图集必须同步更新，否则地面/砖块/草颜色与 Oldsrc 不一致
+                *atlas = sprites.build_atlas();
                 
                 self.phase = PlayPhase::Restart;
                 PlayResult::Continue
@@ -499,6 +497,7 @@ impl Play {
                 }
                 
                 figures.build_world(&mut buffers.world_map, current_opt, sprites);
+                *atlas = sprites.build_atlas();
                 
                 self.phase = PlayPhase::Restart;
                 PlayResult::Continue
@@ -609,7 +608,7 @@ impl Play {
                     vga.page = page;
                     
                     let mut ctx = RenderContext {
-                        vga, buffers, backgr, figures, sprites, atlas, blocks,
+                        vga, buffers, backgr, figures, sprites, atlas: &*atlas, blocks,
                         enemies, players, tmpobj, stars, glitters,
                         status: status_mgr, txt,
                     };
@@ -695,7 +694,7 @@ impl Play {
                     vga.page = page;
                     
                     let mut ctx = RenderContext {
-                        vga, buffers, backgr, figures, sprites, atlas, blocks,
+                        vga, buffers, backgr, figures, sprites, atlas: &*atlas, blocks,
                         enemies, players, tmpobj, stars, glitters,
                         status: status_mgr, txt,
                     };
@@ -712,7 +711,7 @@ impl Play {
             PlayPhase::GameLoop => {
                 self.game_loop_tick(
                     vga, txt, music, buffers, players, enemies, backgr, figures,
-                    stars, blocks, status_mgr, glitters, tmpobj, sprites, atlas,
+                    stars, blocks, status_mgr, glitters, tmpobj, sprites, &*atlas,
                     keyboard, joystick, cur_player,
                 )
             }
@@ -961,7 +960,23 @@ impl Play {
         if p_key_held && !self.p_key_was_pressed {
             // P键刚被按下，进入暂停状态
             self.p_key_was_pressed = true;
-            self.start_pause(vga, txt, music, buffers);
+            self.start_pause(
+                vga,
+                txt,
+                music,
+                buffers,
+                backgr,
+                figures,
+                sprites,
+                atlas,
+                blocks,
+                enemies,
+                players,
+                tmpobj,
+                stars,
+                glitters,
+                status_mgr,
+            );
             return PlayResult::Continue;
         }
         if !p_key_held {
@@ -1287,9 +1302,7 @@ impl Play {
         if buffers.passed && self.counting_score {
             music_player.beep(4 * 880);
         }
-        let page = vga.current_page() as usize;
-        self.total_backgr_addr[page] =
-            vga.push_backgr_address_world(buffers.x_view + 160, 120, 120, 8);
+        let _ = vga;
         if buffers.passed && self.counting_score {
             music_player.beep(2 * 880);
         }
@@ -1300,12 +1313,8 @@ impl Play {
     }
 
     pub fn hide_total_back(&mut self, vga: &mut VGA) {
-        let page = vga.current_page() as usize;
-        let addr = self.total_backgr_addr[page];
-        if addr != 0 {
-            vga.pop_backgr_address(addr);
-        }
-        self.total_backgr_addr[page] = 0;
+        let _ = vga;
+        // GPU渲染每帧完全重绘，不需要背景恢复
     }
 
     /// 开始暂停（初始化暂停状态）
@@ -1315,6 +1324,17 @@ impl Play {
         txt: &mut Txt,
         music: &mut MusicPlayer,
         buffers: &mut Buffers,
+        backgr: &mut BackGr,
+        figures: &mut Figures,
+        sprites: &mut SpriteDataManager,
+        atlas: &crate::sprites::SpriteAtlas,
+        blocks: &mut Blocks,
+        enemies: &mut Enemies,
+        players: &mut Players,
+        tmpobj: &mut TmpObjManager,
+        stars: &mut Stars,
+        glitters: &mut GlitterSystem,
+        status_mgr: &mut Status,
     ) {
         // 初始化暂停状态
         self.pause_text = String::from("PAUSE");
@@ -1333,8 +1353,42 @@ impl Play {
         // 交换页面 - 关键：在另一页上绘制暂停界面，原始游戏页面保持不变
         vga.swap_pages();
         
-        // 保存暂停界面的背景区域（整个显示区域）
-        self.pause_back = vga.push_backgr_address_world(buffers.x_view + 160, 80, 300, 100);
+        // GPU 全量重绘：对齐 Oldsrc 的 hide_* 行为
+        // 在暂停页先渲染一次“无玩家/无状态栏/无对象”的世界帧，避免暂停画面残留 Mario/状态栏
+        let prev_show_objects = self.renderer.show_objects;
+        let prev_show_status = self.renderer.show_status;
+        let prev_show_players = self.renderer.show_players;
+        let prev_only_draw = self.renderer.only_draw;
+
+        self.renderer.show_objects = false;
+        self.renderer.show_status = false;
+        self.renderer.show_players = false;
+        self.renderer.only_draw = false;
+
+        {
+            let mut ctx = RenderContext {
+                vga,
+                buffers,
+                backgr,
+                figures,
+                sprites,
+                atlas,
+                blocks,
+                enemies,
+                players,
+                tmpobj,
+                stars,
+                glitters,
+                status: status_mgr,
+                txt,
+            };
+            self.renderer.render_game_frame(&mut ctx);
+        }
+
+        self.renderer.show_objects = prev_show_objects;
+        self.renderer.show_status = prev_show_status;
+        self.renderer.show_players = prev_show_players;
+        self.renderer.only_draw = prev_only_draw;
         
         // 设置调色板 - 只设置0x0F为白色，与Pascal一致
         // 注意：不要设置0x07-0x0B等，因为它们被河流/瀑布动画使用（颜色索引7-11）
@@ -1465,11 +1519,7 @@ impl Play {
                             let clear_y = 145;
                             let clear_w = 120;
                             let clear_h = 10;
-                            for py in clear_y..(clear_y + clear_h) {
-                                for px in clear_x..(clear_x + clear_w) {
-                                    vga.put_pixel(px, py, 0); // 黑色
-                                }
-                            }
+                            vga.fill_world_gpu(clear_x, clear_y, clear_w, clear_h, 0);
                             
                             // 在底部显示当前输入的作弊码
                             txt.set_font(0, FontStyle::BOLD | FontStyle::SHADOW);
@@ -1499,7 +1549,7 @@ impl Play {
             PauseState::Exiting => {
                 // 切换回原始游戏页面
                 vga.swap_pages();
-                self.pause_back = 0;
+                // GPU渲染每帧完全重绘，不需要背景恢复
                 
                 // 淡入恢复调色板（对应Pascal的FadeUp(8)）
                 vga.palette_fade_up_wrapper(8);
@@ -1702,10 +1752,7 @@ impl Play {
                     .wrapping_sub(((i - 1) % 8) as u8 * 0x10);
                 self.pause_text.push(decoded as char);
             }
-            if self.pause_back != 0 {
-                vga.pop_backgr_address(self.pause_back);
-            }
-            self.pause_back = vga.push_backgr_address_world(buffers.x_view + 20, 85, 280, 10);
+            // GPU渲染每帧完全重绘，不需要背景保存/恢复
             txt.center_text(vga, 85, &self.pause_text, 0x0F, buffers.x_view, SCREEN_WIDTH);
             // 不立即退出，让用户看到信息
             return false;

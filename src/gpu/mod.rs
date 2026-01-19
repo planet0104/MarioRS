@@ -33,6 +33,10 @@ pub struct SpriteInstance {
     pub palette_offset: f32,
     // 调色板索引 (选择哪个预烘焙调色板)
     pub palette_index: f32,
+    // 不透明绘制标志: 1表示索引0也参与绘制
+    pub opaque: f32,
+    // 旋转: 0=0度, 1=90度, 2=180度, 3=270度
+    pub rotation: f32,
 }
 
 impl SpriteInstance {
@@ -45,6 +49,8 @@ impl SpriteInstance {
             flip: [0.0, 0.0],
             palette_offset: 0.0,
             palette_index: 0.0,
+            opaque: 0.0,
+            rotation: 0.0,
         }
     }
 
@@ -56,6 +62,16 @@ impl SpriteInstance {
     pub fn with_palette(mut self, offset: f32, index: f32) -> Self {
         self.palette_offset = offset;
         self.palette_index = index;
+        self
+    }
+
+    pub fn with_opaque(mut self, opaque: bool) -> Self {
+        self.opaque = if opaque { 1.0 } else { 0.0 };
+        self
+    }
+
+    pub fn with_rotation(mut self, rotation: u8) -> Self {
+        self.rotation = (rotation % 4) as f32;
         self
     }
 }
@@ -125,6 +141,8 @@ pub struct GpuRenderer {
     // wgpu核心对象
     pub device: Arc<wgpu::Device>,
     pub queue: Arc<wgpu::Queue>,
+    // 用于采样的通用 sampler（nearest）
+    pub sampler: wgpu::Sampler,
     
     // 渲染目标纹理 (游戏画面)
     pub render_texture: wgpu::Texture,
@@ -149,6 +167,14 @@ pub struct GpuRenderer {
     // 最终缩放输出管线
     pub scale_pipeline: wgpu::RenderPipeline,
     pub scale_bind_group: wgpu::BindGroup,
+
+    // overlay: Android 触摸面板 / FPS 等叠加层（RGBA 纹理，按窗口像素尺寸）
+    pub overlay_texture: wgpu::Texture,
+    pub overlay_texture_view: wgpu::TextureView,
+    pub overlay_bind_group_layout: wgpu::BindGroupLayout,
+    pub overlay_bind_group: wgpu::BindGroup,
+    pub overlay_pipeline: wgpu::RenderPipeline,
+    pub overlay_size: [u32; 2],
     
     // uniform缓冲区
     pub camera_buffer: wgpu::Buffer,
@@ -185,6 +211,8 @@ struct SpriteInstance {
     @location(4) flip: vec2<f32>,
     @location(5) palette_offset: f32,
     @location(6) palette_index: f32,
+    @location(7) opaque: f32,
+    @location(8) rotation: f32,
 }
 
 struct VertexOutput {
@@ -192,6 +220,7 @@ struct VertexOutput {
     @location(0) uv: vec2<f32>,
     @location(1) palette_offset: f32,
     @location(2) palette_index: f32,
+    @location(3) opaque: f32,
 }
 
 @vertex
@@ -207,8 +236,17 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32, instance: SpriteInstance) -
     let screen_pos = instance.position + pos * instance.size;
     let ndc = (screen_pos / camera.screen_size) * 2.0 - 1.0;
     
-    // 计算UV (考虑翻转)
+    // 计算UV (考虑旋转 + 翻转)
+    // 约定：先旋转(0/90/180/270)，再翻转（便于复现 Pascal 的 rotate/mirror 组合）
     var uv = pos;
+    let r = u32(instance.rotation + 0.5) & 3u;
+    if (r == 1u) {
+        uv = vec2<f32>(uv.y, 1.0 - uv.x);
+    } else if (r == 2u) {
+        uv = vec2<f32>(1.0 - uv.x, 1.0 - uv.y);
+    } else if (r == 3u) {
+        uv = vec2<f32>(1.0 - uv.y, uv.x);
+    }
     if (instance.flip.x > 0.5) { uv.x = 1.0 - uv.x; }
     if (instance.flip.y > 0.5) { uv.y = 1.0 - uv.y; }
     uv = instance.uv_offset + uv * instance.uv_size;
@@ -218,6 +256,7 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32, instance: SpriteInstance) -
     output.uv = uv;
     output.palette_offset = instance.palette_offset;
     output.palette_index = instance.palette_index;
+    output.opaque = instance.opaque;
     return output;
 }
 
@@ -225,10 +264,18 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32, instance: SpriteInstance) -
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // 从图集采样调色板索引
     let index_color = textureSample(atlas_texture, tex_sampler, in.uv);
-    let palette_idx = u32(index_color.r * 255.0 + in.palette_offset) % 256u;
-    
-    // 透明像素 (索引0)
-    if (palette_idx == 0u) { discard; }
+    // 重要：必须先按“原始索引0”判断透明，再做 palette_offset。
+    // 否则 star/growing 的 palette_offset 会把 0 偏移成非 0，透明像素变成不透明，出现方块背景闪烁。
+    let raw_idx = i32(index_color.r * 255.0 + 0.5);
+    if (raw_idx == 0 && in.opaque < 0.5) { discard; }
+
+    var palette_i = raw_idx;
+    if (raw_idx != 0) {
+        let off = i32(in.palette_offset);
+        palette_i = (raw_idx + off) % 256;
+        if (palette_i < 0) { palette_i = palette_i + 256; }
+    }
+    let palette_idx = u32(palette_i);
     
     // 从调色板纹理查找颜色
     let palette_row = u32(in.palette_index);
@@ -323,11 +370,53 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 }
 "#;
 
+// overlay 输出着色器（直接以 alpha blending 叠加到 surface 上）
+const OVERLAY_SHADER: &str = r#"
+@group(0) @binding(0) var overlay_texture: texture_2d<f32>;
+@group(0) @binding(1) var tex_sampler: sampler;
+
+struct VertexOutput {
+    @builtin(position) clip_position: vec4<f32>,
+    @location(0) uv: vec2<f32>,
+}
+
+@vertex
+fn vs_main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
+    var positions = array<vec2<f32>, 6>(
+        vec2<f32>(-1.0, -1.0), vec2<f32>(1.0, -1.0), vec2<f32>(-1.0, 1.0),
+        vec2<f32>(1.0, -1.0), vec2<f32>(1.0, 1.0), vec2<f32>(-1.0, 1.0)
+    );
+    let pos = positions[vertex_index];
+
+    var output: VertexOutput;
+    output.clip_position = vec4<f32>(pos, 0.0, 1.0);
+    output.uv = (pos + 1.0) * 0.5;
+    output.uv.y = 1.0 - output.uv.y;
+    return output;
+}
+
+@fragment
+fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
+    return textureSample(overlay_texture, tex_sampler, in.uv);
+}
+"#;
+
 impl GpuRenderer {
     // 创建GPU渲染器
-    pub fn new(device: Arc<wgpu::Device>, queue: Arc<wgpu::Queue>) -> Self {
+    pub fn new(device: Arc<wgpu::Device>, queue: Arc<wgpu::Queue>, surface_format: wgpu::TextureFormat) -> Self {
+        // 创建采样器
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("nearest_sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        });
+
         // 创建渲染目标纹理
-        // 添加COPY_DST以支持从CPU上传framebuffer
         let render_texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("render_texture"),
             size: wgpu::Extent3d {
@@ -341,7 +430,7 @@ impl GpuRenderer {
             format: wgpu::TextureFormat::Rgba8UnormSrgb,
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT 
                  | wgpu::TextureUsages::TEXTURE_BINDING
-                 | wgpu::TextureUsages::COPY_DST,
+                 ,
             view_formats: &[],
         });
         let render_texture_view = render_texture.create_view(&wgpu::TextureViewDescriptor::default());
@@ -386,18 +475,6 @@ impl GpuRenderer {
             label: Some("camera_buffer"),
             contents: bytemuck::cast_slice(&[camera]),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
-
-        // 创建采样器
-        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            label: Some("nearest_sampler"),
-            address_mode_u: wgpu::AddressMode::ClampToEdge,
-            address_mode_v: wgpu::AddressMode::ClampToEdge,
-            address_mode_w: wgpu::AddressMode::ClampToEdge,
-            mag_filter: wgpu::FilterMode::Nearest,
-            min_filter: wgpu::FilterMode::Nearest,
-            mipmap_filter: wgpu::FilterMode::Nearest,
-            ..Default::default()
         });
 
         // 创建精灵着色器模块
@@ -485,6 +562,8 @@ impl GpuRenderer {
                 wgpu::VertexAttribute { offset: 32, shader_location: 4, format: wgpu::VertexFormat::Float32x2 },
                 wgpu::VertexAttribute { offset: 40, shader_location: 5, format: wgpu::VertexFormat::Float32 },
                 wgpu::VertexAttribute { offset: 44, shader_location: 6, format: wgpu::VertexFormat::Float32 },
+                wgpu::VertexAttribute { offset: 48, shader_location: 7, format: wgpu::VertexFormat::Float32 },
+                wgpu::VertexAttribute { offset: 52, shader_location: 8, format: wgpu::VertexFormat::Float32 },
             ],
         };
 
@@ -701,8 +780,102 @@ impl GpuRenderer {
                 module: &scale_shader,
                 entry_point: Some("fs_main"),
                 targets: &[Some(wgpu::ColorTargetState {
-                    format: wgpu::TextureFormat::Bgra8UnormSrgb,
+                    format: surface_format,
                     blend: None,
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                ..Default::default()
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+            cache: None,
+        });
+
+        // overlay 纹理：默认 1x1 全透明
+        let overlay_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("overlay_texture"),
+            size: wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        let overlay_texture_view = overlay_texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+        let overlay_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("overlay_bind_group_layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        });
+
+        let overlay_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("overlay_bind_group"),
+            layout: &overlay_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&overlay_texture_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&sampler),
+                },
+            ],
+        });
+
+        let overlay_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("overlay_shader"),
+            source: wgpu::ShaderSource::Wgsl(OVERLAY_SHADER.into()),
+        });
+
+        let overlay_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("overlay_pipeline_layout"),
+            bind_group_layouts: &[&overlay_bind_group_layout],
+            push_constant_ranges: &[],
+        });
+
+        let overlay_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("overlay_pipeline"),
+            layout: Some(&overlay_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &overlay_shader,
+                entry_point: Some("vs_main"),
+                buffers: &[],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &overlay_shader,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: surface_format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
                 compilation_options: Default::default(),
@@ -720,6 +893,7 @@ impl GpuRenderer {
         Self {
             device,
             queue,
+            sampler,
             render_texture,
             render_texture_view,
             atlas_texture,
@@ -732,6 +906,12 @@ impl GpuRenderer {
             fill_bind_group,
             scale_pipeline,
             scale_bind_group,
+            overlay_texture,
+            overlay_texture_view,
+            overlay_bind_group_layout,
+            overlay_bind_group,
+            overlay_pipeline,
+            overlay_size: [1, 1],
             camera_buffer,
             scale_buffer,
             sprite_instances: Vec::with_capacity(MAX_SPRITES_PER_BATCH),
@@ -739,6 +919,104 @@ impl GpuRenderer {
             current_palette: 0,
             camera,
         }
+    }
+
+    /// 上传 overlay RGBA 到 GPU（width/height 是窗口像素尺寸）
+    pub fn upload_overlay_rgba(&mut self, width: u32, height: u32, rgba: &[u8]) {
+        if width == 0 || height == 0 {
+            return;
+        }
+        let expected = (width * height * 4) as usize;
+        if rgba.len() != expected {
+            eprintln!("[GPU] overlay大小不匹配: {} vs {}", rgba.len(), expected);
+            return;
+        }
+        self.ensure_overlay_texture(width, height);
+        self.queue.write_texture(
+            wgpu::ImageCopyTexture {
+                texture: &self.overlay_texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            rgba,
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: Some(width * 4),
+                rows_per_image: Some(height),
+            },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+        );
+    }
+
+    /// 清空 overlay（设置为 1x1 全透明纹理）
+    pub fn clear_overlay(&mut self) {
+        self.ensure_overlay_texture(1, 1);
+        let transparent = [0u8, 0u8, 0u8, 0u8];
+        self.queue.write_texture(
+            wgpu::ImageCopyTexture {
+                texture: &self.overlay_texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &transparent,
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: Some(4),
+                rows_per_image: Some(1),
+            },
+            wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+        );
+    }
+
+    fn ensure_overlay_texture(&mut self, width: u32, height: u32) {
+        if self.overlay_size[0] == width && self.overlay_size[1] == height {
+            return;
+        }
+
+        let overlay_texture = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("overlay_texture"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        let overlay_texture_view = overlay_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let overlay_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("overlay_bind_group"),
+            layout: &self.overlay_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&overlay_texture_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&self.sampler),
+                },
+            ],
+        });
+
+        self.overlay_texture = overlay_texture;
+        self.overlay_texture_view = overlay_texture_view;
+        self.overlay_bind_group = overlay_bind_group;
+        self.overlay_size = [width, height];
     }
 
     // 上传精灵图集到GPU
@@ -938,48 +1216,28 @@ impl GpuRenderer {
             render_pass.draw(0..6, 0..1);
         }
 
-        self.queue.submit(std::iter::once(encoder.finish()));
-    }
-    
-    /// 上传CPU渲染的RGBA framebuffer到GPU纹理
-    /// 这是一个临时方案，用于在完整GPU渲染管线实现之前显示游戏画面
-    pub fn upload_framebuffer(&self, rgba_data: &[u8]) {
-        // 验证数据大小
-        let expected_size = (GAME_WIDTH * GAME_HEIGHT * 4) as usize;
-        if rgba_data.len() != expected_size {
-            eprintln!("[GPU] framebuffer大小不匹配: {} vs {}", rgba_data.len(), expected_size);
-            return;
+        // overlay pass：在缩放后的输出上叠加（Load 保留上一 pass 的颜色）
+        {
+            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("overlay_render_pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: surface_view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+
+            render_pass.set_pipeline(&self.overlay_pipeline);
+            render_pass.set_bind_group(0, &self.overlay_bind_group, &[]);
+            render_pass.draw(0..6, 0..1);
         }
-        
-        // 上传到渲染纹理
-        self.queue.write_texture(
-            wgpu::ImageCopyTexture {
-                texture: &self.render_texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            rgba_data,
-            wgpu::ImageDataLayout {
-                offset: 0,
-                bytes_per_row: Some(GAME_WIDTH * 4),
-                rows_per_image: Some(GAME_HEIGHT),
-            },
-            wgpu::Extent3d {
-                width: GAME_WIDTH,
-                height: GAME_HEIGHT,
-                depth_or_array_layers: 1,
-            },
-        );
-    }
-    
-    /// 将CPU渲染的framebuffer显示到窗口surface
-    /// 这是一个完整的渲染流程：上传framebuffer + 缩放输出
-    pub fn present_framebuffer(&self, rgba_data: &[u8], surface_view: &wgpu::TextureView) {
-        // 上传framebuffer到GPU纹理
-        self.upload_framebuffer(rgba_data);
-        
-        // 缩放输出到窗口surface
-        self.render_to_surface(surface_view);
+
+        self.queue.submit(std::iter::once(encoder.finish()));
     }
 }

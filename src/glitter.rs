@@ -145,8 +145,8 @@ impl GlitterSystem {
     pub fn collect_glitter_gpu(
         &self,
         commands: &mut Vec<RenderCommand>,
-        x_view: i32,
-        y_view: i32,
+        _x_view: i32,
+        _y_view: i32,
         palette_index: u32,
     ) {
         let num_glitter = self.count[0];
@@ -158,19 +158,16 @@ impl GlitterSystem {
             // 只渲染活跃的闪光 (count > MAX_PAGE + 1 表示可见)
             if self.count[i] > (MAX_PAGE as u8 + 1) {
                 let glitter = &self.glitter_list[i];
-                let world_x = (glitter.pos % VIR_SCREEN_WIDTH as u16) as i32;
-                let world_y = (glitter.pos / VIR_SCREEN_WIDTH as u16) as i32;
-                
-                // 转换为屏幕坐标
-                let sx = (world_x - x_view) as f32;
-                let sy = (world_y - y_view) as f32;
-                
-                // 检查是否在可视区域内
-                if sx >= 0.0 && sx < crate::vga256::SCREEN_WIDTH as f32
-                    && sy >= 0.0 && sy < crate::vga256::SCREEN_HEIGHT as f32
+                // 注意：pos 在 Oldsrc 中存的是“屏幕坐标”（创建时已经减过 x_view/y_view）
+                let x = (glitter.pos % VIR_SCREEN_WIDTH as u16) as f32;
+                let y = (glitter.pos / VIR_SCREEN_WIDTH as u16) as f32;
+
+                if x >= 0.0
+                    && x < crate::vga256::SCREEN_WIDTH as f32
+                    && y >= 0.0
+                    && y < crate::vga256::SCREEN_HEIGHT as f32
                 {
-                    // 使用1x1像素的填充矩形
-                    let fill = FillRect::new(sx, sy, 1.0, 1.0, glitter.attr, palette_index);
+                    let fill = FillRect::new(x, y, 1.0, 1.0, glitter.attr, palette_index);
                     commands.push(RenderCommand::FillRect(fill));
                 }
             }

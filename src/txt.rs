@@ -1001,21 +1001,23 @@ impl Txt {
         for c in s.chars() {
             let idx = c as usize;
             if let Some(glyph) = self.letter(idx) {
-                let (width, height, img) = glyph.create_image(attr);
+                let width = glyph.width() as i32;
 
-                if self.b_shadow || self.b_bold {
-                    let (_, _, gray_img) = glyph.create_image(16);
-                    if self.b_shadow {
-                        vga.draw_image(x + 1, y + 1, width, height, &gray_img);
-                    }
-                    if self.b_bold {
-                        if self.b_shadow {
-                            vga.draw_image(x, y + 1, width, height, &gray_img);
-                        }
-                        vga.draw_image(x - 1, y, width, height, &img);
-                    }
+                // 阴影效果
+                if self.b_shadow {
+                    self.render_glyph_screen_gpu(vga, x + 1, y + 1, glyph, 16);
                 }
-                vga.draw_image(x, y, width, height, &img);
+
+                // 粗体效果
+                if self.b_bold {
+                    if self.b_shadow {
+                        self.render_glyph_screen_gpu(vga, x, y + 1, glyph, 16);
+                    }
+                    self.render_glyph_screen_gpu(vga, x - 1, y, glyph, attr);
+                }
+
+                // 主体
+                self.render_glyph_screen_gpu(vga, x, y, glyph, attr);
                 x += width;
             } else {
                 // 找不到字形时按8像素跳过，避免刷屏
@@ -1029,21 +1031,23 @@ impl Txt {
         for c in s.chars() {
             let idx = c as usize;
             if let Some(glyph) = self.letter(idx) {
-                let (width, height, img) = glyph.create_image(attr);
+                let width = glyph.width() as i32;
 
-                if self.b_shadow || self.b_bold {
-                    let (_, _, gray_img) = glyph.create_image(16);
-                    if self.b_shadow {
-                        vga.draw_image_world(x + 1, y + 1, width, height, &gray_img);
-                    }
-                    if self.b_bold {
-                        if self.b_shadow {
-                            vga.draw_image_world(x, y + 1, width, height, &gray_img);
-                        }
-                        vga.draw_image_world(x - 1, y, width, height, &img);
-                    }
+                // 阴影效果
+                if self.b_shadow {
+                    self.render_glyph_world_gpu(vga, x + 1, y + 1, glyph, 16);
                 }
-                vga.draw_image_world(x, y, width, height, &img);
+
+                // 粗体效果
+                if self.b_bold {
+                    if self.b_shadow {
+                        self.render_glyph_world_gpu(vga, x, y + 1, glyph, 16);
+                    }
+                    self.render_glyph_world_gpu(vga, x - 1, y, glyph, attr);
+                }
+
+                // 主体
+                self.render_glyph_world_gpu(vga, x, y, glyph, attr);
                 x += width;
             } else {
                 x += 8;
@@ -1078,14 +1082,12 @@ impl Txt {
         y: i32,
         s: &str,
         attr: u8,
-        atlas: &crate::sprites::SpriteAtlas,
+        _atlas: &crate::sprites::SpriteAtlas,
     ) {
         for c in s.chars() {
             let idx = c as usize;
             if let Some(glyph) = self.letter(idx) {
                 let width = glyph.width() as i32;
-                let height = glyph.height() as i32;
-                let bitmap_data = glyph.bitmap();
 
                 // 阴影效果
                 if self.b_shadow {
@@ -1134,6 +1136,29 @@ impl Txt {
                     let bit = (byte >> bit_offset) & 1;
                     if bit == 1 {
                         vga.fill_world_gpu(x + col, y + row, 1, 1, attr);
+                    }
+                }
+            }
+        }
+    }
+
+    /// GPU辅助: 在屏幕坐标渲染单个字形
+    fn render_glyph_screen_gpu(&self, vga: &mut VGA, x: i32, y: i32, glyph: &Glyph, attr: u8) {
+        let width = glyph.width() as i32;
+        let height = glyph.height() as i32;
+        let bitmap_data = glyph.bitmap();
+
+        for row in 0..height {
+            for col in 0..width {
+                let bit_index = (row * width + col) as usize;
+                let byte_index = bit_index / 8;
+                let bit_offset = bit_index % 8;
+
+                if byte_index < bitmap_data.len() {
+                    let byte = bitmap_data[byte_index];
+                    let bit = (byte >> bit_offset) & 1;
+                    if bit == 1 {
+                        vga.fill_gpu(x + col, y + row, 1, 1, attr);
                     }
                 }
             }
@@ -1236,89 +1261,4 @@ impl Txt {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::{palettes::Palettes, vga256::VGA};
-    use image::{ImageBuffer, RgbImage};
-
-    #[test]
-    fn test_txt_render_to_png() {
-        let test_str: String = (128u8..=255u8).map(|c| c as char).collect();
-        render_to_png(FontType::Font8x8, &test_str, FontStyle::NORMAL, 12);
-        let test_str: String = (32u8..=129u8).map(|c| c as char).collect();
-        render_to_png(FontType::SwissFont, &test_str, FontStyle::NORMAL, 2);
-    }
-
-    fn render_to_png(font: FontType, text: &str, style: FontStyle, color: u8) {
-        // 初始化 tracing 测试日志
-        let _ = tracing_subscriber::fmt()
-            .with_max_level(tracing::Level::INFO)
-            .with_test_writer()
-            .try_init();
-
-        crate::info!("测试字体:");
-        // 创建一个离屏VGA缓冲区
-        let mut palette = Palettes::new();
-        palette.new_palette(crate::mpal256::mpal256_palette());
-
-        // 创建一个 VGA 显存对象和 BackGrState
-        let mut vga = VGA::new_offscreen(2000, 50);
-        vga.palette = palette.clone();
-
-        let mut txt = Txt::new();
-        txt.set_font_type(font, style);
-        txt.write_text(&mut vga, 8, 8, text, color);
-
-        // 将VGA缓冲区转换为RGB图片
-        let mut img: RgbImage = ImageBuffer::new(vga.width as u32, vga.height as u32);
-        for y in 0..vga.height {
-            for x in 0..vga.width {
-                let idx = y * vga.width + x;
-                let color = vga.framebuffer[idx];
-                let rgb = vga.palette.get_rgb(color);
-                img.put_pixel(x as u32, y as u32, image::Rgb(rgb));
-            }
-        }
-        let file_name = format!("./output/test_render_{:?}_{:?}.png", font, style);
-        img.save(file_name).unwrap();
-    }
-
-    #[test]
-    fn test_and_sign_to_txt() {
-        //笑脸
-        // let width = 8;
-        // let height = 8;
-        // let data: [u8; 8] = [0x7E,0x81,0xA5,0x81,0xBD,0x99,0x81,0x7E];
-
-        //等于号
-        let width = 19;
-        let height = 24;
-        let data: [u8; 56] = [
-            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0x00, 0x00, 0x00, 0xFC, 0xFF, 0xE1, 0xFF, 0x0F, 0x00, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0xFE, 0xFF, 0xF0, 0xFF, 0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        ];
-
-        // 先将所有字节转换为bit向量
-        let mut bits = Vec::with_capacity(width as usize * height as usize);
-        for byte in data.iter() {
-            for i in (0..8).rev() {
-                bits.push((byte >> i) & 1);
-            }
-        }
-        // 按宽度分行输出
-        let mut lines = Vec::new();
-        for row in 0..height as usize {
-            let mut line = String::new();
-            for col in 0..width as usize {
-                let idx = row * width as usize + col;
-                let bit = if idx < bits.len() { bits[idx] } else { 0 };
-                line.push(if bit == 1 { '8' } else { ' ' });
-            }
-            lines.push(line);
-        }
-        std::fs::write("and_sign_bitmap.txt", lines.join("\n")).unwrap();
-    }
-}
+// tests removed: pure wgpu mode does not keep CPU framebuffer snapshots.

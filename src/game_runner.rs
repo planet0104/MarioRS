@@ -44,11 +44,6 @@ impl GameState {
         self.game.frame_update(&mut self.vga)
     }
     
-    /// 将VGA framebuffer渲染到RGBA缓冲区（已弃用，GPU模式下返回黑色）
-    pub fn render_to_rgba(&self, output: &mut [u8]) {
-        self.vga.render_to_rgba(output);
-    }
-    
     /// 获取GPU精灵批次数据用于渲染
     pub fn get_sprite_instances(&self) -> Vec<crate::gpu::SpriteInstance> {
         self.vga.get_sprite_batch().sprite_instances()

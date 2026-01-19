@@ -74,7 +74,7 @@ impl Status {
     pub fn collect_status_gpu(
         &self,
         commands: &mut Vec<RenderCommand>,
-        x_view: i32,
+        _x_view: i32,
         player: usize,
         player_name: &[String],
         data_lives: &[i16],
@@ -90,19 +90,20 @@ impl Status {
         txt.set_font(0, crate::txt::FontStyle::BOLD);
         
         // 玩家名称
-        txt.write_text_gpu(commands, x_view + 10 + 4, HEIGHT, &player_name[player], 31, palette_index);
+        // 重要：UI 必须使用屏幕坐标，不能随着 x_view 滚动
+        txt.write_text_gpu(commands, 10 + 4, HEIGHT, &player_name[player], 31, palette_index);
         
         // 生命数
         let mut lives = data_lives[player];
         if lives > 99 {
             lives = 99;
         }
-        txt.write_text_gpu(commands, x_view + 54 + 4, HEIGHT, &format!("{:2}", lives), 31, palette_index);
+        txt.write_text_gpu(commands, 54 + 4, HEIGHT, &format!("{:2}", lives), 31, palette_index);
         
         // 分数
         txt.write_text_gpu(
             commands,
-            x_view + 84 + 6,
+            84 + 6,
             HEIGHT,
             &format!("{:09}", level_score).replace(' ', "0"),
             31,
@@ -110,13 +111,13 @@ impl Status {
         );
         
         // 金币图标
-        txt.write_text_gpu(commands, x_view + 140 + 40 + 10, HEIGHT, "\t", 13, palette_index);
-        txt.write_text_gpu(commands, x_view + 140 + 40 + 10, HEIGHT, "\x07", 14, palette_index);
+        txt.write_text_gpu(commands, 140 + 40 + 10, HEIGHT, "\t", 13, palette_index);
+        txt.write_text_gpu(commands, 140 + 40 + 10, HEIGHT, "\x07", 14, palette_index);
         
         // 金币数
         txt.write_text_gpu(
             commands,
-            x_view + 158 + 40 + 10,
+            158 + 40 + 10,
             HEIGHT,
             &format!("{:2}", data_coins[player]),
             31,
@@ -125,11 +126,11 @@ impl Status {
         
         // 关卡
         let lev = world_number.chars().nth(2).unwrap_or(' ');
-        txt.write_text_gpu(commands, x_view + 258, HEIGHT, &format!("LEVEL {}", lev), 31, palette_index);
+        txt.write_text_gpu(commands, 258, HEIGHT, &format!("LEVEL {}", lev), 31, palette_index);
         
         // 恢复正常字体
         txt.set_font(0, FontStyle::NORMAL);
-        txt.write_text_gpu(commands, x_view + 46 + 4, HEIGHT, "x", 31, palette_index);
-        txt.write_text_gpu(commands, x_view + 150 + 40 + 10, HEIGHT, "x", 31, palette_index);
+        txt.write_text_gpu(commands, 46 + 4, HEIGHT, "x", 31, palette_index);
+        txt.write_text_gpu(commands, 150 + 40 + 10, HEIGHT, "x", 31, palette_index);
     }
 }

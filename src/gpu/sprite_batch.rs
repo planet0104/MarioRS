@@ -14,6 +14,10 @@ pub struct SpriteCommand {
     // 翻转
     pub flip_x: bool,
     pub flip_y: bool,
+    // 不透明绘制标志: true表示索引0也参与绘制(对齐PutImage语义)
+    pub opaque: bool,
+    // 旋转: 0=0度, 1=90度, 2=180度, 3=270度
+    pub rotation: u8,
     // 调色板偏移
     pub palette_offset: i32,
     // 调色板索引
@@ -28,6 +32,8 @@ impl SpriteCommand {
             uv,
             flip_x: false,
             flip_y: false,
+            opaque: false,
+            rotation: 0,
             palette_offset: 0,
             palette_index: 0,
         }
@@ -51,6 +57,16 @@ impl SpriteCommand {
         self
     }
 
+    pub fn with_opaque(mut self, opaque: bool) -> Self {
+        self.opaque = opaque;
+        self
+    }
+
+    pub fn with_rotation(mut self, rotation: u8) -> Self {
+        self.rotation = rotation % 4;
+        self
+    }
+
     // 转换为GPU实例数据
     pub fn to_instance(&self) -> SpriteInstance {
         let (uv_x, uv_y, uv_w, uv_h) = self.uv.normalized(ATLAS_SIZE);
@@ -66,6 +82,8 @@ impl SpriteCommand {
         )
         .with_flip(self.flip_x, self.flip_y)
         .with_palette(self.palette_offset as f32, self.palette_index as f32)
+        .with_opaque(self.opaque)
+        .with_rotation(self.rotation)
     }
     
     /// 转换为部分可见的GPU实例（用于升起动画）
@@ -93,6 +111,7 @@ impl SpriteCommand {
         )
         .with_flip(self.flip_x, self.flip_y)
         .with_palette(self.palette_offset as f32, self.palette_index as f32)
+        .with_opaque(self.opaque)
     }
 }
 
@@ -140,6 +159,7 @@ impl FillCommand {
 pub struct SpriteBatch {
     sprites: Vec<SpriteCommand>,
     fills: Vec<FillCommand>,
+    instances: Vec<SpriteInstance>,
     current_palette: u32,
 }
 
@@ -148,6 +168,7 @@ impl SpriteBatch {
         Self {
             sprites: Vec::with_capacity(1024),
             fills: Vec::with_capacity(128),
+            instances: Vec::with_capacity(256),
             current_palette: 0,
         }
     }
@@ -156,6 +177,7 @@ impl SpriteBatch {
     pub fn clear(&mut self) {
         self.sprites.clear();
         self.fills.clear();
+        self.instances.clear();
     }
 
     // 设置当前调色板
@@ -171,6 +193,11 @@ impl SpriteBatch {
         }
         self.sprites.push(cmd);
     }
+
+    /// 直接添加底层GPU实例（用于已经算好UV的场景）
+    pub fn push_instance(&mut self, inst: SpriteInstance) {
+        self.instances.push(inst);
+    }
     
     /// 添加部分可见精灵（用于升起动画）
     pub fn push_sprite_partial(&mut self, cmd: SpriteCommand, visible_height: f32) {
@@ -178,20 +205,16 @@ impl SpriteBatch {
         if cmd.palette_index == 0 {
             cmd.palette_index = self.current_palette;
         }
-        // 存储为特殊标记，在to_instance时处理
-        // 这里我们直接修改UV来实现部分渲染
+        // 对齐 Oldsrc DrawPart：显示从顶部开始的 visible_height 像素
+        // 这里直接修改 UV 高度来实现部分渲染
         let full_height = cmd.uv.height as f32;
         if visible_height >= full_height {
             self.sprites.push(cmd);
         } else if visible_height > 0.0 {
-            // 只显示底部部分
+            // 只显示顶部部分
             let clip_ratio = visible_height / full_height;
             let clipped_height = (cmd.uv.height as f32 * clip_ratio) as u32;
-            let clipped_y_offset = cmd.uv.height - clipped_height;
-            
             let mut clipped_cmd = cmd.clone();
-            clipped_cmd.y += clipped_y_offset as f32;
-            clipped_cmd.uv.y += clipped_y_offset;
             clipped_cmd.uv.height = clipped_height;
             self.sprites.push(clipped_cmd);
         }
@@ -233,7 +256,9 @@ impl SpriteBatch {
 
     // 获取精灵实例数据
     pub fn sprite_instances(&self) -> Vec<SpriteInstance> {
-        self.sprites.iter().map(|s| s.to_instance()).collect()
+        let mut out: Vec<SpriteInstance> = self.sprites.iter().map(|s| s.to_instance()).collect();
+        out.extend_from_slice(&self.instances);
+        out
     }
 
     // 获取填充矩形数据

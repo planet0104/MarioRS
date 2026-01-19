@@ -606,7 +606,7 @@ unsafe fn init_gpu_renderer(hwnd: HWND) -> bool {
     surface.configure(&device, &config);
     
     // 创建GPU渲染器
-    let gpu_renderer = GpuRenderer::new(device, queue);
+    let gpu_renderer = GpuRenderer::new(device, queue, config.format);
     
     // 设置初始缩放参数
     gpu_renderer.update_scale(INITIAL_WINDOW_WIDTH, INITIAL_WINDOW_HEIGHT);
@@ -679,6 +679,10 @@ unsafe fn render_frame(_hwnd: HWND) {
         
         // 上传当前调色板到GPU
         gpu.upload_palette(0, &palette);
+
+        // 上传图集到GPU（BuildWorld 可能会重建/重着色 sprites）
+        let (atlas_data, atlas_w, atlas_h) = state.get_atlas_data();
+        gpu.upload_atlas(atlas_data, atlas_w, atlas_h);
         
         // 开始新一帧渲染
         gpu.begin_frame();
