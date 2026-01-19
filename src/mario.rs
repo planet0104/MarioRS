@@ -130,16 +130,30 @@ pub struct MarioGame {
 impl MarioGame {
     /// 创建新的游戏实例
     pub fn new() -> Self {
+        eprintln!("[DEBUG] MarioGame::new: 开始");
+
+        eprintln!("size Buffers = {}", std::mem::size_of::<Buffers>());
+eprintln!("size PictureBuffer = {}", std::mem::size_of::<crate::buffers::PictureBuffer>());
+eprintln!("size StarBuffer = {}", std::mem::size_of::<crate::buffers::StarBuffer>());
         
+        eprintln!("[DEBUG] MarioGame::new: 创建Buffers1");
         let mut buffers = Buffers::new();
+        eprintln!("[DEBUG] MarioGame::new: 创建SpriteDataManager");
         let sprites = SpriteDataManager::new();
+        eprintln!("[DEBUG] MarioGame::new: 构建精灵图集");
         // 构建GPU精灵图集
         let atlas = sprites.build_atlas();
+        eprintln!("[DEBUG] MarioGame::new: 创建MusicPlayer");
         let mut music = MusicPlayer::new();
+        eprintln!("[DEBUG] MarioGame::new: 创建Players");
         let mut players = Players::new();
+        eprintln!("[DEBUG] MarioGame::new: 创建Enemies");
         let enemies = Enemies::new(&sprites);
+        eprintln!("[DEBUG] MarioGame::new: 创建BackGr");
         let backgr = BackGr::new(MAX_WORLD_SIZE as usize, W as usize, NV as usize, H as usize);
+        eprintln!("[DEBUG] MarioGame::new: 初始化Figures");
         let figures = Self::init_figures(&sprites);
+        eprintln!("[DEBUG] MarioGame::new: 创建其他组件");
         let blocks = Blocks::new();
         let stars = Stars::new();
         let status = Status;  // GPU版Status是空结构体
@@ -156,6 +170,7 @@ impl MarioGame {
         let tmpobj = TmpObjManager::new();
         let txt = Txt::new();
         
+        eprintln!("[DEBUG] MarioGame::new: 初始化玩家图形");
         players.init_player_figures(&mut buffers, &sprites);
         
         let play = Play::new();
@@ -163,6 +178,7 @@ impl MarioGame {
         let joystick = JoystickState::new();
         
         // 读取配置文件（对应 Pascal ReadConfig）
+        eprintln!("[DEBUG] MarioGame::new: 读取配置");
         let config = config::read_config();
         
         // 应用配置到游戏状态
@@ -183,7 +199,9 @@ impl MarioGame {
         joystick.rec = config.jsdat;
         
         // 游戏数据初始化在 buffers.data 中
+        eprintln!("[DEBUG] MarioGame::new: 创建Intro");
         let intro = Intro::new();
+        eprintln!("[DEBUG] MarioGame::new: 组装结构体");
         
         Self {
             main_phase: MainPhase::Initializing,

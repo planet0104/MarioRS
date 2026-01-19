@@ -1,3 +1,5 @@
+#![allow(unused)]
+
 //! 音乐与音效系统，严格对齐 Pascal 版的播放节奏。
 //!
 //! Pascal 使用 PC Speaker 的 `Sound/NoSound` 组合出旋律，

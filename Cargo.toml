@@ -118,9 +118,9 @@ rand = { version = "0.8", default-features = false, features = ["alloc", "small_
 hashbrown = "0.15"
 
 [features]
-default = ["gdi-backend", "dark-theme"]   # 默认使用 GPU + GDI回退 + 暗黑主题适配
+default = ["wgpu-backend", "dark-theme"]   # 默认使用 GPU + GDI回退 + 暗黑主题适配
 logging = ["dep:tracing", "dep:tracing-subscriber", "dep:tracing-wasm", "dep:tracing-android"]
-wgpu-backend = ["dep:winit"]              # wgpu 渲染后端（跨平台，体积大）
+wgpu-backend = ["dep:winit", "dep:image"] # wgpu 渲染后端（跨平台，体积大）
 gdi-backend = ["dep:windows-sys"]         # Windows GDI（仅用于窗口创建，渲染使用GPU）
 dark-theme = []                           # 暗黑主题适配（需要 Vista+ dwmapi.dll）
 touch-panel = ["dep:image", "dep:tiny-skia"] # 触摸控制面板 (PNG解码 + 2D绘图)
@@ -140,6 +140,9 @@ embed-resource = "3.0"
 # ============================================================================
 [dev-dependencies]
 image = "0.25"
+winit = "0.30"
+wgpu = { version = "23", default-features = false, features = ["wgsl"] }
+futures = "0.3"
 
 [profile.release]
 opt-level = "z"         # 优化体积而非速度

@@ -36,8 +36,9 @@ impl Stars {
 
     /// 清空星星背景和 last_x
     pub fn clear_stars(&mut self, buffers: &mut Buffers) {
-        for i in 0..buffers.star_backgr.len() {
-            buffers.star_backgr[i] = [0u8; 320];
+        let star_backgr = buffers.star_backgr.as_mut();
+        for i in 0..star_backgr.len() {
+            star_backgr[i] = [0u8; 320];
         }
 
         for i in 0..self.last_x.len() {
@@ -189,19 +190,17 @@ mod tests {
         stars.show_stars(&mut vga, &mut buffers);
 
         // 转换为 RGBA 图像
-        // 只根据framebuffer生成黑白图像
         let width = vga.width as u32;
         let height = vga.height as u32;
         let mut img = ImageBuffer::<Rgba<u8>, Vec<u8>>::new(width, height);
-        for (i, &val) in vga.framebuffer.iter().enumerate() {
-            let x = (i % width as usize) as u32;
-            let y = (i / width as usize) as u32;
-            let color = if val == 0 {
-                [0, 0, 0, 255]
-            } else {
-                [255, 255, 255, 255]
-            };
-            img.put_pixel(x, y, Rgba(color));
+
+        let mut rgba = vec![0u8; (width * height * 4) as usize];
+        vga.render_to_rgba(&mut rgba);
+        for y in 0..height {
+            for x in 0..width {
+                let i = ((y * width + x) * 4) as usize;
+                img.put_pixel(x, y, Rgba([rgba[i], rgba[i + 1], rgba[i + 2], rgba[i + 3]]));
+            }
         }
         img.save("./output/test_stars_output.png").unwrap();
     }

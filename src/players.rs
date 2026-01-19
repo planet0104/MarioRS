@@ -183,7 +183,7 @@ impl Players {
     /// Rust严格等价于Pascal InitPlayerFigures过程
     pub fn init_player_figures(&mut self, buffers: &mut Buffers, sprites: &SpriteDataManager) {
         // Fill Pictures array with 0xFF (equivalent to Pascal's #$FF)
-        buffers.pictures.fill(0xFF);
+        buffers.pictures.as_mut().fill(0xFF);
 
         // Move sprite data for Mario
         buffers.pictures[PL_MARIO as usize][MD_SMALL as usize][0][DIR_LEFT as usize] =

@@ -279,14 +279,10 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32, instance: FillInstance) -> 
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    // DEBUG: Return bright red to test if fills render
-    return vec4<f32>(1.0, 0.0, 0.0, 1.0);
-    
-    // Original code (commented for debug):
-    // let palette_idx = u32(in.color_index) % 256u;
-    // let palette_row = u32(in.palette_index);
-    // let color = textureLoad(palette_texture, vec2<i32>(i32(palette_idx), i32(palette_row)), 0);
-    // return color;
+    let palette_idx = u32(in.color_index) % 256u;
+    let palette_row = u32(in.palette_index);
+    let color = textureLoad(palette_texture, vec2<i32>(i32(palette_idx), i32(palette_row)), 0);
+    return color;
 }
 "#;
 
@@ -323,9 +319,7 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    // DEBUG: Return solid cyan to test if scale pass renders
-    return vec4<f32>(0.0, 1.0, 1.0, 1.0);
-    // Original: return textureSample(render_texture, tex_sampler, in.uv);
+    return textureSample(render_texture, tex_sampler, in.uv);
 }
 "#;
 
@@ -840,14 +834,6 @@ impl GpuRenderer {
         
         // 更新uniform
         let scale_data = [ndc_scale_x, ndc_scale_y, ndc_offset_x, ndc_offset_y];
-        
-        // DEBUG
-        static ONCE: std::sync::Once = std::sync::Once::new();
-        ONCE.call_once(|| {
-            println!("[GPU] update_scale: window={}x{}, scale=({:.3}, {:.3}), offset=({:.3}, {:.3})", 
-                window_width, window_height, ndc_scale_x, ndc_scale_y, ndc_offset_x, ndc_offset_y);
-        });
-        
         self.queue.write_buffer(&self.scale_buffer, 0, bytemuck::cast_slice(&scale_data));
     }
 
@@ -886,8 +872,7 @@ impl GpuRenderer {
                     view: &self.render_texture_view,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        // DEBUG: Bright green clear color to test scale pass
-                        load: wgpu::LoadOp::Clear(wgpu::Color { r: 0.0, g: 1.0, b: 0.0, a: 1.0 }),
+                        load: wgpu::LoadOp::Clear(wgpu::Color { r: 0.0, g: 0.0, b: 0.0, a: 1.0 }),
                         store: wgpu::StoreOp::Store,
                     },
                 })],
@@ -896,15 +881,6 @@ impl GpuRenderer {
                 occlusion_query_set: None,
             });
 
-            // DEBUG TEST: Skip fill/sprite rendering entirely
-            // Just test if clear color shows through the scale pass
-            static ONCE: std::sync::Once = std::sync::Once::new();
-            ONCE.call_once(|| {
-                println!("[GPU TEST] Skipping fill/sprite rendering - testing scale pass only");
-            });
-            
-            // Commented out for testing:
-            /*
             // 先渲染填充矩形 (背景层)
             if !self.fill_rects.is_empty() {
                 let fill_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -917,10 +893,7 @@ impl GpuRenderer {
                 render_pass.set_vertex_buffer(0, fill_buffer.slice(..));
                 render_pass.draw(0..6, 0..self.fill_rects.len() as u32);
             }
-            */
 
-            // DEBUG TEST: Skip sprites too
-            /*
             // 再渲染精灵 (实体层)
             if !self.sprite_instances.is_empty() {
                 let sprite_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -933,7 +906,6 @@ impl GpuRenderer {
                 render_pass.set_vertex_buffer(0, sprite_buffer.slice(..));
                 render_pass.draw(0..6, 0..self.sprite_instances.len() as u32);
             }
-            */
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));
@@ -941,10 +913,6 @@ impl GpuRenderer {
 
     // 渲染到窗口surface (缩放输出)
     pub fn render_to_surface(&self, surface_view: &wgpu::TextureView) {
-        static ONCE: std::sync::Once = std::sync::Once::new();
-        ONCE.call_once(|| {
-            println!("[GPU] render_to_surface called - scale pass executing");
-        });
         let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("scale_encoder"),
         });

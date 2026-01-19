@@ -20,12 +20,16 @@ pub struct GameState {
 impl GameState {
     /// 创建新的游戏状态
     pub fn new() -> Self {
+        eprintln!("[DEBUG] GameState::new: 创建VGA");
         let mut vga = VGA::new_offscreen(
             SCREEN_WIDTH as usize,
             WINDOWHEIGHT as usize,
         );
+        eprintln!("[DEBUG] GameState::new: VGA创建完成，创建MarioGame");
         let mut game = MarioGame::new();
+        eprintln!("[DEBUG] GameState::new: MarioGame创建完成");
         game.init_palette(&mut vga);
+        eprintln!("[DEBUG] GameState::new: 调色板初始化完成");
         
         Self { vga, game }
     }
@@ -69,6 +73,14 @@ impl GameState {
             rgba[i][3] = 255; // 不透明
         }
         rgba
+    }
+    
+    /// 获取精灵图集数据用于GPU上传
+    /// 返回(data, width, height)
+    pub fn get_atlas_data(&self) -> (&[u8], u32, u32) {
+        let atlas = &self.game.atlas;
+        let size = atlas.size();
+        (atlas.data(), size, size)
     }
     
     /// 请求退出

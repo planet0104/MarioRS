@@ -19,12 +19,10 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 // ============================================================================
-// Winit 相关导入(仅在此模块使用)
+// Winit 和 wgpu 相关导入
 // ============================================================================
 
-use pixels::{Pixels, PixelsBuilder, SurfaceTexture};
-use pixels::wgpu::Backends;
-use pixels::wgpu;
+use wgpu::Backends;
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, KeyEvent, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
@@ -35,352 +33,48 @@ use winit::window::{Icon, Window, WindowId};
 // 窗口图标 - 从游戏精灵生成
 // ============================================================================
 
-/// 从游戏精灵创建窗口图标(32x32 RGBA)
+/// 从assets文件夹加载窗口图标
 fn create_window_icon() -> Option<Icon> {
-    use crate::sprites::{SpriteDataManager, PALETTE};
+    // 尝试从编译时嵌入的图标数据创建
+    // 使用include_bytes!在编译时嵌入PNG图标
+    const ICON_DATA: &[u8] = include_bytes!("../../assets/mario_icon_preview.png");
     
-    // 加载精灵管理器获取 Mario 精灵
-    let sprites = SpriteDataManager::new();
-    let mario = &sprites.LWMAR_000; // 大马里奥行走(经典形象)
+    // 使用image crate解码PNG
+    let img = image::load_from_memory(ICON_DATA).ok()?;
+    let rgba_img = img.to_rgba8();
+    let (width, height) = rgba_img.dimensions();
+    let rgba_data = rgba_img.into_raw();
     
-    // 源精灵尺寸: 20x28
-    const SRC_W: usize = 20;
-    const SRC_H: usize = 28;
-    // 目标图标尺寸: 32x32
-    const ICON_SIZE: usize = 32;
-    
-    let mut rgba = vec![0u8; ICON_SIZE * ICON_SIZE * 4];
-    
-    // 计算缩放和居中偏移
-    let scale = 1; // 1:1 缩放保持像素清晰
-    let offset_x = (ICON_SIZE - SRC_W * scale) / 2;
-    let offset_y = (ICON_SIZE - SRC_H * scale) / 2;
-    
-    // 转换调色板索引为 RGBA
-    for y in 0..SRC_H {
-        for x in 0..SRC_W {
-            let palette_idx = mario[y][x] as usize;
-            let (r, g, b, a) = if palette_idx == 0 {
-                (0, 0, 0, 0) // 透明
-            } else if palette_idx < PALETTE.len() {
-                PALETTE[palette_idx]
-            } else {
-                (0, 0, 0, 0)
-            };
-            
-            // 缩放并居中绘制
-            for sy in 0..scale {
-                for sx in 0..scale {
-                    let px = offset_x + x * scale + sx;
-                    let py = offset_y + y * scale + sy;
-                    if px < ICON_SIZE && py < ICON_SIZE {
-                        let idx = (py * ICON_SIZE + px) * 4;
-                        rgba[idx] = r;
-                        rgba[idx + 1] = g;
-                        rgba[idx + 2] = b;
-                        rgba[idx + 3] = a;
-                    }
-                }
-            }
-        }
-    }
-    
-    Icon::from_rgba(rgba, ICON_SIZE as u32, ICON_SIZE as u32).ok()
+    Icon::from_rgba(rgba_data, width, height).ok()
 }
 
 // ============================================================================
-// 显示后端 - 使用 pixels + winit,支持等比例全屏
+// 显示后端 - 使用 wgpu + winit 进行GPU渲染
 // ============================================================================
 
 pub struct DesktopDisplay {
     window: Option<Arc<Window>>,
-    pixels: Option<Pixels<'static>>,
-    fit_renderer: Option<FitRenderer>,
-    fit_viewport: FitViewport,
     width: u32,
     height: u32,
+    // wgpu设备用于GPU渲染
+    wgpu_surface: Option<wgpu::Surface<'static>>,
+    wgpu_device: Option<Arc<wgpu::Device>>,
+    wgpu_queue: Option<Arc<wgpu::Queue>>,
+    wgpu_config: Option<wgpu::SurfaceConfiguration>,
     // GPU渲染器
     gpu_renderer: Option<GpuRenderer>,
-}
-
-#[derive(Clone, Copy, Debug)]
-struct FitViewport {
-    surface_w: u32,
-    surface_h: u32,
-    draw_w: u32,
-    draw_h: u32,
-    bar_x: u32,
-    bar_y: u32,
-}
-
-impl FitViewport {
-    fn new(game_w: u32, game_h: u32, surface_w: u32, surface_h: u32) -> Self {
-        // 非整数等比缩放,尽可能放大但不超出 surface
-        let gw = game_w as f64;
-        let gh = game_h as f64;
-        let sw = surface_w as f64;
-        let sh = surface_h as f64;
-
-        let scale = (sw / gw).min(sh / gh);
-        let mut draw_w = (gw * scale).floor().max(1.0) as u32;
-        let mut draw_h = (gh * scale).floor().max(1.0) as u32;
-
-        if draw_w > surface_w {
-            draw_w = surface_w;
-        }
-        if draw_h > surface_h {
-            draw_h = surface_h;
-        }
-
-        let bar_x = surface_w.saturating_sub(draw_w) / 2;
-        let bar_y = surface_h.saturating_sub(draw_h) / 2;
-
-        Self {
-            surface_w,
-            surface_h,
-            draw_w,
-            draw_h,
-            bar_x,
-            bar_y,
-        }
-    }
-
-    fn as_uniform_params(&self) -> [f32; 4] {
-        // params: [scale_x, scale_y, translate_x, translate_y]
-        // translate_x/translate_y 是目标区域中心点在 NDC 的坐标
-        let sw = self.surface_w.max(1) as f32;
-        let sh = self.surface_h.max(1) as f32;
-        let dw = self.draw_w.max(1) as f32;
-        let dh = self.draw_h.max(1) as f32;
-
-        let scale_x = dw / sw;
-        let scale_y = dh / sh;
-
-        let center_x = (self.bar_x as f32 + dw * 0.5) / sw;
-        let center_y_topdown = (self.bar_y as f32 + dh * 0.5) / sh;
-
-        let translate_x = center_x * 2.0 - 1.0;
-        let translate_y = 1.0 - center_y_topdown * 2.0;
-
-        [scale_x, scale_y, translate_x, translate_y]
-    }
-}
-
-fn pack_f32x4_le(v: [f32; 4]) -> [u8; 16] {
-    let mut out = [0u8; 16];
-    let mut i = 0usize;
-    while i < 4 {
-        let b = v[i].to_le_bytes();
-        out[i * 4] = b[0];
-        out[i * 4 + 1] = b[1];
-        out[i * 4 + 2] = b[2];
-        out[i * 4 + 3] = b[3];
-        i += 1;
-    }
-    out
-}
-
-const FIT_SCALE_WGSL: &str = r#"
-struct VertexOutput {
-    @location(0) tex_coord: vec2<f32>,
-    @builtin(position) position: vec4<f32>,
-}
-
-@group(0) @binding(0) var r_tex_color: texture_2d<f32>;
-@group(0) @binding(1) var r_tex_sampler: sampler;
-// params: x=scale_x y=scale_y z=translate_x w=translate_y
-@group(0) @binding(2) var<uniform> r_params: vec4<f32>;
-
-@vertex
-fn vs_main(@builtin(vertex_index) vid: u32) -> VertexOutput {
-    var pos = vec2<f32>(0.0, 0.0);
-    if (vid == 0u) {
-        pos = vec2<f32>(-1.0, -1.0);
-    } else if (vid == 1u) {
-        pos = vec2<f32>(3.0, -1.0);
-    } else {
-        pos = vec2<f32>(-1.0, 3.0);
-    }
-
-    var out: VertexOutput;
-    out.tex_coord = fma(pos, vec2<f32>(0.5, -0.5), vec2<f32>(0.5, 0.5));
-    out.position = vec4<f32>(pos * r_params.xy + r_params.zw, 0.0, 1.0);
-    return out;
-}
-
-@fragment
-fn fs_main(@location(0) tex_coord: vec2<f32>) -> @location(0) vec4<f32> {
-    return textureSample(r_tex_color, r_tex_sampler, tex_coord);
-}
-"#;
-
-struct FitRenderer {
-    pipeline: wgpu::RenderPipeline,
-    bind_group: wgpu::BindGroup,
-    uniform_buffer: wgpu::Buffer,
-}
-
-impl FitRenderer {
-    fn new(
-        device: &wgpu::Device,
-        source_texture: &wgpu::Texture,
-        render_target_format: wgpu::TextureFormat,
-    ) -> Self {
-        let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("mariors_fit_scale_shader"),
-            source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(FIT_SCALE_WGSL)),
-        });
-
-        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            label: Some("mariors_fit_scale_sampler"),
-            address_mode_u: wgpu::AddressMode::ClampToEdge,
-            address_mode_v: wgpu::AddressMode::ClampToEdge,
-            address_mode_w: wgpu::AddressMode::ClampToEdge,
-            mag_filter: wgpu::FilterMode::Nearest,
-            min_filter: wgpu::FilterMode::Nearest,
-            mipmap_filter: wgpu::FilterMode::Nearest,
-            ..Default::default()
-        });
-
-        let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("mariors_fit_scale_uniform"),
-            size: 16,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-
-        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("mariors_fit_scale_bind_group_layout"),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        multisampled: false,
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: wgpu::ShaderStages::VERTEX,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: wgpu::BufferSize::new(16),
-                    },
-                    count: None,
-                },
-            ],
-        });
-
-        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("mariors_fit_scale_pipeline_layout"),
-            bind_group_layouts: &[&bind_group_layout],
-            push_constant_ranges: &[],
-        });
-
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("mariors_fit_scale_pipeline"),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &module,
-                entry_point: "vs_main",
-                buffers: &[],
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &module,
-                entry_point: "fs_main",
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: render_target_format,
-                    blend: Some(wgpu::BlendState::REPLACE),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                ..Default::default()
-            },
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
-            multiview: None,
-        });
-
-        let texture_view = source_texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("mariors_fit_scale_bind_group"),
-            layout: &bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&texture_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&sampler),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: uniform_buffer.as_entire_binding(),
-                },
-            ],
-        });
-
-        Self {
-            pipeline,
-            bind_group,
-            uniform_buffer,
-        }
-    }
-
-    fn update_viewport(&self, queue: &wgpu::Queue, viewport: FitViewport) {
-        let params = viewport.as_uniform_params();
-        let bytes = pack_f32x4_le(params);
-        queue.write_buffer(&self.uniform_buffer, 0, &bytes);
-    }
-
-    fn render(&self, encoder: &mut wgpu::CommandEncoder, render_target: &wgpu::TextureView, viewport: FitViewport) {
-        let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("mariors_fit_scale_render_pass"),
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: render_target,
-                resolve_target: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                    store: wgpu::StoreOp::Store,
-                },
-            })],
-            depth_stencil_attachment: None,
-            timestamp_writes: None,
-            occlusion_query_set: None,
-        });
-
-        // 只在目标渲染区域绘制,避免 full-screen triangle 在边缘采样导致伪影
-        if viewport.draw_w > 0 && viewport.draw_h > 0 {
-            rpass.set_pipeline(&self.pipeline);
-            rpass.set_bind_group(0, &self.bind_group, &[]);
-            rpass.set_scissor_rect(viewport.bar_x, viewport.bar_y, viewport.draw_w, viewport.draw_h);
-            rpass.draw(0..3, 0..1);
-        }
-    }
 }
 
 impl DesktopDisplay {
     pub fn new(width: u32, height: u32) -> Self {
         Self {
             window: None,
-            pixels: None,
-            fit_renderer: None,
-            fit_viewport: FitViewport::new(width, height, width, height),
             width,
             height,
+            wgpu_surface: None,
+            wgpu_device: None,
+            wgpu_queue: None,
+            wgpu_config: None,
             gpu_renderer: None,
         }
     }
@@ -404,66 +98,75 @@ impl DesktopDisplay {
         // 创建窗口图标(从游戏精灵生成)
         let icon = create_window_icon();
         
-        // 关键修复:先创建不可见窗口,初始化 pixels 并填充黑色后再显示
-        // 这样可以避免启动时的白色闪烁
+        // 创建窗口（先不可见，避免白色闪烁）
         let window_attributes = Window::default_attributes()
             .with_title("Mario")
             .with_inner_size(size)
             .with_min_inner_size(size)
             .with_window_icon(icon)
-            .with_visible(false);  // 先不显示窗口
+            .with_visible(false);
         
         let window = Arc::new(event_loop.create_window(window_attributes)?);
         let window_size = window.inner_size();
-        let window_outer_size = window.outer_size();
-        let scale_factor = window.scale_factor();
         
-        let surface_texture = SurfaceTexture::new(
-            window_size.width,
-            window_size.height,
-            Arc::clone(&window),
-        );
-
-        let mut pixels = PixelsBuilder::new(self.width, self.height, surface_texture)
-            .wgpu_backend(Backends::VULKAN | Backends::GL)
-            .clear_color(pixels::wgpu::Color::BLACK)  // 设置清除颜色为黑色
-            .build()?;
+        // 创建独立的wgpu实例用于GPU渲染
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+            backends: Backends::VULKAN | Backends::GL | Backends::DX12,
+            ..Default::default()
+        });
         
-        // 初始化 framebuffer 为黑色
-        for pixel in pixels.frame_mut().chunks_exact_mut(4) {
-            pixel[0] = 0; // R
-            pixel[1] = 0; // G
-            pixel[2] = 0; // B
-            pixel[3] = 255; // A
-        }
+        // 创建surface
+        let surface = instance.create_surface(window.clone())?;
         
-        // 立即渲染黑色帧到 GPU surface,预热渲染管线
-        // 这可以减少首次显示时的白色闪烁
-        let _ = pixels.render();
+        // 请求适配器
+        let adapter = futures::executor::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::HighPerformance,
+            compatible_surface: Some(&surface),
+            force_fallback_adapter: false,
+        })).ok_or("找不到合适的GPU适配器")?;
         
-        // 注意:不在这里显示窗口,而是在游戏初始化完成后显示
-        // 这样可以避免加载期间的白色闪烁
-        self.fit_viewport = FitViewport::new(self.width, self.height, window_size.width, window_size.height);
-        let render_target_format = pixels.surface_texture_format();
-        let fit_renderer = FitRenderer::new(&pixels.context().device, &pixels.context().texture, render_target_format);
-        fit_renderer.update_viewport(&pixels.context().queue, self.fit_viewport);
-
+        // 请求设备
+        let (device, queue) = futures::executor::block_on(adapter.request_device(
+            &wgpu::DeviceDescriptor {
+                label: Some("mario_device"),
+                required_features: wgpu::Features::empty(),
+                required_limits: wgpu::Limits::downlevel_webgl2_defaults(),
+                memory_hints: wgpu::MemoryHints::Performance,
+            },
+            None,
+        ))?;
+        
+        let device = Arc::new(device);
+        let queue = Arc::new(queue);
+        
+        // 配置surface
+        let config = wgpu::SurfaceConfiguration {
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            format: wgpu::TextureFormat::Bgra8UnormSrgb,
+            width: window_size.width.max(1),
+            height: window_size.height.max(1),
+            present_mode: wgpu::PresentMode::Fifo,
+            alpha_mode: wgpu::CompositeAlphaMode::Opaque,
+            view_formats: vec![],
+            desired_maximum_frame_latency: 2,
+        };
+        surface.configure(&device, &config);
+        
+        // 创建GPU渲染器
+        let gpu_renderer = GpuRenderer::new(device.clone(), queue.clone());
+        
         self.window = Some(window);
-        self.fit_renderer = Some(fit_renderer);
-        self.pixels = Some(pixels);
+        self.wgpu_surface = Some(surface);
+        self.wgpu_device = Some(device);
+        self.wgpu_queue = Some(queue);
+        self.wgpu_config = Some(config);
+        self.gpu_renderer = Some(gpu_renderer);
         Ok(())
     }
     
     /// 显示窗口(在游戏初始化完成后调用)
     pub fn show_window(&mut self) {
         if let Some(window) = &self.window {
-            // 多次渲染黑色帧确保 GPU 完全准备好
-            // 这可以避免首帧白色闪烁
-            if let Some(pixels) = &mut self.pixels {
-                for _ in 0..3 {
-                    let _ = pixels.render();
-                }
-            }
             window.set_visible(true);
             // 显示后立即请求重绘
             window.request_redraw();
@@ -474,43 +177,15 @@ impl DesktopDisplay {
         self.window.is_some()
     }
     
-    /// 处理窗口大小调整,重新创建 surface texture 以支持等比例缩放
+    /// 处理窗口大小调整,重新配置wgpu surface
     pub fn resize(&mut self, new_width: u32, new_height: u32) -> Result<(), Box<dyn std::error::Error>> {
-        if let (Some(window), Some(pixels)) = (&self.window, &mut self.pixels) {
-            // 注意:这里保持当前 pixels 的缩放方式(等比例缩放+letterbox)
-            // 我们只更新 wgpu surface 尺寸,并打出关键尺寸日志用于排查
-            let window_inner = window.inner_size();
-            let window_outer = window.outer_size();
-            let scale_factor = window.scale_factor();
-
-            // 计算理论等比缩放后的渲染矩形(用于对照 pixels 的实际表现)
-            let game_w = self.width as f64;
-            let game_h = self.height as f64;
-            let surface_w = new_width as f64;
-            let surface_h = new_height as f64;
-            let scale_fit = (surface_w / game_w).min(surface_h / game_h);
-            let draw_fit_w = (game_w * scale_fit).floor().max(0.0) as u32;
-            let draw_fit_h = (game_h * scale_fit).floor().max(0.0) as u32;
-            let bar_fit_x = new_width.saturating_sub(draw_fit_w) / 2;
-            let bar_fit_y = new_height.saturating_sub(draw_fit_h) / 2;
-
-            // 如果 pixels 使用整数倍缩放,只有窗口尺寸是游戏尺寸的整数倍时才会无黑边
-            let scale_int = scale_fit.floor().max(1.0) as u32;
-            let draw_int_w = self.width.saturating_mul(scale_int);
-            let draw_int_h = self.height.saturating_mul(scale_int);
-            let bar_int_x = new_width.saturating_sub(draw_int_w) / 2;
-            let bar_int_y = new_height.saturating_sub(draw_int_h) / 2;
-
-            pixels.resize_surface(new_width, new_height)?;
-
-            // 使用自定义非整数等比缩放(最小方案:保留 pixels,替换最后的缩放渲染)
-            self.fit_viewport = FitViewport::new(self.width, self.height, new_width, new_height);
-            if let Some(fit_renderer) = &self.fit_renderer {
-                fit_renderer.update_viewport(&pixels.context().queue, self.fit_viewport);
-            }
-
-            // 无需调整游戏逻辑分辨率 (self.width x self.height)
-            // pixels 会自动进行等比例缩放并添加 letterbox
+        if let (Some(surface), Some(device), Some(config)) = 
+            (&self.wgpu_surface, &self.wgpu_device, &mut self.wgpu_config) 
+        {
+            // 更新surface配置
+            config.width = new_width.max(1);
+            config.height = new_height.max(1);
+            surface.configure(device, config);
         }
         Ok(())
     }
@@ -526,15 +201,29 @@ impl DisplayBackend for DesktopDisplay {
     }
 
     fn present(&mut self) -> Result<(), String> {
-        if let (Some(pixels), Some(fit_renderer)) = (&self.pixels, &self.fit_renderer) {
-            let viewport = self.fit_viewport;
-            pixels.render_with(|encoder, render_target, _context| {
-                fit_renderer.render(encoder, render_target, viewport);
-                Ok(())
-            }).map_err(|e| {
-                log_error(&format!("[display] present_failed {}", e));
-                e.to_string()
-            })
+        // 使用独立的wgpu surface进行GPU渲染输出
+        if let (Some(surface), Some(gpu_renderer), Some(config)) = 
+            (&self.wgpu_surface, &self.gpu_renderer, &self.wgpu_config) 
+        {
+            // 获取surface纹理
+            let output = match surface.get_current_texture() {
+                Ok(t) => t,
+                Err(e) => {
+                    log_error(&format!("[display] get_surface_texture_failed {:?}", e));
+                    return Err(e.to_string());
+                }
+            };
+            let view = output.texture.create_view(&wgpu::TextureViewDescriptor::default());
+            
+            // 更新缩放参数
+            gpu_renderer.update_scale(config.width, config.height);
+            
+            // 渲染到窗口surface
+            gpu_renderer.render_to_surface(&view);
+            
+            // 提交
+            output.present();
+            Ok(())
         } else {
             Ok(())
         }
@@ -925,20 +614,39 @@ impl GameApp {
 
 impl ApplicationHandler for GameApp {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        eprintln!("[DEBUG] resumed: 开始");
         // 窗口创建(winit 0.30 要求在 resumed 中创建)
         if !self.display.has_window() {
+            eprintln!("[DEBUG] resumed: 创建窗口");
             if let Err(e) = self.display.create_window(event_loop) {
                 eprintln!("创建窗口失败: {}", e);
                 event_loop.exit();
                 return;
             }
+            eprintln!("[DEBUG] resumed: 窗口创建完成");
 
             // 初始化游戏状态(游戏逻辑封装在 game_runner 模块中)
             // 注意:窗口在此期间保持不可见,避免白色闪烁
-            self.game_state = Some(GameState::new());
+            eprintln!("[DEBUG] resumed: 创建GameState");
+            let game_state = GameState::new();
+            eprintln!("[DEBUG] resumed: GameState创建完成");
+            
+            // 上传精灵图集和调色板到GPU
+            eprintln!("[DEBUG] resumed: 上传精灵图集");
+            if let Some(gpu_renderer) = self.display.gpu_renderer_mut() {
+                let (atlas_data, atlas_width, atlas_height) = game_state.get_atlas_data();
+                gpu_renderer.upload_atlas(atlas_data, atlas_width, atlas_height);
+                
+                let palette = game_state.get_palette_rgba();
+                gpu_renderer.upload_palette(0, &palette);
+            }
+            eprintln!("[DEBUG] resumed: 上传完成");
+            
+            self.game_state = Some(game_state);
             
             // 游戏初始化完成后再显示窗口
             self.display.show_window();
+            eprintln!("[DEBUG] resumed: 窗口已显示");
             
             // 打印启动信息
             print_startup_info();
@@ -1016,10 +724,33 @@ impl ApplicationHandler for GameApp {
                 if let Some(state) = &mut self.game_state {
                     let result = state.frame_update();
 
-                    // 渲染到framebuffer
-                    let display_frame = self.display.framebuffer_mut();
-                    state.render_to_rgba(display_frame);
-
+                    // GPU渲染流程
+                    if let Some(gpu_renderer) = self.display.gpu_renderer_mut() {
+                        // 获取精灵批次数据
+                        let sprite_instances = state.get_sprite_instances();
+                        let fill_rects = state.get_fill_rects();
+                        
+                        // 上传调色板
+                        let palette = state.get_palette_rgba();
+                        gpu_renderer.upload_palette(0, &palette);
+                        
+                        // 开始新帧
+                        gpu_renderer.begin_frame();
+                        
+                        // 添加填充矩形
+                        for fill in fill_rects {
+                            gpu_renderer.draw_fill(fill);
+                        }
+                        
+                        // 添加精灵
+                        for sprite in sprite_instances {
+                            gpu_renderer.draw_sprite(sprite);
+                        }
+                        
+                        // 渲染到GPU纹理
+                        gpu_renderer.render_frame();
+                    }
+                    
                     // 显示 - pixels 会自动进行等比例缩放和添加 letterbox
                     let _ = self.display.present();
 
@@ -1045,6 +776,8 @@ impl ApplicationHandler for GameApp {
 
 /// 运行游戏(平台入口函数)
 pub fn run_game() -> Result<(), Box<dyn std::error::Error>> {
+    eprintln!("[DEBUG] run_game: 开始");
+    
     // 初始化日志系统(仅在启用 logging feature 时)
     #[cfg(feature = "logging")]
     {
@@ -1061,10 +794,13 @@ pub fn run_game() -> Result<(), Box<dyn std::error::Error>> {
             .ok();
     }
 
+    eprintln!("[DEBUG] run_game: 创建EventLoop");
     let event_loop = EventLoop::new()?;
     event_loop.set_control_flow(ControlFlow::Poll);
 
+    eprintln!("[DEBUG] run_game: 创建GameApp");
     let mut app = GameApp::new();
+    eprintln!("[DEBUG] run_game: GameApp创建完成，开始运行");
     // winit 0.30: run_app 会消费 event_loop 并在退出时返回
     let _ = event_loop.run_app(&mut app);
 

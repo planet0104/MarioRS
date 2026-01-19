@@ -1,5 +1,6 @@
 // 马里奥游戏精灵数据和调色板模块
 #![allow(non_snake_case)]
+#![allow(non_camel_case_types)]
 // 说明：历史版本此文件为自动生成的"硬编码数组"形式。
 // 当前版本改为：编译期嵌入 assets/sprites 目录，再在 Rust 中解析 Pascal db 数据并做 Mode X 去平面化。
 
