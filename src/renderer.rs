@@ -8,7 +8,7 @@
 
 use crate::backgr::BackGr;
 use crate::blocks::Blocks;
-use crate::buffers::{Buffers, H, NH, NV, W};
+use crate::buffers::{Buffers, DM_DOWN_OUT_OF_PIPE, DM_UP_OUT_OF_PIPE, H, NH, NV, W};
 use crate::enemies::Enemies;
 use crate::figures::Figures;
 use crate::glitter::GlitterSystem;
@@ -287,6 +287,36 @@ impl Renderer {
             );
             for sprite_cmd in player_sprites {
                 commands.push(RenderCommand::Sprite(sprite_cmd));
+            }
+        }
+
+        // 6.1 管道出入动画遮挡：对齐 Oldsrc（先画玩家，再重绘管道口在最上层进行遮挡）
+        if matches!(ctx.buffers.demo, DM_UP_OUT_OF_PIPE | DM_DOWN_OUT_OF_PIPE) {
+            // 用地图数据动态判断“管道口”在哪一行，避免 map_y 偏差导致遮挡失败
+            let mx = ctx.players.map_x;
+            let my = ctx.players.map_y;
+            let mut pipe_y: Option<i32> = None;
+            if ctx.buffers.world_get(mx, my + 1) == b'0' {
+                pipe_y = Some(my + 1);
+            } else if ctx.buffers.world_get(mx, my - 1) == b'0' {
+                pipe_y = Some(my - 1);
+            }
+            if let Some(ty) = pipe_y {
+                for dx in 0..=1 {
+                    let tx = mx + dx;
+                    let overlay = ctx.figures.collect_tile_sprite_gpu(
+                        tx,
+                        ty,
+                        &ctx.buffers.world_map,
+                        ctx.sprites,
+                        atlas,
+                        &ctx.buffers.options,
+                        ctx.buffers,
+                    );
+                    for s in overlay {
+                        commands.push(RenderCommand::Sprite(s));
+                    }
+                }
             }
         }
 

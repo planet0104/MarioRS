@@ -772,7 +772,12 @@ impl Figures {
             b'J' => Some(SpriteId::BLOCK_001),
             b'K' => Some(SpriteId::NOTE_000),
             b'X' => Some(SpriteId::XBLOCK_000),
-            b'W' => Some(SpriteId::WOOD_000),
+            b'W' => {
+                // 对齐 Oldsrc：地下室墙面是实体砖块，索引0也要绘制（否则会变成纯背景色）
+                let uv = atlas.get(SpriteId::WOOD_000);
+                commands.push(SpriteCommand::new(xpos, ypos, uv).with_opaque(true));
+                None
+            }
             b'0' => Some(SpriteId::PIPE_000),
             b'1' => Some(SpriteId::PIPE_001),
             b'2' => Some(SpriteId::PIPE_002),
@@ -867,8 +872,8 @@ impl Figures {
                 }
             }
             b'#' => match options.design {
-                // 设计1（Level1）：'#' '%' 用于树干/树叶组合（对齐 Oldsrc），不是瀑布
-                1 | 2 => {
+                1 => Some(SpriteId::FALL_000),
+                2 => {
                     // 对齐 Oldsrc:
                     // - 上方也是 '#': Put TREE_001 (opaque)
                     // - 上方是 '%': Put TREE_000 (opaque) 然后 Draw TREE_003 (transparent leaves)
@@ -897,13 +902,20 @@ impl Figures {
                         }
                     }
                 }
-                3 => Some(SpriteId::WINDOW_001),
+                3 => {
+                    // 对齐 Oldsrc：窗户是覆盖在墙面上的透明图层，需要先画墙面，再画窗户
+                    let uv = atlas.get(SpriteId::WOOD_000);
+                    commands.push(SpriteCommand::new(xpos, ypos, uv).with_opaque(true));
+                    let uv = atlas.get(SpriteId::WINDOW_001);
+                    commands.push(SpriteCommand::new(xpos, ypos, uv));
+                    None
+                }
                 4 => Some(SpriteId::LAVA_000),
                 _ => None,
             },
             b'%' => match options.design {
-                // 设计1（Level1）：'#' '%' 用于树干/树叶组合（对齐 Oldsrc），不是瀑布
-                1 | 2 => {
+                1 => Some(SpriteId::FALL_001),
+                2 => {
                     // 对齐 Oldsrc:
                     // - 上方也是 '%': Put TREE_000 (opaque)
                     // - 上方是 '#': Put TREE_001 (opaque) 然后 Draw TREE_002 (transparent leaves)
@@ -931,7 +943,14 @@ impl Figures {
                         }
                     }
                 }
-                3 => Some(SpriteId::WINDOW_000),
+                3 => {
+                    // 对齐 Oldsrc：窗户是覆盖在墙面上的透明图层，需要先画墙面，再画窗户
+                    let uv = atlas.get(SpriteId::WOOD_000);
+                    commands.push(SpriteCommand::new(xpos, ypos, uv).with_opaque(true));
+                    let uv = atlas.get(SpriteId::WINDOW_000);
+                    commands.push(SpriteCommand::new(xpos, ypos, uv));
+                    None
+                }
                 4 => Some(SpriteId::LAVA_001),
                 5 => {
                     let idx = ((x + (buffers.lava_counter as i32 / 8)) % 5) as u8;
@@ -1018,13 +1037,8 @@ impl Figures {
         if let Some(id) = sprite_id {
             let uv = atlas.get(id);
             // 默认对齐 DrawImage 语义: 索引0透明
-            // 但部分 tile 在 Oldsrc 用 PutImage（索引0也要绘制），否则边框/底色会缺失
-            let force_opaque = matches!(
-                ch,
-                b'W' | b'0' | b'1' | b'2' | b'3' | b'I' | b'J' | b'K' | b'X' | b'A' | b'?' | b'@'
-            );
-            let cmd = SpriteCommand::new(xpos, ypos, uv).with_opaque(force_opaque);
-            commands.push(cmd);
+            // Oldsrc 的 PutImage/DrawImage 差异只在明确分支里使用 with_opaque(true) 处理
+            commands.push(SpriteCommand::new(xpos, ypos, uv));
         }
         
         commands

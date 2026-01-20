@@ -220,6 +220,10 @@ impl Enemies {
                 enemy.tp = TP_DEAD_VERT_PLANT;
                 enemy.delay_counter = 0;
                 enemy.y_vel = 0;
+                // 对齐 Oldsrc：死亡特效必须固定在击中位置，不能回到管道口
+                enemy.status = 0;
+                enemy.last_x_pos = enemy.x_pos;
+                enemy.last_y_pos = enemy.y_pos;
                 buffers.add_score(100);
             }
             _ => {}
@@ -1428,6 +1432,19 @@ impl Enemies {
                     }
                 }
 
+                // 处理死亡食人花动画（对齐Oldsrc：show_enemies中的TP_DEAD_VERT_PLANT逻辑）
+                // wgpu版本使用collect_enemy_sprites_gpu渲染，需要在move_enemies中更新状态
+                if self.enemies[j].tp == TP_DEAD_VERT_PLANT {
+                    self.enemies[j].delay_counter = 0;
+                    self.enemies[j].move_delay = 0;
+                    self.enemies[j].y_vel = 0;
+                    self.enemies[j].status += 1;
+                    // 动画播放完毕后销毁敌人
+                    if self.enemies[j].status > 14 {
+                        self.enemies[j].tp = TP_DYING;
+                    }
+                }
+
                 // 处理死亡状态
                 if matches!(
                     self.enemies[j].tp,
@@ -1488,7 +1505,7 @@ impl Enemies {
                     // 垂直移动逻辑
                     if matches!(
                         self.enemies[j].tp,
-                        TP_VERT_FISH | TP_DEAD_VERT_FISH | TP_VERT_FIREBALL | TP_DEAD_VERT_PLANT
+                        TP_VERT_FISH | TP_DEAD_VERT_FISH | TP_VERT_FIREBALL
                     ) {
                         if (self.enemies[j].dir_counter % 3 == 0)
                             && (self.enemies[j].y_pos + H < NV * H)

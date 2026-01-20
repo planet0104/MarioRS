@@ -594,7 +594,8 @@ impl Play {
                 self.renderer.only_draw = self.only_draw;
                 self.renderer.show_objects = self.show_objects;
                 self.renderer.show_score = self.show_score;
-                self.renderer.show_status = self.text_status;
+                // 对齐 Oldsrc：游戏过程中状态栏一直显示（地下室也一样）
+                self.renderer.show_status = true;
                 self.renderer.show_retrace = self.show_retrace;
                 
                 self.phase = PlayPhase::RenderInitFrames;
@@ -1012,7 +1013,8 @@ impl Play {
                 enemies, players, tmpobj, stars, glitters,
                 status: status_mgr, txt,
             };
-            self.renderer.show_status = self.text_status;
+            // 对齐 Oldsrc：游戏过程中状态栏一直显示（地下室也一样）
+            self.renderer.show_status = true;
             self.renderer.render_game_frame(&mut ctx);
         }
         

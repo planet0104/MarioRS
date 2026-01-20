@@ -521,6 +521,41 @@ impl Players {
                 );
             };
 
+            let push_partial_bottom = |list: &mut Vec<SpriteCommand>,
+                                       x: i32,
+                                       y: i32,
+                                       base_uv: SpriteUV,
+                                       visible_height: f32| {
+                let full_h = base_uv.height as f32;
+                if visible_height <= 0.0 {
+                    return;
+                }
+                if visible_height >= full_h {
+                    list.push(
+                        SpriteCommand::new(x, y, base_uv)
+                            .with_flip(flip_x, false)
+                            .with_palette(0, palette_index),
+                    );
+                    return;
+                }
+                // 从底部开始显示 visible_height（用于“从上方管道往下出来”）
+                let clip_ratio = visible_height / full_h;
+                let clipped_h = (base_uv.height as f32 * clip_ratio) as u32;
+                if clipped_h == 0 {
+                    return;
+                }
+                let trim_top = base_uv.height.saturating_sub(clipped_h);
+                let mut uv2 = base_uv;
+                uv2.y = uv2.y.saturating_add(trim_top);
+                uv2.height = clipped_h;
+                let y2 = y + trim_top as i32;
+                list.push(
+                    SpriteCommand::new(x, y2, uv2)
+                        .with_flip(flip_x, false)
+                        .with_palette(0, palette_index),
+                );
+            };
+
             match buffers.demo {
                 DM_DOWN_INTO_PIPE | DM_UP_OUT_OF_PIPE => {
                     // 进入管道动画：玩家逐渐消失
@@ -530,13 +565,24 @@ impl Players {
                 DM_UP_INTO_PIPE | DM_DOWN_OUT_OF_PIPE => {
                     // 从管道出来动画：玩家逐渐出现
                     let visible_height = (2 * H + self.demo_y) as f32;
-                    push_partial(
-                        &mut commands,
-                        sx,
-                        sy + self.demo_y,
-                        uv,
-                        visible_height.min(uv.height as f32),
-                    );
+                    if buffers.demo == DM_DOWN_OUT_OF_PIPE {
+                        // 对齐 Oldsrc：从上方管道往下出来时，应该先看到下半身，上半身被管道遮挡
+                        push_partial_bottom(
+                            &mut commands,
+                            sx,
+                            sy + self.demo_y,
+                            uv,
+                            visible_height.min(uv.height as f32),
+                        );
+                    } else {
+                        push_partial(
+                            &mut commands,
+                            sx,
+                            sy + self.demo_y,
+                            uv,
+                            visible_height.min(uv.height as f32),
+                        );
+                    }
                 }
                 DM_DEAD => {
                     // 死亡动画（下落）
