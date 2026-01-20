@@ -16,12 +16,24 @@ pub struct SpriteUV {
 impl SpriteUV {
     // 计算归一化UV坐标 (0.0-1.0)
     pub fn normalized(&self, atlas_size: u32) -> (f32, f32, f32, f32) {
+        // 重要：使用 texel center UV，避免采样到相邻精灵/空白像素导致“缝隙/黑线”。
+        //
+        // 旧实现用边界 UV：
+        //   u = x/size .. (x+w)/size
+        // 当顶点 pos=1.0 时，uv 会正好落在边界上，nearest 取样可能落到下一列/下一行，
+        // 在渐显（整体偏暗）时会特别明显，表现为砖墙之间出现黑色格子缝。
+        //
+        // 新实现把 UV 对齐到像素中心：
+        //   u = (x+0.5)/size .. (x+w-0.5)/size
+        // 相当于 uv_size 使用 (w-1)/size，保证采样始终落在本精灵像素范围内。
         let atlas_f = atlas_size as f32;
+        let w = self.width.max(1) as f32;
+        let h = self.height.max(1) as f32;
         (
-            self.x as f32 / atlas_f,
-            self.y as f32 / atlas_f,
-            self.width as f32 / atlas_f,
-            self.height as f32 / atlas_f,
+            (self.x as f32 + 0.5) / atlas_f,
+            (self.y as f32 + 0.5) / atlas_f,
+            ((w - 1.0).max(0.0)) / atlas_f,
+            ((h - 1.0).max(0.0)) / atlas_f,
         )
     }
 }

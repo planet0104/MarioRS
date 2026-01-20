@@ -610,13 +610,17 @@ impl Figures {
         backgr: &mut BackGr,
         _sprites: &SpriteDataManager,
     ) {
+        // 关键：必须以 options.sky_type 为准，不能用 self.sky。
+        // 否则在关卡切换或入管渐显时，可能出现“第一帧还按旧天空类型绘制”导致闪烁。
+        let sky = options.sky_type;
+
         // GPU模式：直接使用fill_world_gpu
         if options.backgr_type == 0 {
             vga.fill_world_gpu(x, y, w, h, 0xE0);
             return;
         }
 
-        match self.sky {
+        match sky {
             // 以Horizon分割填充
             0 | 1 | 3 | 4 => {
                 let horizon = options.horizon as i32;
@@ -665,13 +669,16 @@ impl Figures {
         options: &WorldOptions,
     ) -> Vec<FillCommand> {
         let mut fills = Vec::new();
+        // 关键：必须以 options.sky_type 为准，不能用 self.sky。
+        // 否则在关卡切换或入管渐显时，可能出现“第一帧还按旧天空类型绘制”导致闪烁。
+        let sky = options.sky_type;
         
         if options.backgr_type == 0 {
             fills.push(FillCommand::new(x, y, w, h, 0xE0));
             return fills;
         }
 
-        match self.sky {
+        match sky {
             0 | 1 | 3 | 4 => {
                 let horizon = options.horizon as i32;
                 let top_h = horizon - y;
@@ -704,8 +711,19 @@ impl Figures {
                 }
             }
             6 | 7 | 8 => {
-                // 地下室背景 - 使用统一填充色
-                fills.push(FillCommand::new(x, y, w, h, 0x18));
+                // 地下室背景
+                //
+                // Oldsrc 语义：
+                // - BackGrType=4: 背景墙面用 PALBRICK_000 平铺（不透明 PutImage 语义）
+                // - BackGrType=5/6/7: 分别是大砖/柱子/窗口的背景效果
+                //
+                // GPU 管线里，BackGrType=4 的砖墙需要以 sprite 平铺实现，
+                // 不能用单色填充替代（否则会出现你反馈的“墙面纯色、只有窗口可见”的差异）。
+                //
+                // 这里对 BackGrType=4 不再返回 fill，由 renderer 负责追加砖墙平铺精灵。
+                if options.backgr_type != 4 {
+                    fills.push(FillCommand::new(x, y, w, h, 0x18));
+                }
             }
             _ => {}
         }
@@ -903,8 +921,9 @@ impl Figures {
                     }
                 }
                 3 => {
-                    // 对齐 Oldsrc：窗户是覆盖在墙面上的透明图层，需要先画墙面，再画窗户
-                    let uv = atlas.get(SpriteId::WOOD_000);
+                    // 对齐 Oldsrc：窗户是覆盖在地下砖墙上的透明图层。
+                    // 这里不能用 WOOD_000 当底图，否则会出现你反馈的“窗户上方圆形部分露出木纹”。
+                    let uv = atlas.get(SpriteId::PALBRICK_000);
                     commands.push(SpriteCommand::new(xpos, ypos, uv).with_opaque(true));
                     let uv = atlas.get(SpriteId::WINDOW_001);
                     commands.push(SpriteCommand::new(xpos, ypos, uv));
@@ -944,8 +963,8 @@ impl Figures {
                     }
                 }
                 3 => {
-                    // 对齐 Oldsrc：窗户是覆盖在墙面上的透明图层，需要先画墙面，再画窗户
-                    let uv = atlas.get(SpriteId::WOOD_000);
+                    // 对齐 Oldsrc：窗户是覆盖在地下砖墙上的透明图层
+                    let uv = atlas.get(SpriteId::PALBRICK_000);
                     commands.push(SpriteCommand::new(xpos, ypos, uv).with_opaque(true));
                     let uv = atlas.get(SpriteId::WINDOW_000);
                     commands.push(SpriteCommand::new(xpos, ypos, uv));

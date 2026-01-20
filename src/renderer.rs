@@ -184,6 +184,40 @@ impl Renderer {
                 palette_index,
             )));
         }
+        
+        // 1.1 地下室砖墙背景（严格对齐 Oldsrc）
+        //
+        // Oldsrc FIGURES.DrawSky(Sky=6/7/8, BackGrType=4) 会调用 BACKGR.DrawBricks，
+        // 用 PALBRICK_000 以 PutImage 语义平铺整块背景（索引0也要绘制）。
+        //
+        // wgpu 模式下如果用 0x18 单色 fill 替代，会导致你反馈的现象：
+        // WINDOW_001 能看到，但墙面底纹变成纯色(#717171)。
+        if matches!(ctx.buffers.options.sky_type, 6 | 7 | 8) && ctx.buffers.options.backgr_type == 4 {
+            use crate::sprites::SpriteId;
+            use crate::gpu::sprite_batch::SpriteCommand;
+            
+            let uv = atlas.get(SpriteId::PALBRICK_000);
+            let tw = uv.width as i32;  // 20
+            let th = uv.height as i32; // 14
+            
+            // 让砖块图案在“世界坐标”上保持对齐，随着 x_view/y_view 滚动。
+            let x0 = -x_view.rem_euclid(tw);
+            let y0 = -y_view.rem_euclid(th);
+            let screen_w = crate::vga256::SCREEN_WIDTH;
+            let screen_h = crate::vga256::VIR_SCREEN_HEIGHT;
+            
+            let mut y = y0;
+            while y < screen_h {
+                let mut x = x0;
+                while x < screen_w {
+                    commands.push(RenderCommand::Sprite(
+                        SpriteCommand::new(x, y, uv).with_opaque(true),
+                    ));
+                    x += tw;
+                }
+                y += th;
+            }
+        }
 
         // 2. 星星层（如果有）
         if has_stars {
