@@ -3,6 +3,7 @@
 // 将游戏初始化和主循环逻辑从平台层分离出来
 // 平台层只负责提供运行环境，游戏逻辑在此模块中
 
+use crate::gpu::GpuRenderer;
 use crate::mario::MarioGame;
 use crate::platform::FrameResult;
 use crate::vga256::{VGA, SCREEN_WIDTH, WINDOWHEIGHT};
@@ -54,6 +55,11 @@ impl GameState {
         self.vga.get_sprite_batch().fill_rects()
     }
     
+    /// 获取GPU UI层填充矩形数据用于渲染
+    pub fn get_ui_fill_rects(&self) -> Vec<crate::gpu::FillRect> {
+        self.vga.get_sprite_batch().ui_fill_rects()
+    }
+    
     /// 获取当前调色板数据用于GPU渲染
     /// 返回256色RGBA格式数据
     pub fn get_palette_rgba(&self) -> [[u8; 4]; 256] {
@@ -76,6 +82,51 @@ impl GameState {
         let atlas = &self.game.atlas;
         let size = atlas.size();
         (atlas.data(), size, size)
+    }
+    
+    /// 提交渲染数据到GPU
+    /// 
+    /// 这个方法封装了所有GPU渲染数据的提交逻辑，包括：
+    /// 1. 上传调色板
+    /// 2. 上传精灵图集
+    /// 3. 提交fills、sprites、ui_fills
+    /// 4. 渲染到GPU内部纹理
+    /// 
+    /// 平台层只需调用此方法，然后将GPU内部纹理缩放输出到窗口即可
+    pub fn submit_to_gpu(&self, gpu: &mut GpuRenderer) {
+        // 获取渲染数据
+        let sprites = self.get_sprite_instances();
+        let fills = self.get_fill_rects();
+        let ui_fills = self.get_ui_fill_rects();
+        let palette = self.get_palette_rgba();
+        
+        // 上传调色板到GPU
+        gpu.upload_palette(0, &palette);
+        
+        // 上传图集到GPU（BuildWorld 可能会重建/重着色 sprites）
+        let (atlas_data, atlas_w, atlas_h) = self.get_atlas_data();
+        gpu.upload_atlas(atlas_data, atlas_w, atlas_h);
+        
+        // 开始新一帧渲染
+        gpu.begin_frame();
+        
+        // 添加填充矩形（背景层）
+        for fill in fills {
+            gpu.draw_fill(fill);
+        }
+        
+        // 添加精灵（实体层）
+        for sprite in sprites {
+            gpu.draw_sprite(sprite);
+        }
+        
+        // 添加UI层填充矩形（状态栏等，在sprites之后渲染）
+        for fill in ui_fills {
+            gpu.draw_ui_fill(fill);
+        }
+        
+        // 渲染到GPU内部纹理
+        gpu.render_frame();
     }
     
     /// 请求退出

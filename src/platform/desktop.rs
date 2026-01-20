@@ -631,17 +631,6 @@ impl ApplicationHandler for GameApp {
             let game_state = GameState::new();
             eprintln!("[DEBUG] resumed: GameState创建完成");
             
-            // 上传精灵图集和调色板到GPU
-            eprintln!("[DEBUG] resumed: 上传精灵图集");
-            if let Some(gpu_renderer) = self.display.gpu_renderer_mut() {
-                let (atlas_data, atlas_width, atlas_height) = game_state.get_atlas_data();
-                gpu_renderer.upload_atlas(atlas_data, atlas_width, atlas_height);
-                
-                let palette = game_state.get_palette_rgba();
-                gpu_renderer.upload_palette(0, &palette);
-            }
-            eprintln!("[DEBUG] resumed: 上传完成");
-            
             self.game_state = Some(game_state);
             
             // 游戏初始化完成后再显示窗口
@@ -723,33 +712,8 @@ impl ApplicationHandler for GameApp {
 
                     // GPU渲染流程
                     if let Some(gpu_renderer) = self.display.gpu_renderer_mut() {
-                        // 获取精灵批次数据
-                        let sprite_instances = state.get_sprite_instances();
-                        let fill_rects = state.get_fill_rects();
-                        
-                        // 上传图集（BuildWorld 可能会重建/重着色 sprites）
-                        let (atlas_data, atlas_width, atlas_height) = state.get_atlas_data();
-                        gpu_renderer.upload_atlas(atlas_data, atlas_width, atlas_height);
-                        
-                        // 上传调色板
-                        let palette = state.get_palette_rgba();
-                        gpu_renderer.upload_palette(0, &palette);
-                        
-                        // 开始新帧
-                        gpu_renderer.begin_frame();
-                        
-                        // 添加填充矩形
-                        for fill in fill_rects {
-                            gpu_renderer.draw_fill(fill);
-                        }
-                        
-                        // 添加精灵
-                        for sprite in sprite_instances {
-                            gpu_renderer.draw_sprite(sprite);
-                        }
-                        
-                        // 渲染到GPU纹理
-                        gpu_renderer.render_frame();
+                        // 提交渲染数据到GPU
+                        state.submit_to_gpu(gpu_renderer);
                     }
                     
                     // 显示 - pixels 会自动进行等比例缩放和添加 letterbox

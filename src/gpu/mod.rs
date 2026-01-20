@@ -113,8 +113,10 @@ pub enum RenderCommand {
         sprite: SpriteInstance,
         visible_height: f32,
     },
-    // 填充矩形
+    // 填充矩形 (背景层，在sprites之前渲染)
     FillRect(FillRect),
+    /// UI层填充矩形 (在sprites之后渲染，用于状态栏等)
+    UIFillRect(FillRect),
 }
 
 // 相机/视口uniform
@@ -183,6 +185,8 @@ pub struct GpuRenderer {
     // 当前帧的精灵批次
     pub sprite_instances: Vec<SpriteInstance>,
     pub fill_rects: Vec<FillRect>,
+    /// UI层填充矩形（在sprites之后渲染）
+    pub ui_fill_rects: Vec<FillRect>,
     
     // 当前调色板索引
     pub current_palette: u32,
@@ -916,6 +920,7 @@ impl GpuRenderer {
             scale_buffer,
             sprite_instances: Vec::with_capacity(MAX_SPRITES_PER_BATCH),
             fill_rects: Vec::with_capacity(128),
+            ui_fill_rects: Vec::with_capacity(64),
             current_palette: 0,
             camera,
         }
@@ -1124,6 +1129,7 @@ impl GpuRenderer {
     pub fn begin_frame(&mut self) {
         self.sprite_instances.clear();
         self.fill_rects.clear();
+        self.ui_fill_rects.clear();
     }
 
     // 添加精灵到批次
@@ -1134,6 +1140,11 @@ impl GpuRenderer {
     // 添加填充矩形到批次
     pub fn draw_fill(&mut self, rect: FillRect) {
         self.fill_rects.push(rect);
+    }
+
+    /// 添加UI层填充矩形到批次（在sprites之后渲染）
+    pub fn draw_ui_fill(&mut self, rect: FillRect) {
+        self.ui_fill_rects.push(rect);
     }
 
     // 渲染当前帧到内部纹理
@@ -1183,6 +1194,19 @@ impl GpuRenderer {
                 render_pass.set_bind_group(0, &self.sprite_bind_group, &[]);
                 render_pass.set_vertex_buffer(0, sprite_buffer.slice(..));
                 render_pass.draw(0..6, 0..self.sprite_instances.len() as u32);
+            }
+
+            // 最后渲染UI层填充矩形（状态栏等，需要在sprites之上）
+            if !self.ui_fill_rects.is_empty() {
+                let ui_fill_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("ui_fill_buffer"),
+                    contents: bytemuck::cast_slice(&self.ui_fill_rects),
+                    usage: wgpu::BufferUsages::VERTEX,
+                });
+                render_pass.set_pipeline(&self.fill_pipeline);
+                render_pass.set_bind_group(0, &self.fill_bind_group, &[]);
+                render_pass.set_vertex_buffer(0, ui_fill_buffer.slice(..));
+                render_pass.draw(0..6, 0..self.ui_fill_rects.len() as u32);
             }
         }
 

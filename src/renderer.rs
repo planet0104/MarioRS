@@ -117,6 +117,18 @@ impl Renderer {
                     };
                     batch.push_fill(fill);
                 }
+                RenderCommand::UIFillRect(r) => {
+                    // UI层fills在所有sprites之后渲染
+                    let fill = FillCommand {
+                        x: r.position[0],
+                        y: r.position[1],
+                        width: r.size[0],
+                        height: r.size[1],
+                        color_index: r.color_index as u8,
+                        palette_index: r.palette_index as u32,
+                    };
+                    batch.push_ui_fill(fill);
+                }
                 RenderCommand::DrawSprite(inst) => batch.push_instance(inst),
                 RenderCommand::DrawSpriteFlipY(mut inst) => {
                     inst.flip[1] = 1.0;

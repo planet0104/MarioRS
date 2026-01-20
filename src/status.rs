@@ -71,6 +71,7 @@ impl Status {
     // GPU模式下不需要hide_status，每帧重绘
 
     /// GPU渲染: 收集状态栏文本
+    /// 使用UI层渲染，确保状态栏在所有游戏精灵之上
     pub fn collect_status_gpu(
         &self,
         commands: &mut Vec<RenderCommand>,
@@ -91,17 +92,18 @@ impl Status {
         
         // 玩家名称
         // 重要：UI 必须使用屏幕坐标，不能随着 x_view 滚动
-        txt.write_text_gpu(commands, 10 + 4, HEIGHT, &player_name[player], 31, palette_index);
+        // 使用UI层渲染，确保在所有游戏精灵（包括地下室砖墙）之上
+        txt.write_text_ui_gpu(commands, 10 + 4, HEIGHT, &player_name[player], 31, palette_index);
         
         // 生命数
         let mut lives = data_lives[player];
         if lives > 99 {
             lives = 99;
         }
-        txt.write_text_gpu(commands, 54 + 4, HEIGHT, &format!("{:2}", lives), 31, palette_index);
+        txt.write_text_ui_gpu(commands, 54 + 4, HEIGHT, &format!("{:2}", lives), 31, palette_index);
         
         // 分数
-        txt.write_text_gpu(
+        txt.write_text_ui_gpu(
             commands,
             84 + 6,
             HEIGHT,
@@ -111,11 +113,11 @@ impl Status {
         );
         
         // 金币图标
-        txt.write_text_gpu(commands, 140 + 40 + 10, HEIGHT, "\t", 13, palette_index);
-        txt.write_text_gpu(commands, 140 + 40 + 10, HEIGHT, "\x07", 14, palette_index);
+        txt.write_text_ui_gpu(commands, 140 + 40 + 10, HEIGHT, "\t", 13, palette_index);
+        txt.write_text_ui_gpu(commands, 140 + 40 + 10, HEIGHT, "\x07", 14, palette_index);
         
         // 金币数
-        txt.write_text_gpu(
+        txt.write_text_ui_gpu(
             commands,
             158 + 40 + 10,
             HEIGHT,
@@ -126,11 +128,11 @@ impl Status {
         
         // 关卡
         let lev = world_number.chars().nth(2).unwrap_or(' ');
-        txt.write_text_gpu(commands, 258, HEIGHT, &format!("LEVEL {}", lev), 31, palette_index);
+        txt.write_text_ui_gpu(commands, 258, HEIGHT, &format!("LEVEL {}", lev), 31, palette_index);
         
         // 恢复正常字体
         txt.set_font(0, FontStyle::NORMAL);
-        txt.write_text_gpu(commands, 46 + 4, HEIGHT, "x", 31, palette_index);
-        txt.write_text_gpu(commands, 150 + 40 + 10, HEIGHT, "x", 31, palette_index);
+        txt.write_text_ui_gpu(commands, 46 + 4, HEIGHT, "x", 31, palette_index);
+        txt.write_text_ui_gpu(commands, 150 + 40 + 10, HEIGHT, "x", 31, palette_index);
     }
 }

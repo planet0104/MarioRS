@@ -644,61 +644,8 @@ unsafe fn render_frame(_hwnd: HWND) {
             None => return,
         };
         
-        // 获取GPU渲染数据
-        let sprites = state.get_sprite_instances();
-        let fills = state.get_fill_rects();
-        let palette = state.get_palette_rgba();
-        
-        // Debug: 打印渲染统计
-        static mut FRAME_COUNT: u32 = 0;
-        FRAME_COUNT += 1;
-        if FRAME_COUNT == 60 {
-            println!("[GPU DEBUG] Frame 60 - Full debug:");
-            println!("  fills={}, sprites={}", fills.len(), sprites.len());
-            
-            // 打印前5个fills
-            for (i, f) in fills.iter().take(5).enumerate() {
-                println!("  Fill {}: pos=({:.1}, {:.1}), size=({:.1}, {:.1}), color={}, pal={}", 
-                    i, f.position[0], f.position[1], f.size[0], f.size[1], f.color_index, f.palette_index);
-            }
-            
-            // 统计fills是否有效
-            let valid_fills = fills.iter().filter(|f| 
-                f.size[0] > 0.0 && f.size[1] > 0.0 && 
-                f.position[0] >= -320.0 && f.position[0] < 640.0 &&
-                f.position[1] >= -200.0 && f.position[1] < 400.0
-            ).count();
-            println!("  Valid fills: {}/{}", valid_fills, fills.len());
-            
-            // 打印颜色224和240的值
-            let c224 = &palette[224];
-            let c240 = &palette[240];
-            println!("  Color 224 (0xE0): R={}, G={}, B={}", c224[0], c224[1], c224[2]);
-            println!("  Color 240 (0xF0): R={}, G={}, B={}", c240[0], c240[1], c240[2]);
-        }
-        
-        // 上传当前调色板到GPU
-        gpu.upload_palette(0, &palette);
-
-        // 上传图集到GPU（BuildWorld 可能会重建/重着色 sprites）
-        let (atlas_data, atlas_w, atlas_h) = state.get_atlas_data();
-        gpu.upload_atlas(atlas_data, atlas_w, atlas_h);
-        
-        // 开始新一帧渲染
-        gpu.begin_frame();
-        
-        // 添加填充矩形（背景层）
-        for fill in fills {
-            gpu.draw_fill(fill);
-        }
-        
-        // 添加精灵（实体层）
-        for sprite in sprites {
-            gpu.draw_sprite(sprite);
-        }
-        
-        // 渲染到内部纹理
-        gpu.render_frame();
+        // 提交渲染数据到GPU
+        state.submit_to_gpu(gpu);
         
         // 获取Surface纹理并缩放输出
         match surface.get_current_texture() {

@@ -159,6 +159,8 @@ impl FillCommand {
 pub struct SpriteBatch {
     sprites: Vec<SpriteCommand>,
     fills: Vec<FillCommand>,
+    /// UI层的fills，在所有sprites之后渲染（用于状态栏等）
+    ui_fills: Vec<FillCommand>,
     instances: Vec<SpriteInstance>,
     current_palette: u32,
 }
@@ -168,6 +170,7 @@ impl SpriteBatch {
         Self {
             sprites: Vec::with_capacity(1024),
             fills: Vec::with_capacity(128),
+            ui_fills: Vec::with_capacity(64),
             instances: Vec::with_capacity(256),
             current_palette: 0,
         }
@@ -177,6 +180,7 @@ impl SpriteBatch {
     pub fn clear(&mut self) {
         self.sprites.clear();
         self.fills.clear();
+        self.ui_fills.clear();
         self.instances.clear();
     }
 
@@ -228,6 +232,15 @@ impl SpriteBatch {
         }
         self.fills.push(cmd);
     }
+
+    /// 添加UI层的填充（在所有sprites之后渲染，用于状态栏等）
+    pub fn push_ui_fill(&mut self, cmd: FillCommand) {
+        let mut cmd = cmd;
+        if cmd.palette_index == 0 {
+            cmd.palette_index = self.current_palette;
+        }
+        self.ui_fills.push(cmd);
+    }
     
     /// 直接添加简单精灵（便捷方法）
     pub fn add_sprite(&mut self, x: i32, y: i32, uv: SpriteUV) {
@@ -264,6 +277,11 @@ impl SpriteBatch {
     // 获取填充矩形数据
     pub fn fill_rects(&self) -> Vec<FillRect> {
         self.fills.iter().map(|f| f.to_fill_rect()).collect()
+    }
+
+    /// 获取UI层填充矩形数据
+    pub fn ui_fill_rects(&self) -> Vec<FillRect> {
+        self.ui_fills.iter().map(|f| f.to_fill_rect()).collect()
     }
 
     // 精灵数量

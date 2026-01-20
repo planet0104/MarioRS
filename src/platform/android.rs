@@ -847,24 +847,10 @@ pub fn android_main(app: AndroidApp) {
                                 input.set_screen_size(win_width as f32, win_height as f32);
                                 display.set_native_window(Some(window));
 
-                                // 初始化 GameState，并上传 atlas/palette 到 GPU
+                                // 初始化 GameState（图集/调色板由 submit_to_gpu 每帧上传）
                                 if game_state.is_none() {
-                                    let state = GameState::new();
-                                    if let Some(gpu) = display.gpu_renderer_mut() {
-                                        let (atlas_data, atlas_w, atlas_h) = state.get_atlas_data();
-                                        gpu.upload_atlas(atlas_data, atlas_w, atlas_h);
-                                        let palette = state.get_palette_rgba();
-                                        gpu.upload_palette(0, &palette);
-                                    }
-                                    game_state = Some(state);
+                                    game_state = Some(GameState::new());
                                     log_info("Game state initialized");
-                                } else if let Some(state) = game_state.as_ref() {
-                                    if let Some(gpu) = display.gpu_renderer_mut() {
-                                        let (atlas_data, atlas_w, atlas_h) = state.get_atlas_data();
-                                        gpu.upload_atlas(atlas_data, atlas_w, atlas_h);
-                                        let palette = state.get_palette_rgba();
-                                        gpu.upload_palette(0, &palette);
-                                    }
                                 }
                             }
                         }
@@ -1002,24 +988,10 @@ pub fn android_main(app: AndroidApp) {
             }
 
             if let Some(gpu_renderer) = display.gpu_renderer_mut() {
-                let sprite_instances = state.get_sprite_instances();
-                let fill_rects = state.get_fill_rects();
-                let palette = state.get_palette_rgba();
+                // 提交渲染数据到GPU
+                state.submit_to_gpu(gpu_renderer);
 
-                // 上传图集（BuildWorld 可能会重建/重着色 sprites）
-                let (atlas_data, atlas_w, atlas_h) = state.get_atlas_data();
-                gpu_renderer.upload_atlas(atlas_data, atlas_w, atlas_h);
-
-                gpu_renderer.upload_palette(0, &palette);
-                gpu_renderer.begin_frame();
-                for f in fill_rects {
-                    gpu_renderer.draw_fill(f);
-                }
-                for s in sprite_instances {
-                    gpu_renderer.draw_sprite(s);
-                }
-                gpu_renderer.render_frame();
-
+                // Android专用：叠加层处理（触摸面板、FPS等）
                 if let Some(overlay_vec) = overlay_vec_opt.as_ref() {
                     gpu_renderer.upload_overlay_rgba(ow, oh, overlay_vec);
                 } else {

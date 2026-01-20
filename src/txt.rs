@@ -1176,6 +1176,34 @@ impl Txt {
         attr: u8,
         palette_index: u32,
     ) {
+        self.write_text_gpu_internal(commands, x, y, s, attr, palette_index, false);
+    }
+
+    /// GPU渲染: 收集UI层文本像素为填充矩形命令
+    /// 在所有sprites之后渲染，用于状态栏等UI元素
+    pub fn write_text_ui_gpu(
+        &self,
+        commands: &mut Vec<RenderCommand>,
+        x: i32,
+        y: i32,
+        s: &str,
+        attr: u8,
+        palette_index: u32,
+    ) {
+        self.write_text_gpu_internal(commands, x, y, s, attr, palette_index, true);
+    }
+
+    /// GPU渲染: 内部实现
+    fn write_text_gpu_internal(
+        &self,
+        commands: &mut Vec<RenderCommand>,
+        mut x: i32,
+        y: i32,
+        s: &str,
+        attr: u8,
+        palette_index: u32,
+        is_ui_layer: bool,
+    ) {
         for c in s.chars() {
             let idx = c as usize;
             if let Some(glyph) = self.letter(idx) {
@@ -1185,19 +1213,19 @@ impl Txt {
 
                 // 阴影效果
                 if self.b_shadow {
-                    self.render_glyph_gpu(commands, x + 1, y + 1, glyph, 16, palette_index);
+                    self.render_glyph_gpu_internal(commands, x + 1, y + 1, glyph, 16, palette_index, is_ui_layer);
                 }
                 
                 // 粗体效果
                 if self.b_bold {
                     if self.b_shadow {
-                        self.render_glyph_gpu(commands, x, y + 1, glyph, 16, palette_index);
+                        self.render_glyph_gpu_internal(commands, x, y + 1, glyph, 16, palette_index, is_ui_layer);
                     }
-                    self.render_glyph_gpu(commands, x - 1, y, glyph, attr, palette_index);
+                    self.render_glyph_gpu_internal(commands, x - 1, y, glyph, attr, palette_index, is_ui_layer);
                 }
                 
                 // 主要文字
-                self.render_glyph_gpu(commands, x, y, glyph, attr, palette_index);
+                self.render_glyph_gpu_internal(commands, x, y, glyph, attr, palette_index, is_ui_layer);
                 
                 x += width;
             } else {
@@ -1215,6 +1243,20 @@ impl Txt {
         glyph: &Glyph,
         attr: u8,
         palette_index: u32,
+    ) {
+        self.render_glyph_gpu_internal(commands, x, y, glyph, attr, palette_index, false);
+    }
+
+    /// GPU辅助: 渲染单个字形（内部实现）
+    fn render_glyph_gpu_internal(
+        &self,
+        commands: &mut Vec<RenderCommand>,
+        x: i32,
+        y: i32,
+        glyph: &Glyph,
+        attr: u8,
+        palette_index: u32,
+        is_ui_layer: bool,
     ) {
         let width = glyph.width() as i32;
         let height = glyph.height() as i32;
@@ -1238,7 +1280,11 @@ impl Txt {
                             attr,
                             palette_index,
                         );
-                        commands.push(RenderCommand::FillRect(fill));
+                        if is_ui_layer {
+                            commands.push(RenderCommand::UIFillRect(fill));
+                        } else {
+                            commands.push(RenderCommand::FillRect(fill));
+                        }
                     }
                 }
             }
