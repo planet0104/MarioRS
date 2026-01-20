@@ -824,7 +824,14 @@ impl Figures {
                     commands.push(SpriteCommand::new(xpos, ypos, uv));
                 }
 
-                // 3. 再绘制草地本体(透明覆盖)
+                // 3. 若上方是棕榈树干(0xF6)且 design=1，先叠加一层 WPALM_000
+                // 对齐 Oldsrc: 确保草地透明处显示树干而非天空
+                if get(x, y - 1) == 0xF6 && options.design == 1 {
+                    let uv = atlas.get(SpriteId::WPALM_000);
+                    commands.push(SpriteCommand::new(xpos, ypos, uv));
+                }
+
+                // 4. 再绘制草地本体(透明覆盖)
                 if x == 0 || get(x - 1, y) == ch {
                     if get(x + 1, y) == ch {
                         Some(SpriteId::GRASS2_000)
@@ -863,6 +870,16 @@ impl Figures {
             }
             0xFA => {
                 if options.design == 1 {
+                    // 对齐 Oldsrc: 棕榈叶中心精灵
+                    // 如果左边是0xF9(右侧棕榈叶位置)，先绘制PALM3作为overlay
+                    if get(x - 1, y) == 0xF9 {
+                        let uv = atlas.get(SpriteId::PALM3_000);
+                        commands.push(SpriteCommand::new(xpos, ypos, uv));
+                    // 如果右边是0xF9，先绘制PALM1作为overlay
+                    } else if get(x + 1, y) == 0xF9 {
+                        let uv = atlas.get(SpriteId::PALM1_000);
+                        commands.push(SpriteCommand::new(xpos, ypos, uv));
+                    }
                     Some(SpriteId::PALM0_000)
                 } else {
                     None
@@ -870,6 +887,12 @@ impl Figures {
             }
             0xF4 => {
                 if options.design == 1 {
+                    // 对齐 Oldsrc: 左侧棕榈叶
+                    // 如果下方是树干(0xF6)，先绘制WPALM作为overlay确保树干可见
+                    if get(x, y + 1) == 0xF6 {
+                        let uv = atlas.get(SpriteId::WPALM_000);
+                        commands.push(SpriteCommand::new(xpos, ypos, uv));
+                    }
                     Some(SpriteId::PALM1_000)
                 } else {
                     None
@@ -884,6 +907,12 @@ impl Figures {
             }
             0xF5 => {
                 if options.design == 1 {
+                    // 对齐 Oldsrc: 右侧棕榈叶
+                    // 如果下方是树干(0xF6)，先绘制WPALM作为overlay确保树干可见
+                    if get(x, y + 1) == 0xF6 {
+                        let uv = atlas.get(SpriteId::WPALM_000);
+                        commands.push(SpriteCommand::new(xpos, ypos, uv));
+                    }
                     Some(SpriteId::PALM3_000)
                 } else {
                     None
