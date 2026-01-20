@@ -8,7 +8,7 @@
 
 use crate::backgr::BackGr;
 use crate::blocks::Blocks;
-use crate::buffers::{Buffers, DM_DOWN_OUT_OF_PIPE, DM_UP_OUT_OF_PIPE, H, NH, NV, W};
+use crate::buffers::{Buffers, DM_DOWN_OUT_OF_PIPE, DM_UP_INTO_PIPE, H, NH, NV, W};
 use crate::enemies::Enemies;
 use crate::figures::Figures;
 use crate::glitter::GlitterSystem;
@@ -325,7 +325,7 @@ impl Renderer {
         }
 
         // 6.1 管道出入动画遮挡：对齐 Oldsrc（先画玩家，再重绘管道口在最上层进行遮挡）
-        if matches!(ctx.buffers.demo, DM_UP_OUT_OF_PIPE | DM_DOWN_OUT_OF_PIPE) {
+        if matches!(ctx.buffers.demo, DM_UP_INTO_PIPE | DM_DOWN_OUT_OF_PIPE) {
             // 用地图数据动态判断“管道口”在哪一行，避免 map_y 偏差导致遮挡失败
             let mx = ctx.players.map_x;
             let my = ctx.players.map_y;

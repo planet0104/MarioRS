@@ -315,13 +315,15 @@ impl Players {
         match buffers.demo {
             DM_DOWN_INTO_PIPE | DM_UP_OUT_OF_PIPE => {
                 // 进入管道动画：玩家逐渐消失
-                let draw_height = (2 * H - self.demo_y - 1) as f32;
-                if draw_height > 0.0 {
+                // 对齐 Oldsrc: draw_part_imagebuffer(0, draw_height) 绘制第0行到第draw_height行
+                // 实际绘制行数 = draw_height + 1，所以可见高度应为 2*H - demo_y
+                let visible_height = (2 * H - self.demo_y) as f32;
+                if visible_height > 0.0 {
                     vga.draw_sprite_partial_world_gpu(
                         self.x,
                         self.y + self.demo_y,
                         uv,
-                        draw_height,
+                        visible_height,
                     );
                 }
             }
@@ -559,8 +561,10 @@ impl Players {
             match buffers.demo {
                 DM_DOWN_INTO_PIPE | DM_UP_OUT_OF_PIPE => {
                     // 进入管道动画：玩家逐渐消失
-                    let draw_height = (2 * H - self.demo_y - 1) as f32;
-                    push_partial(&mut commands, sx, sy + self.demo_y, uv, draw_height.min(uv.height as f32));
+                    // 对齐 Oldsrc: draw_part_imagebuffer(0, draw_height) 绘制第0行到第draw_height行
+                    // 实际绘制行数 = draw_height + 1，所以可见高度应为 2*H - demo_y
+                    let visible_height = (2 * H - self.demo_y) as f32;
+                    push_partial(&mut commands, sx, sy + self.demo_y, uv, visible_height.min(uv.height as f32));
                 }
                 DM_UP_INTO_PIPE | DM_DOWN_OUT_OF_PIPE => {
                     // 从管道出来动画：玩家逐渐出现
