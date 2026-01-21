@@ -8,6 +8,7 @@ use crate::palettes::Palettes;
 use crate::sprites::SpriteDataManager;
 use crate::render_state::RenderState;
 use crate::gpu::sprite_batch::{FillCommand, SpriteCommand};
+use crate::gpu::{RenderCommand, FillRect};
 
 /// 调试开关：是否打印特定tile位置的精灵文件名
 /// 设置为true时，会打印指定坐标的tile绘制信息
@@ -740,7 +741,7 @@ impl Figures {
         fills
     }
 
-    /// GPU版本：收集单个tile的精灵命令
+    /// GPU版本：收集单个tile的渲染命令(精灵和填充)
     /// 替代redraw方法的CPU绘制，用于GPU渲染管线
     pub fn collect_tile_sprite_gpu(
         &self,
@@ -751,9 +752,9 @@ impl Figures {
         atlas: &crate::sprites::SpriteAtlas,
         options: &WorldOptions,
         buffers: &Buffers,
-    ) -> Vec<SpriteCommand> {
+    ) -> Vec<RenderCommand> {
         use crate::sprites::SpriteId;
-        let mut commands = Vec::new();
+        let mut commands: Vec<RenderCommand> = Vec::new();
         
         // GPU渲染统一使用屏幕坐标
         let xpos = x * crate::buffers::W as i32 - buffers.x_view;
@@ -783,12 +784,12 @@ impl Figures {
         if get(x, y - 1) == 18 {
             let (base_id, rotation, flip_x, flip_y) = Self::wall_variant_to_sprite(options.wall_type1, 5);
             let uv = atlas.get(base_id);
-            commands.push(
+            commands.push(RenderCommand::Sprite(
                 SpriteCommand::new(xpos, ypos, uv)
                     .with_rotation(rotation)
                     .with_flip(flip_x, flip_y)
                     .with_opaque(true),
-            );
+            ));
         }
         
         // 根据tile字符选择精灵
@@ -825,20 +826,20 @@ impl Figures {
                 if (1..=26).contains(&left) || (1..=26).contains(&right) {
                     // 直接使用FIGLIST_05，fig_list中已包含正确着色的墙体
                     let uv = atlas.get(SpriteId::FIGLIST_05);
-                    commands.push(SpriteCommand::new(xpos, ypos, uv));
+                    commands.push(RenderCommand::Sprite(SpriteCommand::new(xpos, ypos, uv)));
                 }
 
                 // 2. 若上方是树干(0xF0)且 design=2，先叠加一层 SMTREE_001
                 if get(x, y - 1) == 0xF0 && options.design == 2 {
                     let uv = atlas.get(SpriteId::SMTREE_001);
-                    commands.push(SpriteCommand::new(xpos, ypos, uv));
+                    commands.push(RenderCommand::Sprite(SpriteCommand::new(xpos, ypos, uv)));
                 }
 
                 // 3. 若上方是棕榈树干(0xF6)且 design=1，先叠加一层 WPALM_000
                 // 对齐 Oldsrc: 确保草地透明处显示树干而非天空
                 if get(x, y - 1) == 0xF6 && options.design == 1 {
                     let uv = atlas.get(SpriteId::WPALM_000);
-                    commands.push(SpriteCommand::new(xpos, ypos, uv));
+                    commands.push(RenderCommand::Sprite(SpriteCommand::new(xpos, ypos, uv)));
                 }
 
                 // 4. 再绘制草地本体(透明覆盖)
@@ -884,11 +885,11 @@ impl Figures {
                     // 如果左边是0xF9(右侧棕榈叶位置)，先绘制PALM3作为overlay
                     if get(x - 1, y) == 0xF9 {
                         let uv = atlas.get(SpriteId::PALM3_000);
-                        commands.push(SpriteCommand::new(xpos, ypos, uv));
+                        commands.push(RenderCommand::Sprite(SpriteCommand::new(xpos, ypos, uv)));
                     // 如果右边是0xF9，先绘制PALM1作为overlay
                     } else if get(x + 1, y) == 0xF9 {
                         let uv = atlas.get(SpriteId::PALM1_000);
-                        commands.push(SpriteCommand::new(xpos, ypos, uv));
+                        commands.push(RenderCommand::Sprite(SpriteCommand::new(xpos, ypos, uv)));
                     }
                     Some(SpriteId::PALM0_000)
                 } else {
@@ -901,7 +902,7 @@ impl Figures {
                     // 如果下方是树干(0xF6)，先绘制WPALM作为overlay确保树干可见
                     if get(x, y + 1) == 0xF6 {
                         let uv = atlas.get(SpriteId::WPALM_000);
-                        commands.push(SpriteCommand::new(xpos, ypos, uv));
+                        commands.push(RenderCommand::Sprite(SpriteCommand::new(xpos, ypos, uv)));
                     }
                     Some(SpriteId::PALM1_000)
                 } else {
@@ -921,7 +922,7 @@ impl Figures {
                     // 如果下方是树干(0xF6)，先绘制WPALM作为overlay确保树干可见
                     if get(x, y + 1) == 0xF6 {
                         let uv = atlas.get(SpriteId::WPALM_000);
-                        commands.push(SpriteCommand::new(xpos, ypos, uv));
+                        commands.push(RenderCommand::Sprite(SpriteCommand::new(xpos, ypos, uv)));
                     }
                     Some(SpriteId::PALM3_000)
                 } else {
@@ -939,22 +940,21 @@ impl Figures {
                     match get(x, y - 1) {
                         b'#' => {
                             let uv = atlas.get(SpriteId::TREE_001);
-                            commands.push(SpriteCommand::new(xpos, ypos, uv).with_opaque(true));
+                            commands.push(RenderCommand::Sprite(SpriteCommand::new(xpos, ypos, uv).with_opaque(true)));
                             None
                         }
                         b'%' => {
                             let uv = atlas.get(SpriteId::TREE_000);
-                            commands.push(SpriteCommand::new(xpos, ypos, uv).with_opaque(true));
+                            commands.push(RenderCommand::Sprite(SpriteCommand::new(xpos, ypos, uv).with_opaque(true)));
                             let uv = atlas.get(SpriteId::TREE_003);
-                            commands.push(SpriteCommand::new(xpos, ypos, uv));
+                            commands.push(RenderCommand::Sprite(SpriteCommand::new(xpos, ypos, uv)));
                             None
                         }
                         _ => {
-                            // TREE_003 的底图应为 TREE_001（TREE001 与 TREE003 使用同一套颜色索引区间）
-                            let uv = atlas.get(SpriteId::TREE_001);
-                            commands.push(SpriteCommand::new(xpos, ypos, uv).with_opaque(true));
+                            // 对齐 Oldsrc：顶部树叶只绘制透明树叶层
+                            // 注意：TREE_003 的圆角依赖透明像素，若先铺不透明底图会导致圆角变直角
                             let uv = atlas.get(SpriteId::TREE_003);
-                            commands.push(SpriteCommand::new(xpos, ypos, uv));
+                            commands.push(RenderCommand::Sprite(SpriteCommand::new(xpos, ypos, uv)));
                             None
                         }
                     }
@@ -963,15 +963,28 @@ impl Figures {
                     // 对齐 Oldsrc：窗户是覆盖在地下砖墙上的透明图层。
                     // 这里不能用 WOOD_000 当底图，否则会出现你反馈的“窗户上方圆形部分露出木纹”。
                     let uv = atlas.get(SpriteId::PALBRICK_000);
-                    commands.push(SpriteCommand::new(xpos, ypos, uv).with_opaque(true));
+                    commands.push(RenderCommand::Sprite(SpriteCommand::new(xpos, ypos, uv).with_opaque(true)));
                     let uv = atlas.get(SpriteId::WINDOW_001);
-                    commands.push(SpriteCommand::new(xpos, ypos, uv));
+                    commands.push(RenderCommand::Sprite(SpriteCommand::new(xpos, ypos, uv)));
                     None
                 }
-                4 => Some(SpriteId::LAVA_000),
+                4 => {
+                    // 对齐 Oldsrc：岩浆使用 PutImage 语义（索引0也要绘制），否则会出现“高度变小且不贴底”
+                    let uv = atlas.get(SpriteId::LAVA_000);
+                    commands.push(RenderCommand::Sprite(SpriteCommand::new(xpos, ypos, uv).with_opaque(true)));
+                    None
+                }
                 5 => {
                     // 对齐 Oldsrc: design=5时填充颜色5
-                    // 注意：这里返回None，填充应由draw_sky/背景层处理
+                    // Pascal: vga.fill_world(xpos, ypos, W, H, 5)
+                    commands.push(RenderCommand::FillRect(FillRect::new(
+                        xpos as f32,
+                        ypos as f32,
+                        crate::buffers::W as f32,
+                        crate::buffers::H as f32,
+                        5,
+                        0,
+                    )));
                     None
                 }
                 _ => None,
@@ -986,22 +999,21 @@ impl Figures {
                     match get(x, y - 1) {
                         b'%' => {
                             let uv = atlas.get(SpriteId::TREE_000);
-                            commands.push(SpriteCommand::new(xpos, ypos, uv).with_opaque(true));
+                            commands.push(RenderCommand::Sprite(SpriteCommand::new(xpos, ypos, uv).with_opaque(true)));
                             None
                         }
                         b'#' => {
                             let uv = atlas.get(SpriteId::TREE_001);
-                            commands.push(SpriteCommand::new(xpos, ypos, uv).with_opaque(true));
+                            commands.push(RenderCommand::Sprite(SpriteCommand::new(xpos, ypos, uv).with_opaque(true)));
                             let uv = atlas.get(SpriteId::TREE_002);
-                            commands.push(SpriteCommand::new(xpos, ypos, uv));
+                            commands.push(RenderCommand::Sprite(SpriteCommand::new(xpos, ypos, uv)));
                             None
                         }
                         _ => {
-                            // TREE_002 的底图应为 TREE_000（TREE000 与 TREE002 使用同一套颜色索引区间）
-                            let uv = atlas.get(SpriteId::TREE_000);
-                            commands.push(SpriteCommand::new(xpos, ypos, uv).with_opaque(true));
+                            // 对齐 Oldsrc：顶部树叶只绘制透明树叶层
+                            // 注意：TREE_002 的圆角依赖透明像素，若先铺不透明底图会导致圆角变直角
                             let uv = atlas.get(SpriteId::TREE_002);
-                            commands.push(SpriteCommand::new(xpos, ypos, uv));
+                            commands.push(RenderCommand::Sprite(SpriteCommand::new(xpos, ypos, uv)));
                             None
                         }
                     }
@@ -1009,13 +1021,20 @@ impl Figures {
                 3 => {
                     // 对齐 Oldsrc：窗户是覆盖在地下砖墙上的透明图层
                     let uv = atlas.get(SpriteId::PALBRICK_000);
-                    commands.push(SpriteCommand::new(xpos, ypos, uv).with_opaque(true));
+                    commands.push(RenderCommand::Sprite(SpriteCommand::new(xpos, ypos, uv).with_opaque(true)));
                     let uv = atlas.get(SpriteId::WINDOW_000);
-                    commands.push(SpriteCommand::new(xpos, ypos, uv));
+                    commands.push(RenderCommand::Sprite(SpriteCommand::new(xpos, ypos, uv)));
                     None
                 }
-                4 => Some(SpriteId::LAVA_001),
+                4 => {
+                    // 对齐 Oldsrc：岩浆使用 PutImage 语义（索引0也要绘制）
+                    let uv = atlas.get(SpriteId::LAVA_001);
+                    commands.push(RenderCommand::Sprite(SpriteCommand::new(xpos, ypos, uv).with_opaque(true)));
+                    None
+                }
                 5 => {
+                    // 对齐 Oldsrc: LAVA2 动画 (001~005)
+                    // 注意: Oldsrc 中没有 LAVA2_000 精灵, 底部红色由 '#' 字符的颜色5填充实现
                     let idx = ((x + (buffers.lava_counter as i32 / 8)) % 5) as u8;
                     Some(match idx {
                         0 => SpriteId::LAVA2_001,
@@ -1036,41 +1055,18 @@ impl Figures {
                     // 这里不应该遇到 b'A'，如果遇到则跳过
                     None
                 } else {
-                    // wall_type1 >= 100 时使用 BRICK 精灵
-                    // wall_type1: 100->BRICK0, 101->BRICK1, 102->BRICK2
+                    // 对齐 Oldsrc：A 砖块应使用 BuildWorld 重着色后的 Figures.bricks[0..2]
+                    // CPU 版 Redraw 会直接从 self.bricks 取图像；wgpu 版通过纹理图集中的 BRICK_RT_* 实现同样效果
                     let l = get(x - 1, y) == b'A';
                     let r = get(x + 1, y) == b'A';
                     let stitch = (x + y) % 2 == 1;
                     
-                    match options.wall_type1 {
-                        101 => {
-                            if stitch && r {
-                                Some(SpriteId::BRICK1_001)
-                            } else if !stitch && l {
-                                Some(SpriteId::BRICK1_002)
-                            } else {
-                                Some(SpriteId::BRICK1_000)
-                            }
-                        }
-                        102 => {
-                            if stitch && r {
-                                Some(SpriteId::BRICK2_001)
-                            } else if !stitch && l {
-                                Some(SpriteId::BRICK2_002)
-                            } else {
-                                Some(SpriteId::BRICK2_000)
-                            }
-                        }
-                        _ => {
-                            // 默认使用BRICK0（包括wall_type1=100）
-                            if stitch && r {
-                                Some(SpriteId::BRICK0_001)
-                            } else if !stitch && l {
-                                Some(SpriteId::BRICK0_002)
-                            } else {
-                                Some(SpriteId::BRICK0_000)
-                            }
-                        }
+                    if stitch && r {
+                        Some(SpriteId::BRICK_RT_001)
+                    } else if !stitch && l {
+                        Some(SpriteId::BRICK_RT_002)
+                    } else {
+                        Some(SpriteId::BRICK_RT_000)
                     }
                 }
             }
@@ -1084,7 +1080,7 @@ impl Figures {
                 } else {
                     // 上下颠倒绘制
                     let uv = atlas.get(SpriteId::PIN_000);
-                    commands.push(SpriteCommand::new(xpos, ypos, uv).with_flip(false, true));
+                    commands.push(RenderCommand::Sprite(SpriteCommand::new(xpos, ypos, uv).with_flip(false, true)));
                     None
                 }
             }
@@ -1104,12 +1100,12 @@ impl Figures {
                         let (base_id, rotation, flip_x, flip_y) =
                             Self::wall_variant_to_sprite(options.wall_type1, overlay_idx);
                         let uv = atlas.get(base_id);
-                        commands.push(
+                        commands.push(RenderCommand::Sprite(
                             SpriteCommand::new(xpos, ypos, uv)
                                 .with_rotation(rotation)
                                 .with_flip(flip_x, flip_y)
                                 .with_opaque(true),
-                        );
+                        ));
                     } else {
                         let right = get(x + 1, y);
                         if (14..=26).contains(&right) && [3, 6, 9].contains(&ch_modified) {
@@ -1117,12 +1113,12 @@ impl Figures {
                             let (base_id, rotation, flip_x, flip_y) =
                                 Self::wall_variant_to_sprite(options.wall_type1, overlay_idx);
                             let uv = atlas.get(base_id);
-                            commands.push(
+                            commands.push(RenderCommand::Sprite(
                                 SpriteCommand::new(xpos, ypos, uv)
                                     .with_rotation(rotation)
                                     .with_flip(flip_x, flip_y)
                                     .with_opaque(true),
-                            );
+                            ));
                         }
                     }
                 }
@@ -1133,12 +1129,12 @@ impl Figures {
 
                 // Pascal: if not (Ch in [#1,#3,#4,#6,#7,#9]) then PutImage else DrawImage
                 let opaque = ![1, 3, 4, 6, 7, 9].contains(&ch_modified);
-                commands.push(
+                commands.push(RenderCommand::Sprite(
                     SpriteCommand::new(xpos, ypos, uv)
                         .with_rotation(rotation)
                         .with_flip(flip_x, flip_y)
                         .with_opaque(opaque),
-                );
+                ));
                 None
             }
             _ => None,
@@ -1148,7 +1144,7 @@ impl Figures {
             let uv = atlas.get(id);
             // 默认对齐 DrawImage 语义: 索引0透明
             // Oldsrc 的 PutImage/DrawImage 差异只在明确分支里使用 with_opaque(true) 处理
-            commands.push(SpriteCommand::new(xpos, ypos, uv));
+            commands.push(RenderCommand::Sprite(SpriteCommand::new(xpos, ypos, uv)));
         }
         
         commands
@@ -1185,7 +1181,7 @@ impl Figures {
         }
     }
 
-    /// GPU版本：收集可见区域的所有tile精灵
+    /// GPU版本：收集可见区域的所有tile渲染命令(精灵和填充)
     pub fn collect_visible_tiles_gpu(
         &self,
         x_start: i32,
@@ -1197,7 +1193,7 @@ impl Figures {
         atlas: &crate::sprites::SpriteAtlas,
         options: &WorldOptions,
         buffers: &Buffers,
-    ) -> Vec<SpriteCommand> {
+    ) -> Vec<RenderCommand> {
         let mut commands = Vec::new();
         
         for y in y_start..(y_start + height) {
@@ -1213,7 +1209,7 @@ impl Figures {
     }
 
     // CPU Redraw 路径已彻底删除：纯 GPU 渲染通过 `collect_tile_sprite_gpu/collect_visible_tiles_gpu`
-    // 生成 `SpriteCommand`，由 `renderer` 统一提交到 wgpu。
+    // 生成 `RenderCommand`，由 `renderer` 统一提交到 wgpu。
 
     /// Rust 严格移植自 Pascal BuildWall 过程（变量、流程、分支与Pascal一致）
     ///

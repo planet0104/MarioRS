@@ -301,11 +301,24 @@ impl SpriteLoader {
         let inc_name = format!("{base}.{ext_inc}");
         let bin_name = format!("{base}.{ext_bin}");
         // Try generated assets (produced by build.rs) first
-        if let Some(bytes) = get_generated_asset(&inc_name) {
-            return bytes.to_vec();
-        }
-        if let Some(bytes) = get_generated_asset(&bin_name) {
-            return bytes.to_vec();
+        //
+        // 特例 LAVA2 000 的底图在原资源中是二进制 LAVA2 000 红色底层
+        // 同时也存在 LAVA2 00 的 pascal include 版本
+        // 这里强制优先选择 000 用于岩浆两格高度的底层贴图避免视觉不一致
+        if base == "LAVA2" && frame == 0 {
+            if let Some(bytes) = get_generated_asset(&bin_name) {
+                return bytes.to_vec();
+            }
+            if let Some(bytes) = get_generated_asset(&inc_name) {
+                return bytes.to_vec();
+            }
+        } else {
+            if let Some(bytes) = get_generated_asset(&inc_name) {
+                return bytes.to_vec();
+            }
+            if let Some(bytes) = get_generated_asset(&bin_name) {
+                return bytes.to_vec();
+            }
         }
 
         // No runtime fallback: generated assets must contain the files.
@@ -525,6 +538,7 @@ pub struct SpriteDataManager {
 
     pub LAVA_000: ImageBuffer,
     pub LAVA_001: ImageBuffer,
+    // 注意: Pascal 原版没有使用 LAVA2_000, 岩浆底部由颜色5填充实现
     pub LAVA2_001: ImageBuffer,
     pub LAVA2_002: ImageBuffer,
     pub LAVA2_003: ImageBuffer,
@@ -712,6 +726,7 @@ impl SpriteDataManager {
             WINDOW_001: b20x14("WINDOW_001"),
             LAVA_000: b20x14("LAVA_000"),
             LAVA_001: b20x14("LAVA_001"),
+            // 注意: Pascal 原版没有使用 LAVA2_000
             LAVA2_001: b20x14("LAVA2_001"),
             LAVA2_002: b20x14("LAVA2_002"),
             LAVA2_003: b20x14("LAVA2_003"),
@@ -822,6 +837,7 @@ pub enum SpriteId {
     TREE_000, TREE_001, TREE_002, TREE_003,
     WINDOW_000, WINDOW_001,
     LAVA_000, LAVA_001,
+    // 注意: Pascal 原版没有使用 LAVA2_000
     LAVA2_001, LAVA2_002, LAVA2_003, LAVA2_004, LAVA2_005,
     FALL_000, FALL_001,
     NOTE_000, PIN_000,
@@ -883,6 +899,11 @@ pub enum SpriteId {
     WOOD_000_RT,    // 运行时重着色的WOOD
     XBLOCK_000_RT,  // 运行时重着色的XBLOCK
     BLOCK_001_RT,   // 运行时重着色的BLOCK
+    
+    // 运行时砖块精灵（对齐 Oldsrc：BuildWorld 会把 BRICKx 重着色到 Figures.bricks[0..2]）
+    BRICK_RT_000,
+    BRICK_RT_001,
+    BRICK_RT_002,
     
     // 总数标记
     COUNT,
@@ -1128,6 +1149,7 @@ impl SpriteDataManager {
         add_sprite!(WINDOW_001, 20, 14);
         add_sprite!(LAVA_000, 20, 14);
         add_sprite!(LAVA_001, 20, 14);
+        // 注意: Pascal 原版没有使用 LAVA2_000
         add_sprite!(LAVA2_001, 20, 14);
         add_sprite!(LAVA2_002, 20, 14);
         add_sprite!(LAVA2_003, 20, 14);
@@ -1262,6 +1284,14 @@ impl SpriteDataManager {
         
         let block_rt_pixels: Vec<u8> = figures.block_rt.iter().flatten().copied().collect();
         uvs.push(atlas.add_sprite("BLOCK_001_RT", 20, 14, &block_rt_pixels).unwrap());
+        
+        // 运行时砖块精灵：对齐 Oldsrc 的 b'A' 渲染路径（使用 Figures.bricks 而不是原始 BRICKx 精灵）
+        let brick0_rt_pixels: Vec<u8> = figures.bricks[0].iter().flatten().copied().collect();
+        uvs.push(atlas.add_sprite("BRICK_RT_000", 20, 14, &brick0_rt_pixels).unwrap());
+        let brick1_rt_pixels: Vec<u8> = figures.bricks[1].iter().flatten().copied().collect();
+        uvs.push(atlas.add_sprite("BRICK_RT_001", 20, 14, &brick1_rt_pixels).unwrap());
+        let brick2_rt_pixels: Vec<u8> = figures.bricks[2].iter().flatten().copied().collect();
+        uvs.push(atlas.add_sprite("BRICK_RT_002", 20, 14, &brick2_rt_pixels).unwrap());
         
         SpriteAtlas { atlas, uvs }
     }

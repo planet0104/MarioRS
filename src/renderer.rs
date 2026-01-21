@@ -231,6 +231,50 @@ impl Renderer {
             }
         }
 
+        // 1.2 地下室柱子背景（对齐 Oldsrc BACKGR.Pillar）
+        //
+        // Oldsrc FIGURES.DrawSky(Sky=6/7/8, BackGrType=6) 会逐 tile 调用 BACKGR.Pillar，
+        // 按 (x/20)%3 在 PALPILL_000/001/002 之间切换，形成黑色垂直渐变的柱子纹理。
+        //
+        // GPU 版用整屏 tile 平铺实现同样的像素效果（索引0也要绘制）。
+        if matches!(ctx.buffers.options.sky_type, 6 | 7 | 8) && ctx.buffers.options.backgr_type == 6 {
+            use crate::gpu::sprite_batch::SpriteCommand;
+            use crate::sprites::SpriteId;
+
+            let uv0 = atlas.get(SpriteId::PALPILL_000);
+            let uv1 = atlas.get(SpriteId::PALPILL_001);
+            let uv2 = atlas.get(SpriteId::PALPILL_002);
+
+            let tw = uv0.width as i32; // 20
+            let th = uv0.height as i32; // 14
+
+            // 让柱子纹理在“世界坐标”上保持对齐，随着 x_view/y_view 滚动。
+            let x0 = -x_view.rem_euclid(tw);
+            let y0 = -y_view.rem_euclid(th);
+            let screen_w = crate::render_state::SCREEN_WIDTH;
+            let screen_h = crate::render_state::VIR_SCREEN_HEIGHT;
+
+            let mut y = y0;
+            while y < screen_h {
+                let mut x = x0;
+                while x < screen_w {
+                    // Oldsrc: match (x/20)%3
+                    let world_x = x + x_view;
+                    let which = world_x.div_euclid(tw).rem_euclid(3);
+                    let uv = match which {
+                        0 => uv0,
+                        1 => uv1,
+                        _ => uv2,
+                    };
+                    commands.push(RenderCommand::Sprite(
+                        SpriteCommand::new(x, y, uv).with_opaque(true),
+                    ));
+                    x += tw;
+                }
+                y += th;
+            }
+        }
+
         // 2. 星星层（如果有）
         if has_stars {
             ctx.stars.collect_stars_gpu(&mut commands, ctx.buffers, palette_index);
@@ -299,7 +343,7 @@ impl Renderer {
         let visible_tiles_x = NH + 2;
         let visible_tiles_y = NV;
         
-        let tile_sprites = ctx.figures.collect_visible_tiles_gpu(
+        let tile_commands = ctx.figures.collect_visible_tiles_gpu(
             tile_start_x,
             tile_start_y,
             visible_tiles_x,
@@ -310,9 +354,7 @@ impl Renderer {
             &ctx.buffers.options,
             ctx.buffers,
         );
-        for sprite_cmd in tile_sprites {
-            commands.push(RenderCommand::Sprite(sprite_cmd));
-        }
+        commands.extend(tile_commands);
 
         // 5. 敌人层
         if self.show_objects {
@@ -359,9 +401,7 @@ impl Renderer {
                         &ctx.buffers.options,
                         ctx.buffers,
                     );
-                    for s in overlay {
-                        commands.push(RenderCommand::Sprite(s));
-                    }
+                    commands.extend(overlay);
                 }
             }
         }
