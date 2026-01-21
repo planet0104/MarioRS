@@ -292,6 +292,24 @@ impl Renderer {
             )));
         }
 
+        // 3.1 云朵层（如果启用）
+        // 注意：当前所有关卡的clouds值都是0，此代码为预留
+        if ctx.backgr.clouds > 0 {
+            // 使用简化的云朵渲染，以填充矩形模拟云朵形状
+            // TODO: 如果需要精确对齐Pascal版本的TraceCloud效果，可扩展此处逻辑
+            let cloud_fills = ctx.backgr.collect_cloud_fills(x_view);
+            for f in cloud_fills {
+                commands.push(RenderCommand::FillRect(crate::gpu::FillRect::new(
+                    f.x,
+                    f.y,
+                    f.width,
+                    f.height,
+                    f.color_index,
+                    palette_index,
+                )));
+            }
+        }
+
         // Intro 特例：对齐 Oldsrc WORLDS/INTRO.PAS::DrawIntroScreen 的 DrawBackGrMap
         // Oldsrc 调用顺序是先画标题，再 DrawBackGrMap，但通过 GetPixel>=0xC0 的 mask 避免覆盖前景/标题。
         // GPU 无读回，这里把 DrawBackGrMap 放到“地形之前”渲染，达到与 mask 等价的像素效果。

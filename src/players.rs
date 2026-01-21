@@ -443,6 +443,7 @@ impl Players {
     }
 
     /// GPU模式：获取当前玩家精灵ID (使用SpriteId枚举)
+    /// 对齐 Oldsrc: 开火射击时(mode=MD_FIRE, key_space=true, fire_counter<7)使用混合精灵
     pub fn get_player_sprite_id_enum(&self, buffers: &Buffers) -> crate::sprites::SpriteId {
         use crate::sprites::SpriteId;
         
@@ -450,6 +451,12 @@ impl Players {
         let mode = buffers.data.mode[player] as usize;
         let is_mario = player == 0;
         let is_jumping = self.walking_mode != 0;
+        
+        // 开火射击状态：使用混合精灵(上半身手臂伸出+下半身站立)
+        // 对齐 Oldsrc draw_player 416-434行的逻辑
+        if mode == MD_FIRE && self.key_space && self.fire_counter < 7 {
+            return if is_mario { SpriteId::FFMAR_000 } else { SpriteId::FFLUI_000 };
+        }
         
         match (mode, is_jumping, is_mario) {
             (0, false, true) => SpriteId::SWMAR_000,  // Small Walk Mario
@@ -619,12 +626,15 @@ impl Players {
             .with_flip(flip_x, false)
             .with_palette(0, palette_index);
         
-        // 变身/无敌星闪烁效�?
+        // 变身/无敌星闪烁效果
         if self.growing || star_active {
             let t = self.grow_counter + self.star_counter;
             let color_offset = (((t & 1) << 4) as i32) - (((t & 0xF) < 8) as i32);
             cmd = cmd.with_palette(color_offset, palette_index);
         }
+        
+        // 开火动画：使用预生成的混合精灵FFMAR_000/FFLUI_000，对齐Oldsrc效果。
+        // 混合精灵由FWMAR_001上半身+FWMAR_000下半身合成，实现"手臂伸出发射火球"姿势。
         
         commands.push(cmd);
         commands

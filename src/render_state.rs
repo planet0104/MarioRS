@@ -29,8 +29,6 @@ pub const YBASE: i32 = 9;
 /// 管理视口、调色板和渲染命令收集
 pub struct RenderState {
     pub palette: Palettes,
-    pub width: usize,
-    pub height: usize,
     pub page: i32,
     pub x_view: i32,
     pub y_view: i32,
@@ -38,7 +36,6 @@ pub struct RenderState {
     pub y_end: i32,
     pub y_offset: i32,
     pub page_offset: i32,
-    pub in_graphics_mode: bool,
     pub stack: [i32; 2],
     
     // GPU渲染命令收集器
@@ -47,7 +44,7 @@ pub struct RenderState {
 
 impl RenderState {
     /// 创建RenderState对象
-    pub fn new(width: usize, height: usize) -> Self {
+    pub fn new(_width: usize, _height: usize) -> Self {
         let mut palette = Palettes::new();
         palette.palette = [[0; 3]; 256]; // 初始全黑
 
@@ -56,8 +53,6 @@ impl RenderState {
 
         RenderState {
             palette,
-            width,
-            height,
             page: 0,
             x_view: 0,
             y_view: 0,
@@ -65,7 +60,6 @@ impl RenderState {
             y_end: WINDOWHEIGHT,
             y_offset: 0,
             page_offset: PAGE_0,
-            in_graphics_mode: false,
             stack,
             sprite_batch: SpriteBatch::new(),
         }
@@ -199,11 +193,6 @@ impl RenderState {
     /// 获取当前页号
     pub fn current_page(&self) -> i32 {
         self.page
-    }
-
-    /// 获取页偏移量
-    pub fn get_page_offset(&self) -> i32 {
-        self.page_offset
     }
 
     /// 清空渲染队列

@@ -4,8 +4,7 @@
 use crate::buffers::{H, MAX_WORLD_SIZE, NH, NV, W, WorldOptions};
 use crate::palettes::Palettes;
 use crate::render_state::RenderState;
-use crate::gpu::sprite_batch::{FillCommand, SpriteCommand};
-use crate::gpu::texture_atlas::SpriteUV;
+use crate::gpu::sprite_batch::FillCommand;
 
 // Include generated assets produced by build.rs
 include!(concat!(env!("OUT_DIR"), "/generated_assets.rs"));
@@ -385,26 +384,46 @@ impl BackGr {
         fills
     }
 
-    /// GPU模式：收集云朵精灵命令
-    pub fn collect_cloud_sprites(&self, x_view: i32) -> Vec<SpriteCommand> {
-        let mut sprites = Vec::new();
+    /// GPU模式：收集云朵填充命令（简化版本）
+    /// 使用椭圆形填充矩形来模拟云朵形状
+    pub fn collect_cloud_fills(&self, x_view: i32) -> Vec<FillCommand> {
+        let mut fills = Vec::new();
         
-        // 云朵作为填充矩形渲染（简化版本）
-        for i in 1..=(self.clouds as usize) {
-            if i < self.cloud_map.len() {
-                let cloud = &self.cloud_map[i];
-                let cx = cloud[0] - x_view / CLOUD_SPEED;
-                let cy = cloud[1];
-                
-                if cx > -100 && cx < (NH * W + 100) {
-                    // 云朵使用默认UV (需要在图集中预留云朵纹理)
-                    let uv = SpriteUV { x: 0, y: 0, width: 60, height: 20 };
-                    sprites.push(SpriteCommand::new(cx, cy, uv));
-                }
+        if self.clouds == 0 {
+            return fills;
+        }
+        
+        let max_clouds = MAX_CLOUDS as usize;
+        
+        for i in 1..=max_clouds {
+            if i >= self.cloud_map.len() || i + max_clouds >= self.cloud_map.len() {
+                continue;
+            }
+            
+            let cloud_start = &self.cloud_map[i];
+            let cloud_end = &self.cloud_map[i + max_clouds];
+            
+            let x1 = cloud_start[0] - x_view / CLOUD_SPEED;
+            let x2 = cloud_end[0] - x_view / CLOUD_SPEED;
+            let y = cloud_start[1];
+            let cloud_width = (x2 - x1).max(0);
+            
+            // 只渲染在可视范围内的云朵
+            if x2 < 0 || x1 > NH * W {
+                continue;
+            }
+            
+            // 使用渐变色来模拟云朵的圆形效果
+            // 云朵颜色使用背景色系 (0xE0-0xEF范围)
+            let cloud_color = 0xE8u8; // 浅蓝色
+            
+            // 简化版：使用单个矩形表示云朵
+            if cloud_width > 0 && y < NV * H {
+                fills.push(FillCommand::new(x1, y, cloud_width, CLOUD_HEIGHT.min(NV * H - y), cloud_color));
             }
         }
         
-        sprites
+        fills
     }
 
     /// GPU模式：收集smooth_fill填充命令（严格对齐 Oldsrc）

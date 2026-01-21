@@ -8,7 +8,6 @@ use crate::glitter::GlitterSystem;
 use crate::gpu::{RenderCommand, SpriteInstance};
 use crate::music::MusicPlayer;
 use crate::sprites::{SpriteAtlas, SpriteDataManager, SpriteId};
-use crate::render_state::RenderState;
 
 // 常量定义 - 临时对象类型
 pub const TP_BROKEN: i32 = 1; // 破碎方块类型
@@ -170,31 +169,6 @@ impl TmpObjManager {
         }
     }
 
-    /// GPU版 - 显示所有临时对象
-    pub fn show_temp_obj(&mut self, render_state: &mut RenderState, atlas: &SpriteAtlas) {
-        for i in 0..MAX_TEMP_OBJ {
-            if self.temp_obj[i].alive {
-                let temp_obj = &self.temp_obj[i];
-
-                // 根据对象类型选择精灵ID
-                let sprite_id = match temp_obj.tp {
-                    TP_BROKEN => SpriteId::PART_000,
-                    TP_COIN => SpriteId::COIN_000,
-                    TP_HIT => SpriteId::WHHIT_000,
-                    TP_FIRE => SpriteId::WHFIRE_000,
-                    TP_NOTE => SpriteId::NOTE_000,
-                    _ => continue,
-                };
-
-                // 使用GPU方法绘制精灵
-                let uv = atlas.get(sprite_id);
-                render_state.draw_sprite_world_gpu(temp_obj.x_pos, temp_obj.y_pos, uv);
-            }
-        }
-    }
-
-    // GPU模式下不需要隐藏操作，每帧重绘
-
     /// GPU渲染: 收集所有临时对象的精灵实例
     pub fn collect_temp_obj_sprites_gpu(
         &self,
@@ -318,40 +292,6 @@ impl TmpObjManager {
             rem_rec.new_image = new_img;
             rem_rec.rem_count = 4;  // GPU模式：只需要几帧的延迟
             rem_rec.active = true;
-        }
-    }
-
-    /// GPU版 - 执行移除操作（绘制替换图像）
-    pub fn run_remove(&mut self, render_state: &mut RenderState, atlas: &SpriteAtlas) {
-        for i in 0..MAX_REMOVE {
-            if self.rem_list[i].active {
-                let rem_rec = &mut self.rem_list[i];
-
-                // 根据新图像类型执行相应绘制操作
-                match rem_rec.new_image {
-                    0 => {
-                        // 背景填充由GPU每帧自动重绘处理
-                    }
-                    1 => {
-                        let uv = atlas.get(SpriteId::QUEST_001);
-                        render_state.draw_sprite_world_gpu(rem_rec.rem_x, rem_rec.rem_y, uv);
-                    }
-                    2 => {
-                        let uv = atlas.get(SpriteId::QUEST_000);
-                        render_state.draw_sprite_world_gpu(rem_rec.rem_x, rem_rec.rem_y, uv);
-                    }
-                    5 => {
-                        let uv = atlas.get(SpriteId::NOTE_000);
-                        render_state.draw_sprite_world_gpu(rem_rec.rem_x, rem_rec.rem_y, uv);
-                    }
-                    _ => {}
-                }
-
-                rem_rec.rem_count -= 1;
-                if rem_rec.rem_count < 1 {
-                    rem_rec.active = false;
-                }
-            }
         }
     }
 

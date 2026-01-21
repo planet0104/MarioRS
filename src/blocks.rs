@@ -4,7 +4,6 @@
 use crate::{
     gpu::{RenderCommand, SpriteInstance},
     sprites::{SpriteAtlas, SpriteId},
-    render_state::RenderState,
 };
 
 pub const BUMP_HEIGHT: i32 = 4;
@@ -52,19 +51,6 @@ impl Blocks {
         self.bump_sprite_id = sprite_id;
         self.bumping = true;
         self.delay_counter = 0;
-    }
-
-    /// GPU版draw_blocks - 方块弹跳动画渲染
-    pub fn draw_blocks(&mut self, render_state: &mut RenderState, atlas: &SpriteAtlas) {
-        if self.bumping {
-            if self.dy < BUMP_HEIGHT {
-                let y = self.bump_y - BUMP_HEIGHT + self.dy.abs();
-                let uv = atlas.get(self.bump_sprite_id);
-                render_state.draw_sprite_world_gpu(self.bump_x, y, uv);
-            } else if self.delay_counter >= 4 {
-                self.bumping = false;
-            }
-        }
     }
 
     /// 推进动画帧

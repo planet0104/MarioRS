@@ -436,249 +436,10 @@ impl Enemies {
         self.num_enemies = self.active_enemies.len();
     }
 
-    /// GPU版show_enemies - 直接向render_state.sprite_batch添加GPU精灵
-    /// 需要传入SpriteAtlas用于获取精灵UV
-    pub fn show_enemies(
-        &mut self,
-        render_state: &mut RenderState,
-        buffers: &mut Buffers,
-        _sprites: &SpriteDataManager,
-        glitter_sys: &mut GlitterSystem,
-        atlas: &crate::sprites::SpriteAtlas,
-    ) {
-        use crate::sprites::SpriteId;
-        
-        for &j in self.active_enemies.clone().iter() {
-            let j = j as usize;
-            if j >= self.enemies.len() {
-                continue;
-            }
-            
-            let enemy = &self.enemies[j];
-            
-            // 检查是否在可视区域内
-            if (enemy.x_pos + W < buffers.x_view)
-                || (enemy.x_pos > buffers.x_view + SCREEN_WIDTH as i32)
-                || (enemy.y_pos >= buffers.y_view + SCREEN_HEIGHT as i32)
-            {
-                continue;
-            }
-            
-            match enemy.tp {
-                TP_CHIBIBO => {
-                    // 对齐 Oldsrc: TP_CHIBIBO 使用 FigList[1 + 3*sub_tp] 的单个图像，
-                    // 并用 dir_counter 在左右镜像之间切换（作为走路动画效果）。
-                    let sprite_id = if enemy.sub_tp == 0 { SpriteId::CHIBIBO_000 } else { SpriteId::CHIBIBO_002 };
-                    let flip_x = !(enemy.dir_counter % 32 < 16);
-                    let uv = atlas.get(sprite_id);
-                    render_state.draw_sprite_flipped_world_gpu(enemy.x_pos, enemy.y_pos, uv, flip_x, false);
-                }
-                TP_FLAT_CHIBIBO => {
-                    // 对齐 Oldsrc: TP_FLAT_CHIBIBO 使用 FigList[2 + 3*sub_tp]（扁平帧）
-                    let sprite_id = if enemy.sub_tp == 0 { SpriteId::CHIBIBO_001 } else { SpriteId::CHIBIBO_003 };
-                    let flip_x = !(enemy.dir_counter % 32 < 16);
-                    let uv = atlas.get(sprite_id);
-                    render_state.draw_sprite_flipped_world_gpu(enemy.x_pos, enemy.y_pos, uv, flip_x, false);
-                }
-                TP_DEAD_CHIBIBO => {
-                    // Oldsrc 使用 enemy_pictures[1][LEFT] 的 upside_down，这里用 CHIBIBO_000 + flip_x=true 对齐
-                    let uv = atlas.get(SpriteId::CHIBIBO_000);
-                    render_state.draw_sprite_flipped_world_gpu(enemy.x_pos, enemy.y_pos, uv, true, true);
-                }
-                TP_RISING_CHAMP => {
-                    if enemy.y_pos != (enemy.map_y * H) {
-                        let visible_h = (H - (enemy.y_pos % H) - 1) as f32;
-                        let sprite_id = if enemy.sub_tp == 0 { SpriteId::CHAMP_000 } else { SpriteId::POISON_000 };
-                        let uv = atlas.get(sprite_id);
-                        render_state.draw_sprite_partial_world_gpu(enemy.x_pos, enemy.y_pos, uv, visible_h);
-                    }
-                }
-                TP_CHAMP => {
-                    let sprite_id = if enemy.sub_tp == 0 { SpriteId::CHAMP_000 } else { SpriteId::POISON_000 };
-                    let uv = atlas.get(sprite_id);
-                    render_state.draw_sprite_world_gpu(enemy.x_pos, enemy.y_pos, uv);
-                }
-                TP_RISING_LIFE => {
-                    if enemy.y_pos != (enemy.map_y * H) {
-                        let visible_h = (H - (enemy.y_pos % H) - 1) as f32;
-                        let uv = atlas.get(SpriteId::LIFE_000);
-                        render_state.draw_sprite_partial_world_gpu(enemy.x_pos, enemy.y_pos, uv, visible_h);
-                    }
-                }
-                TP_LIFE => {
-                    let uv = atlas.get(SpriteId::LIFE_000);
-                    render_state.draw_sprite_world_gpu(enemy.x_pos, enemy.y_pos, uv);
-                }
-                TP_RISING_FLOWER => {
-                    if enemy.y_pos != (enemy.map_y * H) {
-                        let visible_h = (H - (enemy.y_pos % H) - 1) as f32;
-                        let uv = atlas.get(SpriteId::FLOWER_000);
-                        render_state.draw_sprite_partial_world_gpu(enemy.x_pos, enemy.y_pos, uv, visible_h);
-                    }
-                }
-                TP_FLOWER => {
-                    let uv = atlas.get(SpriteId::FLOWER_000);
-                    render_state.draw_sprite_world_gpu(enemy.x_pos, enemy.y_pos, uv);
-                }
-                TP_RISING_STAR => {
-                    if enemy.y_pos != (enemy.map_y * H) {
-                        let visible_h = (H - (enemy.y_pos % H) - 1) as f32;
-                        let uv = atlas.get(SpriteId::STAR_000);
-                        render_state.draw_sprite_partial_world_gpu(enemy.x_pos, enemy.y_pos, uv, visible_h);
-                    }
-                }
-                TP_STAR => {
-                    let uv = atlas.get(SpriteId::STAR_000);
-                    render_state.draw_sprite_world_gpu(enemy.x_pos, enemy.y_pos, uv);
-                }
-                TP_FIREBALL => {
-                    let sprite_id = if enemy.x_pos % 4 < 2 { SpriteId::FIRE_000 } else { SpriteId::FIRE_001 };
-                    let uv = atlas.get(sprite_id);
-                    render_state.draw_sprite_world_gpu(enemy.x_pos, enemy.y_pos, uv);
-                }
-                TP_VERT_FISH => {
-                    if (enemy.y_vel != 0) || (enemy.y_pos < NV * H - H) {
-                        let flip_x = self.player_x1 > enemy.x_pos;
-                        let uv = atlas.get(SpriteId::FISH_001);
-                        render_state.draw_sprite_flipped_world_gpu(enemy.x_pos, enemy.y_pos, uv, flip_x, false);
-                    }
-                }
-                TP_DEAD_VERT_FISH => {
-                    if (enemy.y_pos < NV * H - H) || (enemy.y_vel != 0) {
-                        let flip_x = self.player_x1 <= enemy.x_pos;
-                        let uv = atlas.get(SpriteId::FISH_001);
-                        render_state.draw_sprite_flipped_world_gpu(enemy.x_pos, enemy.y_pos, uv, flip_x, true);
-                    }
-                }
-                TP_VERT_FIREBALL => {
-                    let enemy = &mut self.enemies[j];
-                    if (enemy.delay_counter - enemy.move_delay).abs() <= 1 {
-                        let sprite_id = match random_usize(4) {
-                            0 => SpriteId::F_000,
-                            1 => SpriteId::F_001,
-                            2 => SpriteId::F_002,
-                            _ => SpriteId::F_003,
-                        };
-                        let uv = atlas.get(sprite_id);
-                        render_state.draw_sprite_world_gpu(enemy.x_pos, enemy.y_pos, uv);
-                        // 添加火花效果
-                        glitter_sys.new_glitter(
-                            enemy.x_pos + random_i32(W),
-                            enemy.y_pos + random_i32(H),
-                            57 + random_u8(7),
-                            14 + random_u8(20),
-                            buffers,
-                        );
-                        glitter_sys.new_star(
-                            enemy.x_pos + random_i32(W),
-                            enemy.y_pos + random_i32(H),
-                            57 + random_u8(7),
-                            14 + random_u8(20),
-                            buffers,
-                        );
-                    }
-                }
-                TP_VERT_PLANT => {
-                    let sprite_id = if self.time_counter % 32 < 16 {
-                        match enemy.sub_tp { 0 | 1 => SpriteId::PPLANT_002, _ => SpriteId::PPLANT_000 }
-                    } else {
-                        match enemy.sub_tp { 0 | 1 => SpriteId::PPLANT_003, _ => SpriteId::PPLANT_001 }
-                    };
-                    let visible_h = (enemy.map_y * H) - enemy.y_pos - 1;
-                    if visible_h >= 0 {
-                        let uv = atlas.get(sprite_id);
-                        render_state.draw_sprite_partial_world_gpu(enemy.x_pos, enemy.y_pos, uv, visible_h as f32);
-                    }
-                }
-                TP_DEAD_VERT_PLANT => {
-                    let enemy = &mut self.enemies[j];
-                    enemy.delay_counter = 0;
-                    enemy.move_delay = 0;
-                    enemy.y_vel = 0;
-                    enemy.status += 1;
-                    if enemy.status < 12 {
-                        let uv = atlas.get(SpriteId::HIT_000);
-                        render_state.draw_sprite_world_gpu(enemy.x_pos, enemy.y_pos, uv);
-                    } else if enemy.status > 14 {
-                        enemy.tp = TP_DYING;
-                    }
-                }
-                TP_RED => {
-                    let sprite_id = if enemy.dir_counter % 16 <= 8 { SpriteId::RED_000 } else { SpriteId::RED_001 };
-                    let flip_x = enemy.x_vel > 0;
-                    let uv = atlas.get(sprite_id);
-                    render_state.draw_sprite_flipped_world_gpu(enemy.x_pos, enemy.y_pos, uv, flip_x, false);
-                }
-                TP_DEAD_RED => {
-                    let sprite_id = if enemy.dir_counter % 16 <= 8 { SpriteId::RED_000 } else { SpriteId::RED_001 };
-                    let flip_x = enemy.x_vel > 0;
-                    let uv = atlas.get(sprite_id);
-                    render_state.draw_sprite_flipped_world_gpu(enemy.x_pos, enemy.y_pos, uv, flip_x, true);
-                }
-                TP_KOOPA => {
-                    // 对齐 Oldsrc: 乌龟本体（有头）用 koopa_list + y_pos-10
-                    let sprite_id = match (enemy.sub_tp, enemy.dir_counter % 16 <= 8) {
-                        (0, true) => SpriteId::GRKOOPA_000,
-                        (0, false) => SpriteId::GRKOOPA_001,
-                        (_, true) => SpriteId::RDKOOPA_000,
-                        (_, false) => SpriteId::RDKOOPA_001,
-                    };
-                    let flip_x = enemy.x_vel > 0;
-                    let uv = atlas.get(sprite_id);
-                    render_state.draw_sprite_flipped_world_gpu(enemy.x_pos, enemy.y_pos - 10, uv, flip_x, false);
-                }
-                TP_WAKING_KOOPA | TP_RUNNING_KOOPA => {
-                    // 对齐 Oldsrc: shell 跑动/抖动时，会在 GRKP_000/001 之间切换，
-                    // 并用 dir_counter 再切换左右镜像（作为旋转/抖动帧）。
-                    let base0 = if enemy.sub_tp == 0 { SpriteId::GRKP_000 } else { SpriteId::RDKP_000 };
-                    let base1 = if enemy.sub_tp == 0 { SpriteId::GRKP_001 } else { SpriteId::RDKP_001 };
-                    let sprite_id = if enemy.dir_counter % 16 <= 8 { base1 } else { base0 };
-                    let flip_x = !(enemy.dir_counter % 32 <= 16);
-                    let uv = atlas.get(sprite_id);
-                    render_state.draw_sprite_flipped_world_gpu(enemy.x_pos, enemy.y_pos, uv, flip_x, false);
-                }
-                TP_SLEEPING_KOOPA => {
-                    // Oldsrc: enemy_pictures[8 + 2*sub_tp][0]（固定使用镜像帧）
-                    let sprite_id = if enemy.sub_tp == 0 { SpriteId::GRKP_000 } else { SpriteId::RDKP_000 };
-                    let uv = atlas.get(sprite_id);
-                    render_state.draw_sprite_flipped_world_gpu(enemy.x_pos, enemy.y_pos, uv, true, false);
-                }
-                TP_DEAD_KOOPA => {
-                    // Oldsrc: up_side_down(enemy_pictures[8 + 2*sub_tp][(dir_counter%16<=8)])
-                    let sprite_id = if enemy.sub_tp == 0 { SpriteId::GRKP_000 } else { SpriteId::RDKP_000 };
-                    let flip_x = !(enemy.dir_counter % 16 <= 8);
-                    let uv = atlas.get(sprite_id);
-                    render_state.draw_sprite_flipped_world_gpu(enemy.x_pos, enemy.y_pos, uv, flip_x, true);
-                }
-                TP_BLOCK_LIFT => {
-                    let uv = atlas.get(SpriteId::LIFT1_000);
-                    render_state.draw_sprite_world_gpu(enemy.x_pos, enemy.y_pos, uv);
-                }
-                TP_DONUT => {
-                    let enemy = &mut self.enemies[j];
-                    let sprite_id = if enemy.status == 0 {
-                        if enemy.y_vel == 0 { enemy.counter = 0; }
-                        SpriteId::DONUT_000
-                    } else {
-                        enemy.status -= 1;
-                        SpriteId::DONUT_001
-                    };
-                    let uv = atlas.get(sprite_id);
-                    render_state.draw_sprite_world_gpu(enemy.x_pos, enemy.y_pos, uv);
-                    if enemy.y_vel > 0 && enemy.counter % 24 == 0 {
-                        enemy.y_vel += 1;
-                    }
-                    enemy.counter += 1;
-                }
-                _ => {}
-            }
-        }
-    }
-
     /// GPU渲染: 收集所有敌人的精灵实例
     /// 替代show_enemies，不再直接绘制到VGA，而是收集RenderCommand
     /// 使用SpriteId和着色器翻转，而非动态生成的镜像ImageBuffer
-    /// 注意：glitter效果需要通过collect_enemy_glitter_gpu单独收集
+    /// 注意：火花效果(glitter)在move_enemies中通过glitter_sys创建
     pub fn collect_enemy_sprites_gpu(
         &self,
         commands: &mut Vec<RenderCommand>,
@@ -803,8 +564,7 @@ impl Enemies {
                         };
                         let inst = self.create_enemy_sprite(atlas, sprite_id, sx, sy, false, false);
                         commands.push(RenderCommand::DrawSprite(inst));
-                        // 注意：火花效果(glitter)会在show_enemies中添加，
-                        // GPU版本需要单独收集glitter精灵
+                        // 火花效果在move_enemies中通过glitter_sys创建
                     }
                 }
                 TP_VERT_PLANT => {
@@ -1402,6 +1162,27 @@ impl Enemies {
                                     self.enemies[j].y_vel = -9;
                                 }
                             }
+                        }
+                    }
+
+                    // TP_VERT_FIREBALL 火花效果（对齐 Oldsrc show_enemies 逻辑）
+                    if self.enemies[j].tp == TP_VERT_FIREBALL {
+                        if (self.enemies[j].delay_counter - self.enemies[j].move_delay).abs() <= 1 {
+                            // 在火球附近生成随机火花
+                            glitter_sys.new_glitter(
+                                self.enemies[j].x_pos + random_i32(W),
+                                self.enemies[j].y_pos + random_i32(H),
+                                57 + random_u8(7),
+                                14 + random_u8(20),
+                                buffers,
+                            );
+                            glitter_sys.new_star(
+                                self.enemies[j].x_pos + random_i32(W),
+                                self.enemies[j].y_pos + random_i32(H),
+                                57 + random_u8(7),
+                                14 + random_u8(20),
+                                buffers,
+                            );
                         }
                     }
                 }

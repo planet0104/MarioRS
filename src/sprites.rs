@@ -217,7 +217,7 @@ impl<const W: usize, const H: usize> Sprite<W, H> {
         &self.pixels
     }
 
-    /// 转换为一维切片（用于旧版 RenderState API）
+    /// 转换为一维切片（用于纹理图集更新）
     /// 返回新分配的Vec，避免unsafe
     pub fn to_flat_vec(&self) -> Vec<u8> {
         self.pixels.iter().flatten().copied().collect()
@@ -245,7 +245,7 @@ pub type SpriteLarge = Sprite<108, 28>; // Intro 大图
 /// 说明：
 /// - Sprites 目录既有二进制 `.000`，也有 Pascal include 文本 `.$00`（db 列表）。
 /// - 游戏资源在 Pascal 原版里是编译期 include 进源码；Rust 这里用 include_dir 在编译期嵌入。
-/// - 像素数据采用 RenderState Mode X 的 4-plane 平面布局，需要去平面化成线性 row-major 才能按 (x,y) 访问。
+/// - 像素数据采用 Pascal VGA256 Mode X 的 4-plane 平面布局，需要去平面化成线性 row-major 才能按 (x,y) 访问。
 #[derive(Clone, Copy)]
 struct SpriteLoader;
 
@@ -874,6 +874,7 @@ pub enum SpriteId {
     LJMAR_000, LJMAR_001,
     FWMAR_000, FWMAR_001,
     FJMAR_000, FJMAR_001,
+    FFMAR_000,  // Fire-Firing Mario: 开火射击时的混合精灵(上半身手臂伸出+下半身站立)
     
     // 玩家精灵 (Luigi)
     LWLUI_000, LWLUI_001,
@@ -882,6 +883,7 @@ pub enum SpriteId {
     SJLUI_000, SJLUI_001,
     FWLUI_000, FWLUI_001,
     FJLUI_000, FJLUI_001,
+    FFLUI_000,  // Fire-Firing Luigi: 开火射击时的混合精灵(上半身手臂伸出+下半身站立)
     
     // 背景精灵
     PALPILL_000, PALPILL_001, PALPILL_002,
@@ -1236,6 +1238,30 @@ impl SpriteDataManager {
         add_sprite!(FJMAR_000, 20, 28);
         add_sprite!(FJMAR_001, 20, 28);
         
+        // FFMAR_000: 开火射击混合精灵 (Mario)
+        // 对齐 Oldsrc draw_player 416-434行:
+        //   上半身(FWMAR_001[0..20])绘制到y+1位置（向下偏移1像素）
+        //   下半身(FWMAR_000[21..28])绘制到y位置
+        // 混合精灵模拟这个偏移效果：
+        //   第0行: FWMAR_000[0]（填充因偏移产生的顶部空白）
+        //   第1-20行: FWMAR_001[0-19]（上半身向下偏移1行）
+        //   第21-27行: FWMAR_000[21-27]（下半身保持不变）
+        {
+            let mut ffmar_pixels: Vec<u8> = Vec::with_capacity(20 * 28);
+            // 第0行: 使用FWMAR_000[0]填充顶部（因为原版上半身从y+1开始）
+            ffmar_pixels.extend_from_slice(&self.FWMAR_000[0]);
+            // 第1-20行: FWMAR_001[0-19]向下偏移1行
+            for row in 0..20 {
+                ffmar_pixels.extend_from_slice(&self.FWMAR_001[row]);
+            }
+            // 第21-27行: FWMAR_000[21-27]下半身
+            for row in 21..28 {
+                ffmar_pixels.extend_from_slice(&self.FWMAR_000[row]);
+            }
+            uvs.push(atlas.add_sprite("FFMAR_000", 20, 28, &ffmar_pixels)
+                .expect("Failed to add sprite: FFMAR_000"));
+        }
+        
         // 玩家精灵 - Luigi (20x28)
         add_sprite!(LWLUI_000, 20, 28);
         add_sprite!(LWLUI_001, 20, 28);
@@ -1249,6 +1275,24 @@ impl SpriteDataManager {
         add_sprite!(FWLUI_001, 20, 28);
         add_sprite!(FJLUI_000, 20, 28);
         add_sprite!(FJLUI_001, 20, 28);
+        
+        // FFLUI_000: 开火射击混合精灵 (Luigi)
+        // 对齐 Oldsrc draw_player（同Mario的偏移逻辑）
+        {
+            let mut fflui_pixels: Vec<u8> = Vec::with_capacity(20 * 28);
+            // 第0行: 使用FWLUI_000[0]填充顶部
+            fflui_pixels.extend_from_slice(&self.FWLUI_000[0]);
+            // 第1-20行: FWLUI_001[0-19]向下偏移1行
+            for row in 0..20 {
+                fflui_pixels.extend_from_slice(&self.FWLUI_001[row]);
+            }
+            // 第21-27行: FWLUI_000[21-27]下半身
+            for row in 21..28 {
+                fflui_pixels.extend_from_slice(&self.FWLUI_000[row]);
+            }
+            uvs.push(atlas.add_sprite("FFLUI_000", 20, 28, &fflui_pixels)
+                .expect("Failed to add sprite: FFLUI_000"));
+        }
         
         // 背景精灵 (20x14)
         let palpill_pixels_0: Vec<u8> = self.PALPILL_000.pixels.iter().flatten().copied().collect();

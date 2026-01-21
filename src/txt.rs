@@ -44,34 +44,6 @@ impl Glyph {
         if self.data.len() < 2 { &[] } else { &self.data[2..] }
     }
 
-    /// 将字体字节数据转换为像素数组
-    /// 使用LSB优先的位顺序：bit0(最低位)对应最左边的像素
-    pub fn create_image(&self, color: u8) -> (i32, i32, Vec<u8>) {
-        let width = self.width() as i32;
-        let height = self.height() as i32;
-        let bitmap_data = self.bitmap();
-
-        let mut pixels = vec![0u8; (width * height) as usize];
-
-        for row in 0..height {
-            for col in 0..width {
-                let bit_index = (row * width + col) as usize;
-                let byte_index = bit_index / 8;
-                let bit_offset = bit_index % 8;
-
-                if byte_index < bitmap_data.len() {
-                    let byte = bitmap_data[byte_index];
-                    let bit = (byte >> bit_offset) & 1;
-                    let pixel_index = (row * width + col) as usize;
-                    if bit == 1 {
-                        pixels[pixel_index] = color;
-                    }
-                }
-            }
-        }
-
-        (width, height, pixels)
-    }
 }
 
 pub struct Txt {

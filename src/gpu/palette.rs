@@ -8,6 +8,9 @@ pub const PALETTE_BLINK_START: u32 = 17;
 pub const PALETTE_BLINK_END: u32 = 32;
 
 // 调色板生成器 - 预烘焙所有动画状态
+// 注意：此组件为预留实现，用于未来的调色板动画优化
+// 当前版本直接在CPU端修改调色板数据
+#[allow(dead_code)]
 pub struct PaletteGenerator {
     // 原始调色板颜色 (256色)
     base_palette: [[u8; 4]; 256],
@@ -96,6 +99,9 @@ impl PaletteGenerator {
 }
 
 // 调色板动画控制器
+// 注意：此组件为预留实现，用于未来的GPU端调色板动画
+// 当前版本使用CPU端的fade_step等函数处理动画
+#[allow(dead_code)]
 pub struct PaletteAnimator {
     // 当前帧索引
     current_frame: u32,

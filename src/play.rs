@@ -1313,11 +1313,6 @@ impl Play {
         }
     }
 
-    pub fn hide_total_back(&mut self, render_state: &mut RenderState) {
-        let _ = render_state;
-        // GPU渲染每帧完全重绘，不需要背景恢复
-    }
-
     /// 开始暂停（初始化暂停状态）
     fn start_pause(
         &mut self,

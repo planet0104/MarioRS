@@ -211,6 +211,9 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 "#;
 
 /// Tilemap GPU渲染器
+/// 注意：此组件为预留实现，用于未来的Tilemap批量渲染优化
+/// 当前版本使用SpriteBatch逐tile渲染
+#[allow(dead_code)]
 pub struct TilemapRenderer {
     /// 渲染管线
     pipeline: wgpu::RenderPipeline,

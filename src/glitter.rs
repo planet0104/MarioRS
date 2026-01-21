@@ -90,25 +90,6 @@ impl GlitterSystem {
         self.new_glitter(x, y - 1, new_attr, duration, buffers);
     }
 
-    /// GPU版 - 显示所有闪光
-    pub fn show_glitter(&mut self, render_state: &mut RenderState) {
-        let num_glitter = self.count[0];
-        if num_glitter > 0 {
-            for i in 1..=MAX_GLITTER {
-                if self.count[i] > (MAX_PAGE as u8 + 1) {
-                    let glitter = &self.glitter_list[i];
-                    let x = (glitter.pos % VIR_SCREEN_WIDTH as u16) as i32;
-                    let y = (glitter.pos / VIR_SCREEN_WIDTH as u16) as i32;
-                    // GPU模式：直接绘制1x1像素
-                    render_state.fill_gpu(x, y, 1, 1, glitter.attr);
-                }
-            }
-        }
-    }
-
-    // GPU模式下不需要隐藏操作，每帧重绘
-    // 闪光计数器由update_glitter_gpu管理
-
     /// 金币特效
     pub fn coin_glitter(&mut self, x: i32, y: i32, buffers: &mut Buffers) {
         self.new_star(x + 5, y + 2, 0x1F, 20, buffers);

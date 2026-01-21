@@ -4,7 +4,6 @@
 use crate::{
     buffers::{Buffers, W, WorldOptions},
     gpu::{FillRect, RenderCommand},
-    render_state::RenderState,
 };
 
 pub const STAR_SPEED: i32 = 10;
@@ -13,8 +12,6 @@ pub const MAX: i32 = (crate::buffers::MAX_WORLD_SIZE / STAR_SPEED) * W;
 pub struct Stars {
     /// 星星位置映射，长度320
     pub star_map: [u16; 320],
-    /// 上一次每页的X坐标，长度4
-    pub last_x: [i32; 4],
     /// 闪烁计数器
     pub blink_counter: i32,
     /// 星星颜色1
@@ -27,22 +24,18 @@ impl Stars {
     pub fn new() -> Self {
         Self {
             star_map: [0u16; 320],
-            last_x: [0i32; 4],
             blink_counter: 0,
             c1: 0,
             c2: 0,
         }
     }
 
-    /// 清空星星背景和 last_x
-    pub fn clear_stars(&mut self, buffers: &mut Buffers) {
-        let star_backgr = buffers.star_backgr.as_mut();
-        for i in 0..star_backgr.len() {
-            star_backgr[i] = [0u8; 320];
-        }
-
-        for i in 0..self.last_x.len() {
-            self.last_x[i] = 0;
+    /// 清空星星 (GPU模式简化版本)
+    pub fn clear_stars(&mut self, _buffers: &mut Buffers) {
+        // GPU模式下不需要star_backgr和last_x操作
+        // 每帧完全重绘，只需重置star_map
+        for i in 0..self.star_map.len() {
+            self.star_map[i] = 0;
         }
     }
 
@@ -72,45 +65,6 @@ impl Stars {
             _ => {}
         }
     }
-
-    /// GPU版 - 显示星星
-    pub fn show_stars(&mut self, render_state: &mut RenderState, buffers: &Buffers) {
-        use crate::utils::random_i32;
-        
-        let x_view = buffers.x_view;
-        let x_offset = (8 * x_view) / STAR_SPEED as i32;
-        
-        // 随机闪烁计数器
-        self.blink_counter = random_i32(320);
-        let mut bx = self.blink_counter;
-        
-        // 主循环
-        for i in 0..320 {
-            let star_pos = self.star_map[i];
-            if star_pos == 0 {
-                continue;
-            }
-            let ax = star_pos as i32 + x_offset;
-            if ax < 0 || ax >= 320 {
-                continue;
-            }
-            let y = (star_pos as i32 / 320) as i32;
-            
-            // GPU模式下无法直接读取像素，假设可以绘制
-            // 选择颜色（闪烁效果）
-            let mut al = self.c1;
-            bx -= 1;
-            if bx == 0 {
-                al = self.c2;
-                bx = self.blink_counter;
-            }
-            
-            // 使用GPU填充1x1像素
-            render_state.fill_gpu(ax, y, 1, 1, al);
-        }
-    }
-
-    // GPU模式下不需要隐藏操作，每帧重绘
 
     /// GPU渲染: 收集星星像素
     /// 星星是单像素效果，使用1x1的填充矩形来渲染
