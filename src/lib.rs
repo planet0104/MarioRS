@@ -29,7 +29,7 @@ pub mod players;
 pub mod utils;
 pub mod persist;
 pub mod logging;
-pub mod vga256;
+pub mod render_state;
 pub mod backgr;
 pub mod blocks;
 pub mod figures;

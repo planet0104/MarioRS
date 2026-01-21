@@ -19,7 +19,7 @@ use crate::{
     status::Status,
     tmpobj::TmpObjManager,
     txt::{FontStyle, Txt},
-    vga256::{MAX_PAGE, SCREEN_WIDTH, VGA},
+    render_state::{MAX_PAGE, SCREEN_WIDTH, RenderState},
 };
 
 // Intro阶段日志：默认禁用，需要调试时取消注释下面的println版本
@@ -213,9 +213,9 @@ impl Intro {
         game_number: &mut i32,
     ) -> IntroResult {
         // 解构 GameContext 获取各子系统引用
-        // 注意：palette 现在统一使用 vga.palette，不再单独传递
+        // 注意：palette 现在统一使用  render_state.palette，不再单独传递
         self.frame_update_inner(
-            ctx.vga,
+            ctx.render_state,
             ctx.txt,
             ctx.music,
             ctx.buffers,
@@ -240,11 +240,11 @@ impl Intro {
     }
     
     /// 内部实现：保持原有参数签名以最小化代码改动
-    /// 注意：palette 现在统一使用 vga.palette，不再作为独立参数
+    /// 注意：palette 现在统一使用  render_state.palette，不再作为独立参数
     #[allow(clippy::too_many_arguments)]
     fn frame_update_inner(
         &mut self,
-        vga: &mut VGA,
+        render_state: &mut RenderState,
         txt: &mut Txt,
         music: &mut MusicPlayer,
         buffers: &mut Buffers,
@@ -313,26 +313,26 @@ impl Intro {
             
             IntroPhase::PlayIntroWorld => {
                 intro_dbg!("[INTRO] 初始化Intro世界");
-                intro_dbg!("[INTRO] palette[0]={:?}, lock={}", vga.palette.palette[0], vga.palette.lock_palette);
+                intro_dbg!("[INTRO] palette[0]={:?}, lock={}",  render_state.palette.palette[0],  render_state.palette.lock_palette);
                 
                 // 准备地图数据
                 let intro_map = self.intro_map.as_mut().unwrap();
                 let intro_opt = self.intro_opt.clone();
                 
                 // 设置VGA（类似play_world初始化）
-                vga.set_y_offset(crate::vga256::YBASE);
-                vga.set_y_start(0x12);
-                vga.set_y_end(0x7D);
-                vga.clear_palette();
-                intro_dbg!("[INTRO] after clear_palette: palette[0]={:?}", vga.palette.palette[0]);
-                vga.lock_pal();
-                intro_dbg!("[INTRO] after lock_pal: lock={}", vga.palette.lock_palette);
-                vga.clear_vga_mem();
+                render_state.set_y_offset(crate::render_state::YBASE);
+                render_state.set_y_start(0x12);
+                render_state.set_y_end(0x7D);
+                render_state.clear_palette();
+                intro_dbg!("[INTRO] after clear_palette: palette[0]={:?}",  render_state.palette.palette[0]);
+                render_state.lock_pal();
+                intro_dbg!("[INTRO] after lock_pal: lock={}",  render_state.palette.lock_palette);
+                render_state.clear_vga_mem();
                 
                 // 初始化调色板
-                vga.palette_init(crate::mpal256::mpal256_palette());
+                 render_state.palette_init(crate::mpal256::mpal256_palette());
                 intro_dbg!("[INTRO] after palette_init: palette[0xA0]={:?}, palette[15]={:?}", 
-                    vga.palette.palette[0xA0], vga.palette.palette[15]);
+                     render_state.palette.palette[0xA0],  render_state.palette.palette[15]);
                 
                 // 读取世界地图
                 let mut tmp_world = std::mem::take(&mut buffers.world_map);
@@ -354,7 +354,7 @@ impl Intro {
                 buffers.x_view = 0;
                 buffers.y_view = 0;
                 buffers.last_x_view = [0; MAX_PAGE as usize + 1];
-                vga.set_view(buffers.x_view, buffers.y_view);
+                render_state.set_view(buffers.x_view, buffers.y_view);
                 
                 // 初始化世界元素
                 let current_opt = buffers.options.clone();
@@ -380,35 +380,35 @@ impl Intro {
                 }
                 
                 figures.build_world(&mut buffers.world_map, &current_opt, sprites);
-                // 关键：BuildWorld 会重着色/转换草地等，会修改 sprites 内容
+                // 关键：BuildWorld 会重着色/转换草地等，运行时精灵存入figures
                 // GPU 图集必须同步更新，否则 Intro 地面/草/砖块颜色与 Oldsrc 不一致
-                *atlas = sprites.build_atlas();
+                *atlas = sprites.build_atlas(figures);
                 
                 // 设置天空调色板和草地调色板
                 {
-                    let mut pal = std::mem::take(&mut vga.palette);
+                    let mut pal = std::mem::take(&mut  render_state.palette);
                     figures.set_sky_palette(&mut pal, &current_opt);
-                    vga.palette = pal;
+                     render_state.palette = pal;
                 }
                 {
-                    let mut pal = std::mem::take(&mut vga.palette);
-                    backgr.draw_pal_backgr(&mut pal, vga, Some(&current_opt));
-                    vga.palette = pal;
+                    let mut pal = std::mem::take(&mut  render_state.palette);
+                    backgr.draw_pal_backgr(&mut pal, render_state, Some(&current_opt));
+                     render_state.palette = pal;
                 }
-                vga.palette_init_grass(&current_opt);
+                 render_state.palette_init_grass(&current_opt);
                 
                 // 关键修复：保存调色板颜色到source_palette，然后palette置黑
                 // 在整个初始化过程中保持palette全黑，防止帧间闪烁
-                vga.palette.source_palette = vga.palette.palette;
-                vga.palette.palette = [[0; 3]; 256];
-                intro_dbg!("[INTRO] PlayIntroWorld: palette置黑，source_palette[0xA0]={:?}", vga.palette.source_palette[0xA0]);
+                 render_state.palette.source_palette =  render_state.palette.palette;
+                 render_state.palette.palette = [[0; 3]; 256];
+                intro_dbg!("[INTRO] PlayIntroWorld: palette置黑，source_palette[0xA0]={:?}",  render_state.palette.source_palette[0xA0]);
                 
                 // 使用Renderer渲染初始帧（和play_world一致）
                 for page in 0..=MAX_PAGE {
-                    vga.page = page;
+                    render_state.page = page;
                     
                     let mut ctx = RenderContext {
-                        vga,
+                        render_state,
                         buffers,
                         backgr,
                         figures,
@@ -450,23 +450,23 @@ impl Intro {
                 // 颜色对齐 Oldsrc 实机观感：
                 // - 云：#E3E4F8 约等于 6bit [56,56,61]
                 // - 山：#86B1C2 约等于 6bit [33,44,48]
-                vga.palette.source_palette[0xA0] = [56, 56, 61];
-                vga.palette.source_palette[0xA1] = [33, 44, 48];
-                vga.palette.source_palette[0x18] = [10, 15, 25];
-                vga.palette.source_palette[0x8D] = [28, 38, 50];
-                vga.palette.source_palette[0x8F] = [40, 50, 63];
+                 render_state.palette.source_palette[0xA0] = [56, 56, 61];
+                 render_state.palette.source_palette[0xA1] = [33, 44, 48];
+                 render_state.palette.source_palette[0x18] = [10, 15, 25];
+                 render_state.palette.source_palette[0x8D] = [28, 38, 50];
+                 render_state.palette.source_palette[0x8F] = [40, 50, 63];
                 
                 // blink 初始化也直接修改 source_palette
                 for _ in 0..50 {
                     // 简化的 blink 初始化，只更新 source_palette 中的动画颜色
                     // 瀑布颜色索引 7-11
-                    vga.palette.source_palette[7] = vga.palette.source_palette[7];
-                    vga.palette.source_palette[8] = vga.palette.source_palette[8];
-                    vga.palette.source_palette[9] = vga.palette.source_palette[9];
-                    vga.palette.source_palette[10] = vga.palette.source_palette[10];
-                    vga.palette.source_palette[11] = vga.palette.source_palette[11];
+                     render_state.palette.source_palette[7] =  render_state.palette.source_palette[7];
+                     render_state.palette.source_palette[8] =  render_state.palette.source_palette[8];
+                     render_state.palette.source_palette[9] =  render_state.palette.source_palette[9];
+                     render_state.palette.source_palette[10] =  render_state.palette.source_palette[10];
+                     render_state.palette.source_palette[11] =  render_state.palette.source_palette[11];
                 }
-                intro_dbg!("[INTRO] source_palette[0xA0]={:?}", vga.palette.source_palette[0xA0]);
+                intro_dbg!("[INTRO] source_palette[0xA0]={:?}",  render_state.palette.source_palette[0xA0]);
                 
                 self.phase = IntroPhase::DrawIntro;
                 IntroResult::Continue
@@ -479,12 +479,12 @@ impl Intro {
                 // palette 已经是全黑的（在 PlayIntroWorld 阶段置黑）
                 // source_palette 已经设置好了（包含所有颜色）
                 intro_dbg!("[INTRO] palette[0xA0]={:?}, source_palette[0xA0]={:?}", 
-                    vga.palette.palette[0xA0], vga.palette.source_palette[0xA0]);
+                     render_state.palette.palette[0xA0],  render_state.palette.source_palette[0xA0]);
                 
                 for _i in 0..=MAX_PAGE {
                     intro_dbg!("[INTRO] drawing page {}", i);
                     self.draw_intro_screen(
-                        vga,
+                        render_state,
                         txt,
                         buffers,
                         players,
@@ -500,29 +500,29 @@ impl Intro {
                         atlas,
                         &intro_opt,
                     );
-                    vga.show_page();
+                    render_state.show_page();
                 }
                 
                 // 解锁调色板并开始渐显
                 // source_palette 已经在之前的阶段设置好了
-                vga.unlock_pal();
+                render_state.unlock_pal();
                 // 手动设置渐显状态（palette 是黑的，source_palette 已设置）
-                vga.palette.fading_up = true;
-                vga.palette.fading_down = false;
-                vga.palette.fading_pos = 63;
-                vga.palette.fading_step = 1;
-                vga.palette.fading_done = false;
+                 render_state.palette.fading_up = true;
+                 render_state.palette.fading_down = false;
+                 render_state.palette.fading_pos = 63;
+                 render_state.palette.fading_step = 1;
+                 render_state.palette.fading_done = false;
                 intro_dbg!("[INTRO] 开始渐显，fading_pos={}, source_palette[0xA0]={:?}", 
-                    vga.palette.fading_pos, vga.palette.source_palette[0xA0]);
+                     render_state.palette.fading_pos,  render_state.palette.source_palette[0xA0]);
                 self.phase = IntroPhase::FadingUp;
                 IntroResult::Continue
             }
             
             IntroPhase::FadingUp => {
-                vga.palette_fade_step();
-                if vga.palette.fading_done {
+                 render_state.palette_fade_step();
+                if  render_state.palette.fading_done {
                     intro_dbg!("[INTRO] 淡入完成，进入菜单");
-                    vga.reset_stack();
+                    render_state.reset_stack();
                     self.bg = [[0; 5]; MAX_PAGE as usize + 1];
                     self.menu = Default::default();
                     txt.set_font(0, FontStyle::BOLD | FontStyle::SHADOW);
@@ -573,7 +573,7 @@ impl Intro {
                 // 渲染菜单
                 let intro_opt = self.intro_opt.clone();
                 self.render_menu_frame(
-                    vga,
+                    render_state,
                     txt,
                     buffers,
                     players,
@@ -598,13 +598,13 @@ impl Intro {
                 }
                 
                 if self.intro_done {
-                    vga.palette.start_fade_down_steps(64);
+                     render_state.palette.start_fade_down_steps(64);
                     self.phase = IntroPhase::FadingDownForExit;
                 } else if self.counter >= WAIT_BEFORE_DEMO {
                     // Pascal: if not IntroDone then Demo;
                     // 超时后开始播放Demo
                     self.counter = 0;
-                    vga.palette.start_fade_down_steps(64);
+                     render_state.palette.start_fade_down_steps(64);
                     self.phase = IntroPhase::FadingDownForDemo;
                 }
                 
@@ -612,8 +612,8 @@ impl Intro {
             }
             
             IntroPhase::FadingDownForDemo => {
-                vga.palette_fade_step();
-                if vga.palette.fading_done {
+                 render_state.palette_fade_step();
+                if  render_state.palette.fading_done {
                     // 淡出完成后进入Demo模式
                     self.phase = IntroPhase::PlayDemo;
                 }
@@ -654,8 +654,8 @@ impl Intro {
             }
             
             IntroPhase::FadingDownForExit => {
-                vga.palette_fade_step();
-                if vga.palette.fading_done {
+                 render_state.palette_fade_step();
+                if  render_state.palette.fading_done {
                     self.phase = IntroPhase::Finished;
                 }
                 IntroResult::Continue
@@ -672,7 +672,7 @@ impl Intro {
                 buffers.data.num_players = self.next_num_players;
                 
                 // 完全清空VGA调色板，防止进入Play阶段时闪烁残留颜色
-                vga.clear_palette();
+                render_state.clear_palette();
                 self.started = false;
                 IntroResult::StartGame
             }
@@ -780,7 +780,7 @@ impl Intro {
 
     fn draw_intro_screen(
         &mut self,
-        vga: &mut VGA,
+        render_state: &mut RenderState,
         txt: &mut Txt,
         buffers: &mut Buffers,
         players: &mut Players,
@@ -799,7 +799,7 @@ impl Intro {
         // GPU模式：严格走 GPU 命令收集与提交（vga 的旧 CPU API 在 GPU 版是空实现）
         {
             let mut ctx = crate::renderer::RenderContext {
-                vga,
+                render_state,
                 buffers,
                 backgr,
                 figures,
@@ -824,7 +824,7 @@ impl Intro {
         // 叠加 INTRO 标题/边框（对齐 Oldsrc DrawIntroScreen）
         let palette_index: u32 = 0;
         let sprite_cmds = self.collect_intro_sprites_gpu(atlas, palette_index);
-        let batch = vga.get_sprite_batch_mut();
+        let batch = render_state.get_sprite_batch_mut();
         for s in sprite_cmds {
             batch.push_sprite(s);
         }
@@ -1084,7 +1084,7 @@ impl Intro {
 
     fn render_menu_frame(
         &mut self,
-        vga: &mut VGA,
+        render_state: &mut RenderState,
         txt: &mut Txt,
         buffers: &mut Buffers,
         players: &mut Players,
@@ -1104,7 +1104,7 @@ impl Intro {
         // 先绘制底图（天空、地形、玩家等），再叠加 INTRO 标题和菜单文字
         {
             let mut ctx = crate::renderer::RenderContext {
-                vga,
+                render_state,
                 buffers,
                 backgr,
                 figures,
@@ -1130,7 +1130,7 @@ impl Intro {
         {
             let palette_index: u32 = 0;
             let sprite_cmds = self.collect_intro_sprites_gpu(atlas, palette_index);
-            let batch = vga.get_sprite_batch_mut();
+            let batch = render_state.get_sprite_batch_mut();
             for s in sprite_cmds {
                 batch.push_sprite(s);
             }
@@ -1165,8 +1165,8 @@ impl Intro {
                 // 高频渲染不输出日志，避免刷屏
                 if (k + 1) as i32 == self.selected {
                     // 红色(用于选择指示符)
-                    vga.palette_out(5, 63, 0, 0);
-                    txt.write_text(vga, i - 12, j, "\x10", 5);
+                     render_state.palette_out(5, 63, 0, 0);
+                    txt.write_text(render_state, i - 12, j, "\x10", 5);
                 }
 
                 let mut color = 15;
@@ -1174,16 +1174,16 @@ impl Intro {
                     color = 14 + (self.counter & 1) as u8;
                 }
                 // 黄色(用于闪烁菜单项) 和 白色(用于普通菜单文字)
-                vga.palette_out(14, 63, 61, 31);
-                vga.palette_out(15, 63, 63, 63);
+                 render_state.palette_out(14, 63, 61, 31);
+                 render_state.palette_out(15, 63, 63, 63);
                 // 高频渲染不输出日志，避免刷屏
-                txt.write_text(vga, i + 8, j, &self.menu[k], color);
+                txt.write_text(render_state, i + 8, j, &self.menu[k], color);
             }
         }
 
-        vga.show_page();
-        vga.palette_blink_wrapper(options);
-        vga.reset_stack();
+        render_state.show_page();
+         render_state.palette_blink_wrapper(options);
+        render_state.reset_stack();
 
         // 实际渲染到窗口由平台层（wgpu backend）负责
     }

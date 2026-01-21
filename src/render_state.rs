@@ -1,16 +1,15 @@
-// VGA256 模块 - 纯GPU渲染版本
+// RenderState 模块 - GPU渲染状态管理
 // 
 // 架构说明：
-// - 移除CPU framebuffer，所有绘制通过GPU命令收集
-// - 保留视口状态管理（x_view, y_view）用于世界坐标转换
-// - 保留调色板管理用于GPU着色器
+// - 管理视口状态（x_view, y_view）用于世界坐标转换
+// - 管理调色板数据用于GPU着色器
+// - 收集GPU渲染命令（SpriteBatch）
 
 use crate::gpu::sprite_batch::{SpriteBatch, SpriteCommand};
 use crate::gpu::texture_atlas::SpriteUV;
 use crate::palettes::{PalType, Palettes};
 
-// Pascal VGA256.PAS 常量
-pub const VGA_SEGMENT: u16 = 0xA000;
+// 屏幕尺寸常量
 pub const WINDOWHEIGHT: i32 = 13 * 14;
 pub const WINDOWWIDTH: i32 = 16 * 20;
 pub const SCREEN_WIDTH: i32 = 320;
@@ -18,32 +17,17 @@ pub const SCREEN_HEIGHT: i32 = 200;
 pub const VIR_SCREEN_WIDTH: i32 = SCREEN_WIDTH + 2 * 20;
 pub const VIR_SCREEN_HEIGHT: i32 = 182;
 pub const BYTES_PER_LINE: i32 = VIR_SCREEN_WIDTH / 4;
-pub const MISC_OUTPUT: u16 = 0x03C2;
-pub const SC_INDEX: u16 = 0x03C4;
-pub const GC_INDEX: u16 = 0x03CE;
-pub const CRTC_INDEX: u16 = 0x03D4;
-pub const VERT_RESCAN: u16 = 0x03DA;
-pub const MAP_MASK: u8 = 2;
-pub const MEMORY_MODE: u8 = 4;
-pub const VERT_RETRACE_MASK: u8 = 8;
-pub const MAX_SCAN_LINE: u8 = 9;
-pub const START_ADDRESS_HIGH: u8 = 0xC;
-pub const START_ADDRESS_LOW: u8 = 0xD;
-pub const UNDERLINE: u8 = 0x14;
-pub const MODE_CONTROL: u8 = 0x17;
-pub const READ_MAP: u8 = 4;
-pub const GRAPHICS_MODE: u8 = 5;
-pub const MISCELLANEOUS: u8 = 6;
-pub const MAX_SCREENS: i32 = 24;
+
+// 页面常量（用于双缓冲状态管理）
 pub const MAX_PAGE: i32 = 1;
-pub const PAGE_SIZE: i32 = (VIR_SCREEN_HEIGHT + MAX_SCREENS) * BYTES_PER_LINE;
+pub const PAGE_SIZE: i32 = (VIR_SCREEN_HEIGHT + 24) * BYTES_PER_LINE;
 pub const PAGE_0: i32 = 0;
 pub const PAGE_1: i32 = 0x8000;
 pub const YBASE: i32 = 9;
 
-/// GPU渲染的VGA模块
-/// 移除了CPU framebuffer，使用SpriteBatch收集GPU渲染命令
-pub struct VGA {
+/// GPU渲染状态管理
+/// 管理视口、调色板和渲染命令收集
+pub struct RenderState {
     pub palette: Palettes,
     pub width: usize,
     pub height: usize,
@@ -61,8 +45,8 @@ pub struct VGA {
     pub sprite_batch: SpriteBatch,
 }
 
-impl VGA {
-    /// 创建VGA对象
+impl RenderState {
+    /// 创建RenderState对象
     pub fn new(width: usize, height: usize) -> Self {
         let mut palette = Palettes::new();
         palette.palette = [[0; 3]; 256]; // 初始全黑
@@ -70,7 +54,7 @@ impl VGA {
         let safe = 34 * BYTES_PER_LINE;
         let stack = [PAGE_0 + PAGE_SIZE + safe, PAGE_1 + PAGE_SIZE + safe];
 
-        VGA {
+        RenderState {
             palette,
             width,
             height,
@@ -87,7 +71,7 @@ impl VGA {
         }
     }
 
-    /// 创建VGA对象（兼容旧接口）
+    /// 创建RenderState对象（兼容旧接口）
     pub fn new_offscreen(width: usize, height: usize) -> Self {
         Self::new(width, height)
     }
@@ -168,6 +152,20 @@ impl VGA {
         self.sprite_batch.add_fill(x, y, w, h, color_index);
     }
 
+    /// 添加UI层填充矩形到GPU渲染队列（屏幕坐标）
+    /// UI层在所有sprites之后渲染，用于状态栏、暂停文本等
+    pub fn fill_ui_gpu(&mut self, x: i32, y: i32, w: i32, h: i32, color_index: u8) {
+        use crate::gpu::sprite_batch::FillCommand;
+        self.sprite_batch.push_ui_fill(FillCommand::new(x, y, w, h, color_index));
+    }
+
+    /// 添加UI层填充矩形到GPU渲染队列（世界坐标）
+    /// UI层在所有sprites之后渲染，用于状态栏、暂停文本等
+    pub fn fill_ui_world_gpu(&mut self, x_world: i32, y_world: i32, w: i32, h: i32, color_index: u8) {
+        let (x, y) = self.world_to_screen(x_world, y_world);
+        self.fill_ui_gpu(x, y, w, h, color_index);
+    }
+
     /// 设置当前调色板索引
     pub fn set_gpu_palette(&mut self, index: u32) {
         self.sprite_batch.set_palette(index);
@@ -208,7 +206,7 @@ impl VGA {
         self.page_offset
     }
 
-    /// 清空（GPU模式下清空渲染队列）
+    /// 清空渲染队列
     pub fn clear(&mut self) {
         self.sprite_batch.clear();
     }
@@ -243,7 +241,6 @@ impl VGA {
         self.set_viewport(self.x_view, self.y_view, self.page);
     }
 
-    pub fn border(&mut self, _attr: u8) {}
     pub fn set_y_offset(&mut self, new_y_offset: i32) { self.y_offset = new_y_offset; }
     pub fn get_y_offset(&self) -> i32 { self.y_offset }
     pub fn set_y_start(&mut self, y_start: i32) { self.y_start = y_start; }
@@ -335,13 +332,5 @@ impl VGA {
         self.palette.lock_palette = was_locked;
         pal.out_palette(color, r, g, b, self);
         self.palette = pal;
-    }
-
-    // ========================================================================
-    // 水平滚动（GPU模式下只更新视口，不移动像素）
-    // ========================================================================
-
-    pub fn scroll_screen_x(&mut self, _dx: i32) {
-        // GPU模式下不需要移动像素，每帧完整重绘
     }
 }

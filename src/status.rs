@@ -4,7 +4,7 @@ use crate::{
     gpu::RenderCommand,
     sprites::SpriteAtlas,
     txt::FontStyle,
-    vga256::VGA,
+    render_state::RenderState,
 };
 
 pub struct Status;
@@ -25,22 +25,22 @@ impl Status {
         data_coins: &[i16],
         world_number: &str,
         txt: &mut crate::txt::Txt,
-        vga: &mut VGA,
+        render_state: &mut RenderState,
         atlas: &SpriteAtlas,
     ) {
         const HEIGHT: i32 = 6;
         
         txt.set_font(0, FontStyle::BOLD);
-        txt.write_text_world_gpu(vga, x_view + 10 + 4, HEIGHT, &player_name[player], 31, atlas);
+        txt.write_text_world_gpu(render_state, x_view + 10 + 4, HEIGHT, &player_name[player], 31, atlas);
         
         let mut lives = data_lives[player];
         if lives > 99 {
             lives = 99;
         }
-        txt.write_text_world_gpu(vga, x_view + 54 + 4, HEIGHT, &format!("{:2}", lives), 31, atlas);
+        txt.write_text_world_gpu(render_state, x_view + 54 + 4, HEIGHT, &format!("{:2}", lives), 31, atlas);
         
         txt.write_text_world_gpu(
-            vga,
+            render_state,
             x_view + 84 + 6,
             HEIGHT,
             &format!("{:09}", level_score).replace(' ', "0"),
@@ -48,11 +48,11 @@ impl Status {
             atlas,
         );
         
-        txt.write_text_world_gpu(vga, x_view + 140 + 40 + 10, HEIGHT, "\t", 13, atlas);
-        txt.write_text_world_gpu(vga, x_view + 140 + 40 + 10, HEIGHT, "\x07", 14, atlas);
+        txt.write_text_world_gpu(render_state, x_view + 140 + 40 + 10, HEIGHT, "\t", 13, atlas);
+        txt.write_text_world_gpu(render_state, x_view + 140 + 40 + 10, HEIGHT, "\x07", 14, atlas);
         
         txt.write_text_world_gpu(
-            vga,
+            render_state,
             x_view + 158 + 40 + 10,
             HEIGHT,
             &format!("{:2}", data_coins[player]),
@@ -61,11 +61,11 @@ impl Status {
         );
         
         let lev = world_number.chars().nth(2).unwrap_or(' ');
-        txt.write_text_world_gpu(vga, x_view + 258, HEIGHT, &format!("LEVEL {}", lev), 31, atlas);
+        txt.write_text_world_gpu(render_state, x_view + 258, HEIGHT, &format!("LEVEL {}", lev), 31, atlas);
         
         txt.set_font(0, FontStyle::NORMAL);
-        txt.write_text_world_gpu(vga, x_view + 46 + 4, HEIGHT, "x", 31, atlas);
-        txt.write_text_world_gpu(vga, x_view + 150 + 40 + 10, HEIGHT, "x", 31, atlas);
+        txt.write_text_world_gpu(render_state, x_view + 46 + 4, HEIGHT, "x", 31, atlas);
+        txt.write_text_world_gpu(render_state, x_view + 150 + 40 + 10, HEIGHT, "x", 31, atlas);
     }
 
     // GPU模式下不需要hide_status，每帧重绘

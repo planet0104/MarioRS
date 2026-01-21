@@ -6,15 +6,15 @@
 use crate::gpu::GpuRenderer;
 use crate::mario::MarioGame;
 use crate::platform::FrameResult;
-use crate::vga256::{VGA, SCREEN_WIDTH, WINDOWHEIGHT};
+use crate::render_state::{RenderState, SCREEN_WIDTH, WINDOWHEIGHT};
 
-// 导出游戏窗口尺寸供平台层使用（平台层不应直接引用 vga256 模块）
+// 导出游戏窗口尺寸供平台层使用（平台层不应直接引用 render_state 模块）
 pub const GAME_WIDTH: u32 = SCREEN_WIDTH as u32;
 pub const GAME_HEIGHT: u32 = WINDOWHEIGHT as u32;
 
 /// 游戏应用状态
 pub struct GameState {
-    pub vga: VGA,
+    pub render_state: RenderState,
     pub game: MarioGame,
 }
 
@@ -22,17 +22,17 @@ impl GameState {
     /// 创建新的游戏状态
     pub fn new() -> Self {
         eprintln!("[DEBUG] GameState::new: 创建VGA");
-        let mut vga = VGA::new_offscreen(
+        let mut render_state = RenderState::new_offscreen(
             SCREEN_WIDTH as usize,
             WINDOWHEIGHT as usize,
         );
         eprintln!("[DEBUG] GameState::new: VGA创建完成，创建MarioGame");
         let mut game = MarioGame::new();
         eprintln!("[DEBUG] GameState::new: MarioGame创建完成");
-        game.init_palette(&mut vga);
+        game.init_palette(&mut render_state);
         eprintln!("[DEBUG] GameState::new: 调色板初始化完成");
         
-        Self { vga, game }
+        Self { render_state, game }
     }
     
     /// 处理键盘事件
@@ -42,29 +42,29 @@ impl GameState {
     
     /// 帧更新
     pub fn frame_update(&mut self) -> FrameResult {
-        self.game.frame_update(&mut self.vga)
+        self.game.frame_update(&mut self.render_state)
     }
     
     /// 获取GPU精灵批次数据用于渲染
     pub fn get_sprite_instances(&self) -> Vec<crate::gpu::SpriteInstance> {
-        self.vga.get_sprite_batch().sprite_instances()
+        self.render_state.get_sprite_batch().sprite_instances()
     }
     
     /// 获取GPU填充矩形数据用于渲染
     pub fn get_fill_rects(&self) -> Vec<crate::gpu::FillRect> {
-        self.vga.get_sprite_batch().fill_rects()
+        self.render_state.get_sprite_batch().fill_rects()
     }
     
     /// 获取GPU UI层填充矩形数据用于渲染
     pub fn get_ui_fill_rects(&self) -> Vec<crate::gpu::FillRect> {
-        self.vga.get_sprite_batch().ui_fill_rects()
+        self.render_state.get_sprite_batch().ui_fill_rects()
     }
     
     /// 获取当前调色板数据用于GPU渲染
     /// 返回256色RGBA格式数据
     pub fn get_palette_rgba(&self) -> [[u8; 4]; 256] {
         let mut rgba = [[0u8; 4]; 256];
-        let palette = &self.vga.palette.palette;
+        let palette = &self. render_state.palette.palette;
         for i in 0..256 {
             // VGA调色板是6位色（0-63），需要转换为8位（0-255）
             // 乘以4或使用位移来扩展范围

@@ -21,11 +21,11 @@ use crate::stars::Stars;
 use crate::status::Status;
 use crate::tmpobj::TmpObjManager;
 use crate::txt::Txt;
-use crate::vga256::VGA;
+use crate::render_state::RenderState;
 
 /// 渲染上下文 - 包含渲染一帧所需的所有引用
 pub struct RenderContext<'a> {
-    pub vga: &'a mut VGA,
+    pub render_state: &'a mut RenderState,
     pub buffers: &'a mut Buffers,
     pub backgr: &'a mut BackGr,
     pub figures: &'a mut Figures,
@@ -70,20 +70,20 @@ impl Renderer {
     }
     
     /// GPU模式：开始帧渲染（清空批次）
-    pub fn begin_gpu_frame(&self, vga: &mut VGA) {
-        vga.begin_gpu_frame();
+    pub fn begin_gpu_frame(&self, render_state: &mut RenderState) {
+        render_state.begin_gpu_frame();
     }
     
     /// GPU模式：获取收集的渲染批次
-    pub fn get_sprite_batch<'a>(&self, vga: &'a VGA) -> &'a SpriteBatch {
-        vga.get_sprite_batch()
+    pub fn get_sprite_batch<'a>(&self, render_state: &'a RenderState) -> &'a SpriteBatch {
+        render_state.get_sprite_batch()
     }
 
     /// GPU版 - 渲染完整一帧（初始化阶段）
     pub fn render_init_frame(&mut self, ctx: &mut RenderContext, _page: i32) {
-        ctx.vga.begin_gpu_frame();
+        ctx.render_state.begin_gpu_frame();
         let commands = self.collect_gpu_frame(ctx, ctx.atlas);
-        Self::submit_gpu_commands(ctx.vga, commands);
+        Self::submit_gpu_commands(ctx.render_state, commands);
         ctx.figures.set_trace_enabled(false);
     }
 
@@ -91,17 +91,17 @@ impl Renderer {
     /// 
     /// GPU模式：每帧完全重绘，不需要hide/erase操作
     pub fn render_game_frame(&mut self, ctx: &mut RenderContext) {
-        ctx.vga.begin_gpu_frame();
+        ctx.render_state.begin_gpu_frame();
         let commands = self.collect_gpu_frame(ctx, ctx.atlas);
-        Self::submit_gpu_commands(ctx.vga, commands);
+        Self::submit_gpu_commands(ctx.render_state, commands);
     }
 
-    fn submit_gpu_commands(vga: &mut VGA, commands: Vec<RenderCommand>) {
+    fn submit_gpu_commands(render_state:&mut RenderState, commands: Vec<RenderCommand>) {
         // 当前实现每帧上传 row0 调色板，因此统一使用 palette_index=0
-        // fade/blink 等效果会直接体现在 vga.palette.palette 的内容里
+        // fade/blink 等效果会直接体现在  render_state.palette.palette 的内容里
         let palette_index: u32 = 0;
-        vga.set_gpu_palette(palette_index);
-        let batch = vga.get_sprite_batch_mut();
+        render_state.set_gpu_palette(palette_index);
+        let batch = render_state.get_sprite_batch_mut();
 
         for cmd in commands {
             match cmd {
@@ -183,8 +183,8 @@ impl Renderer {
         for f in ctx.figures.collect_sky_fills(
             0,
             0,
-            crate::vga256::SCREEN_WIDTH,
-            crate::vga256::VIR_SCREEN_HEIGHT,
+            crate::render_state::SCREEN_WIDTH,
+            crate::render_state::VIR_SCREEN_HEIGHT,
             &ctx.buffers.options,
         ) {
             commands.push(RenderCommand::FillRect(crate::gpu::FillRect::new(
@@ -215,8 +215,8 @@ impl Renderer {
             // 让砖块图案在“世界坐标”上保持对齐，随着 x_view/y_view 滚动。
             let x0 = -x_view.rem_euclid(tw);
             let y0 = -y_view.rem_euclid(th);
-            let screen_w = crate::vga256::SCREEN_WIDTH;
-            let screen_h = crate::vga256::VIR_SCREEN_HEIGHT;
+            let screen_w = crate::render_state::SCREEN_WIDTH;
+            let screen_h = crate::render_state::VIR_SCREEN_HEIGHT;
             
             let mut y = y0;
             while y < screen_h {

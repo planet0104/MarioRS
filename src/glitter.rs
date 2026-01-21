@@ -1,7 +1,7 @@
 // Glitter System - 闪光效果系统 - GPU版本
 use crate::buffers::{Buffers, H, NH, NV, W};
 use crate::gpu::{FillRect, RenderCommand};
-use crate::vga256::{MAX_PAGE, VGA, VIR_SCREEN_WIDTH};
+use crate::render_state::{MAX_PAGE, RenderState, VIR_SCREEN_WIDTH};
 
 pub const MAX_GLITTER: usize = 75;
 
@@ -21,7 +21,7 @@ pub struct GlitterSystem {
 
 impl GlitterSystem {
     /// 清空所有闪光
-    pub fn clear_glitter(&mut self, _vga: &mut VGA, _buffers: &mut Buffers) {
+    pub fn clear_glitter(&mut self, _render_state: &mut RenderState, _buffers: &mut Buffers) {
         for v in self.count.iter_mut() {
             *v = 0;
         }
@@ -91,7 +91,7 @@ impl GlitterSystem {
     }
 
     /// GPU版 - 显示所有闪光
-    pub fn show_glitter(&mut self, vga: &mut VGA) {
+    pub fn show_glitter(&mut self, render_state: &mut RenderState) {
         let num_glitter = self.count[0];
         if num_glitter > 0 {
             for i in 1..=MAX_GLITTER {
@@ -100,7 +100,7 @@ impl GlitterSystem {
                     let x = (glitter.pos % VIR_SCREEN_WIDTH as u16) as i32;
                     let y = (glitter.pos / VIR_SCREEN_WIDTH as u16) as i32;
                     // GPU模式：直接绘制1x1像素
-                    vga.fill_gpu(x, y, 1, 1, glitter.attr);
+                    render_state.fill_gpu(x, y, 1, 1, glitter.attr);
                 }
             }
         }
@@ -163,9 +163,9 @@ impl GlitterSystem {
                 let y = (glitter.pos / VIR_SCREEN_WIDTH as u16) as f32;
 
                 if x >= 0.0
-                    && x < crate::vga256::SCREEN_WIDTH as f32
+                    && x < crate::render_state::SCREEN_WIDTH as f32
                     && y >= 0.0
-                    && y < crate::vga256::SCREEN_HEIGHT as f32
+                    && y < crate::render_state::SCREEN_HEIGHT as f32
                 {
                     let fill = FillRect::new(x, y, 1.0, 1.0, glitter.attr, palette_index);
                     commands.push(RenderCommand::FillRect(fill));
@@ -197,12 +197,12 @@ impl GlitterSystem {
 mod tests {
     use super::*;
     use crate::buffers::Buffers;
-    use crate::vga256::{SCREEN_HEIGHT, SCREEN_WIDTH, VGA};
+    use crate::render_state::{SCREEN_HEIGHT, SCREEN_WIDTH, RenderState};
 
     #[test]
     fn test_glitter_system() {
         // 初始化VGA和Buffers
-        let mut vga = VGA::new_offscreen(SCREEN_WIDTH as usize, SCREEN_HEIGHT as usize);
+        let mut vga = RenderState::new_offscreen(SCREEN_WIDTH as usize, SCREEN_HEIGHT as usize);
         let mut buffers = Buffers::new();
         // 初始化GlitterSystem
         let mut glitter = GlitterSystem {

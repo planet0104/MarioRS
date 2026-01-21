@@ -6,7 +6,7 @@ use crate::backgr::BackGr;
 use crate::buffers::{Buffers, EX, EY1, ImageBuffer, NV, WorldBuffer, WorldOptions};
 use crate::palettes::Palettes;
 use crate::sprites::SpriteDataManager;
-use crate::vga256::VGA;
+use crate::render_state::RenderState;
 use crate::gpu::sprite_batch::{FillCommand, SpriteCommand};
 
 /// 调试开关：是否打印特定tile位置的精灵文件名
@@ -22,15 +22,24 @@ pub struct Figures {
     pub sky: u8,
     /// P1-2: 实例级 trace 标志（替代静态 AtomicBool）
     pub trace_enabled: bool,
+    
+    // 运行时动态着色精灵（参考Pascal设计，保持原始精灵不可变）
+    pub wood_rt: ImageBuffer,    // 运行时重着色的WOOD
+    pub xblock_rt: ImageBuffer,  // 运行时重着色的XBLOCK
+    pub block_rt: ImageBuffer,   // 运行时重着色的BLOCK
 }
 
 impl Figures {
     pub fn new(fig_list: [[ImageBuffer; N2]; N1], bricks: [ImageBuffer; 4], sky: u8) -> Self {
+        let empty_sprite: ImageBuffer = [[0; crate::buffers::W as usize]; crate::buffers::H as usize];
         Self {
             fig_list,
             bricks,
             sky,
             trace_enabled: false, // P1-2: 默认关闭
+            wood_rt: empty_sprite,
+            xblock_rt: empty_sprite,
+            block_rt: empty_sprite,
         }
     }
 
@@ -596,7 +605,7 @@ impl Figures {
     /// 绘制天空/背景底色（对齐 Pascal FIGURES.PAS::DrawSky）
     ///
     /// 依赖：
-    /// - 填充像素：`vga.fill_world`
+    /// - 填充像素：`render_state.fill_world`
     /// - 平滑渐变/砖块等：`backgr`（对应 Pascal BACKGR.PAS 的 SmoothFill/DrawBricks/...）
     /// GPU版draw_sky - 使用GPU填充渲染天空/背景
     pub fn draw_sky(
@@ -605,7 +614,7 @@ impl Figures {
         y: i32,
         w: i32,
         h: i32,
-        vga: &mut VGA,
+        render_state: &mut RenderState,
         options: &WorldOptions,
         backgr: &mut BackGr,
         _sprites: &SpriteDataManager,
@@ -616,7 +625,7 @@ impl Figures {
 
         // GPU模式：直接使用fill_world_gpu
         if options.backgr_type == 0 {
-            vga.fill_world_gpu(x, y, w, h, 0xE0);
+            render_state.fill_world_gpu(x, y, w, h, 0xE0);
             return;
         }
 
@@ -627,27 +636,27 @@ impl Figures {
                 let top_h = horizon - y;
 
                 if horizon < y {
-                    vga.fill_world_gpu(x, y, w, h, 0xF0);
+                    render_state.fill_world_gpu(x, y, w, h, 0xF0);
                 } else if horizon > y + h - 1 {
-                    vga.fill_world_gpu(x, y, w, h, 0xE0);
+                    render_state.fill_world_gpu(x, y, w, h, 0xE0);
                 } else {
-                    vga.fill_world_gpu(x, y, w, top_h, 0xE0);
-                    vga.fill_world_gpu(x, horizon, w, h - top_h, 0xF0);
+                    render_state.fill_world_gpu(x, y, w, top_h, 0xE0);
+                    render_state.fill_world_gpu(x, horizon, w, h - top_h, 0xF0);
                 }
             }
 
             // SmoothFill（渐变背景）
             2 | 5 | 9 | 10 | 11 | 12 => {
-                backgr.smooth_fill_gpu(x as usize, y as usize, w as usize, h as usize, options, vga);
+                backgr.smooth_fill_gpu(x as usize, y as usize, w as usize, h as usize, options, render_state);
             }
 
             // 地下室场景：画砖/柱子/窗/大砖
             6 | 7 | 8 => {
                 match options.backgr_type {
-                    4 => backgr.draw_bricks_gpu(x, y, w, h, vga),
-                    5 => backgr.large_bricks_gpu(x, y, w, h, vga),
-                    6 => backgr.pillar_gpu(x, y, w, h, vga),
-                    7 => backgr.windows_gpu(x, y, w, h, vga),
+                    4 => backgr.draw_bricks_gpu(x, y, w, h, render_state),
+                    5 => backgr.large_bricks_gpu(x, y, w, h, render_state),
+                    6 => backgr.pillar_gpu(x, y, w, h, render_state),
+                    7 => backgr.windows_gpu(x, y, w, h, render_state),
                     _ => {}
                 }
             }
@@ -787,14 +796,13 @@ impl Figures {
             b'?' => Some(SpriteId::QUEST_000),
             b'@' => Some(SpriteId::QUEST_001),
             b'I' => Some(SpriteId::BLOCK_000),
-            b'J' => Some(SpriteId::BLOCK_001),
+            b'J' => Some(SpriteId::BLOCK_001_RT),  // 使用运行时重着色版本
             b'K' => Some(SpriteId::NOTE_000),
-            b'X' => Some(SpriteId::XBLOCK_000),
+            b'X' => Some(SpriteId::XBLOCK_000_RT),  // 使用运行时重着色版本
             b'W' => {
-                // 对齐 Oldsrc：地下室墙面是实体砖块，索引0也要绘制（否则会变成纯背景色）
-                let uv = atlas.get(SpriteId::WOOD_000);
-                commands.push(SpriteCommand::new(xpos, ypos, uv).with_opaque(true));
-                None
+                // 对齐 Oldsrc：WOOD使用DrawImage（透明绘制），索引0的像素不绘制
+                // 这样WOOD精灵边缘的透明像素会正确显示背景色
+                Some(SpriteId::WOOD_000_RT)  // 使用运行时重着色版本
             }
             b'0' => Some(SpriteId::PIPE_000),
             b'1' => Some(SpriteId::PIPE_001),
@@ -810,11 +818,13 @@ impl Figures {
             }
             0xF7 => {
                 // 草地逻辑对齐 Oldsrc 的 redraw:
-                // 1. 若左右邻居存在墙体(1..=26)，先绘制无边缘墙体背景(GREEN_003)
+                // 1. 若左右邻居存在墙体(1..=26)，先绘制无边缘墙体背景
+                // 对齐 Pascal: 使用fig_list[0][5]，即无边缘中央墙块（已包含正确着色）
                 let left = get(x - 1, y);
                 let right = get(x + 1, y);
                 if (1..=26).contains(&left) || (1..=26).contains(&right) {
-                    let uv = atlas.get(SpriteId::GREEN_003);
+                    // 直接使用FIGLIST_05，fig_list中已包含正确着色的墙体
+                    let uv = atlas.get(SpriteId::FIGLIST_05);
                     commands.push(SpriteCommand::new(xpos, ypos, uv));
                 }
 
@@ -959,6 +969,11 @@ impl Figures {
                     None
                 }
                 4 => Some(SpriteId::LAVA_000),
+                5 => {
+                    // 对齐 Oldsrc: design=5时填充颜色5
+                    // 注意：这里返回None，填充应由draw_sky/背景层处理
+                    None
+                }
                 _ => None,
             },
             b'%' => match options.design {
@@ -1013,19 +1028,66 @@ impl Figures {
                 _ => None,
             },
             b'A' => {
-                // 砖块 - 使用默认砖块样式
-                let l = get(x - 1, y) == b'A';
-                let r = get(x + 1, y) == b'A';
-                let stitch = (x + y) % 2 == 1;
-                if stitch && r {
-                    Some(SpriteId::BRICK0_001)
-                } else if !stitch && l {
-                    Some(SpriteId::BRICK0_002)
+                // 砖块 - 仅当 wall_type1 >= 100 时使用 BRICK 精灵
+                // wall_type1 < 100 时，A 字符应该已被 build_wall 转换为 1-26
+                // 如果仍然遇到 b'A'，说明 build_wall 未处理该位置，跳过渲染
+                if options.wall_type1 < 100 {
+                    // wall_type1 < 100 时使用 FIGLIST 精灵（由 build_wall 处理）
+                    // 这里不应该遇到 b'A'，如果遇到则跳过
+                    None
                 } else {
-                    Some(SpriteId::BRICK0_000)
+                    // wall_type1 >= 100 时使用 BRICK 精灵
+                    // wall_type1: 100->BRICK0, 101->BRICK1, 102->BRICK2
+                    let l = get(x - 1, y) == b'A';
+                    let r = get(x + 1, y) == b'A';
+                    let stitch = (x + y) % 2 == 1;
+                    
+                    match options.wall_type1 {
+                        101 => {
+                            if stitch && r {
+                                Some(SpriteId::BRICK1_001)
+                            } else if !stitch && l {
+                                Some(SpriteId::BRICK1_002)
+                            } else {
+                                Some(SpriteId::BRICK1_000)
+                            }
+                        }
+                        102 => {
+                            if stitch && r {
+                                Some(SpriteId::BRICK2_001)
+                            } else if !stitch && l {
+                                Some(SpriteId::BRICK2_002)
+                            } else {
+                                Some(SpriteId::BRICK2_000)
+                            }
+                        }
+                        _ => {
+                            // 默认使用BRICK0（包括wall_type1=100）
+                            if stitch && r {
+                                Some(SpriteId::BRICK0_001)
+                            } else if !stitch && l {
+                                Some(SpriteId::BRICK0_002)
+                            } else {
+                                Some(SpriteId::BRICK0_000)
+                            }
+                        }
+                    }
                 }
             }
-            b'=' => Some(SpriteId::PIN_000),
+            b'=' => {
+                // 对齐 Oldsrc: PIN精灵根据下方tile决定是否上下颠倒
+                // 如果下方是可以抓住的tile(CAN_HOLD_YOU)，正常绘制；否则上下颠倒
+                let below = get(x, y + 1);
+                let can_hold = crate::buffers::CAN_HOLD_YOU.contains(&below);
+                if can_hold {
+                    Some(SpriteId::PIN_000)
+                } else {
+                    // 上下颠倒绘制
+                    let uv = atlas.get(SpriteId::PIN_000);
+                    commands.push(SpriteCommand::new(xpos, ypos, uv).with_flip(false, true));
+                    None
+                }
+            }
             // 墙体精灵 1-26：对齐 Oldsrc 的 redraw 分支（14-26 会先减13再参与选择）
             1..=26 => {
                 // 对齐 Oldsrc 的 FigList 变体逻辑：
@@ -1092,40 +1154,34 @@ impl Figures {
         commands
     }
 
-    /// 把 FigList[0][idx]（1..=13）映射到基础精灵 + 旋转/翻转（GPU 侧做旋转，避免生成额外贴图）
-    /// 只覆盖 Oldsrc InitWalls 生成的变体索引：
-    /// 1,2,4,5,10 为基础；3,6,7,8,9,11,12,13 为镜像/旋转组合。
+    /// 参考Pascal设计：直接使用fig_list中预处理的精灵
+    /// fig_list[0][1..13]已经包含了所有变换（重着色、镜像、旋转）
+    /// 因此GPU不需要再做变换，直接返回FIGLIST_xx精灵ID
+    /// 
+    /// 返回值: (精灵ID, 旋转角度, flip_x, flip_y)
+    /// 由于变换已在CPU端完成，所有变换参数都是默认值（0, false, false）
     fn wall_variant_to_sprite(
-        wall_type1: u8,
+        _wall_type1: u8,  // 不再需要，fig_list已根据wall_type处理
         idx: u8,
     ) -> (crate::sprites::SpriteId, u8, bool, bool) {
         use crate::sprites::SpriteId;
 
-        let (s1, s2, s4, s5, s10) = match wall_type1 {
-            0 => (SpriteId::GREEN_000, SpriteId::GREEN_001, SpriteId::GREEN_002, SpriteId::GREEN_003, SpriteId::GREEN_004),
-            1 => (SpriteId::SAND_000, SpriteId::SAND_001, SpriteId::SAND_002, SpriteId::SAND_003, SpriteId::SAND_004),
-            2 => (SpriteId::GREEN_000, SpriteId::GREEN_001, SpriteId::GREEN_002, SpriteId::GREEN_003, SpriteId::GREEN_004),
-            3 => (SpriteId::BROWN_000, SpriteId::BROWN_001, SpriteId::BROWN_002, SpriteId::BROWN_003, SpriteId::BROWN_004),
-            4 => (SpriteId::GRASS_000, SpriteId::GRASS_001, SpriteId::GRASS_002, SpriteId::GRASS_003, SpriteId::GRASS_004),
-            5 => (SpriteId::DES_000, SpriteId::DES_001, SpriteId::DES_002, SpriteId::DES_003, SpriteId::DES_004),
-            _ => (SpriteId::GREEN_000, SpriteId::GREEN_001, SpriteId::GREEN_002, SpriteId::GREEN_003, SpriteId::GREEN_004),
-        };
-
+        // 直接返回fig_list对应的精灵，无需GPU变换
         match idx {
-            1 => (s1, 0, false, false),
-            2 => (s2, 0, false, false),
-            3 => (s1, 0, true, false), // mirror(1)
-            4 => (s4, 0, false, false),
-            5 => (s5, 0, false, false),
-            6 => (s4, 1, false, false), // rotate(4)
-            7 => (s1, 1, false, true), // rotate(mirror(1)) == rot90 + flip_y
-            8 => (s2, 1, false, false), // rotate(2)
-            9 => (s1, 1, false, false), // rotate(1)
-            10 => (s10, 0, false, false),
-            11 => (s10, 0, true, false), // mirror(10)
-            12 => (s10, 1, false, true), // rotate(mirror(10)) == rot90 + flip_y
-            13 => (s10, 3, false, false), // mirror(rotate(mirror(10))) == rot270
-            _ => (s5, 0, false, false),
+            1 => (SpriteId::FIGLIST_01, 0, false, false),
+            2 => (SpriteId::FIGLIST_02, 0, false, false),
+            3 => (SpriteId::FIGLIST_03, 0, false, false),
+            4 => (SpriteId::FIGLIST_04, 0, false, false),
+            5 => (SpriteId::FIGLIST_05, 0, false, false),
+            6 => (SpriteId::FIGLIST_06, 0, false, false),
+            7 => (SpriteId::FIGLIST_07, 0, false, false),
+            8 => (SpriteId::FIGLIST_08, 0, false, false),
+            9 => (SpriteId::FIGLIST_09, 0, false, false),
+            10 => (SpriteId::FIGLIST_10, 0, false, false),
+            11 => (SpriteId::FIGLIST_11, 0, false, false),
+            12 => (SpriteId::FIGLIST_12, 0, false, false),
+            13 => (SpriteId::FIGLIST_13, 0, false, false),
+            _ => (SpriteId::FIGLIST_05, 0, false, false),  // 默认使用中间块
         }
     }
 
@@ -1540,22 +1596,58 @@ impl Figures {
             &sprites.PALM3_002,
         );
 
-        // ===== 关键修复：在 recolor 之前从原始数据恢复精灵 =====
-        // 因为 recolor 是就地修改，如果 build_world 被多次调用（切换关卡时），
-        // 已经被 recolor 过的精灵会被错误地再次 recolor。
-        // 解决方案：从原始数据副本恢复后再 recolor。
+        // ===== Pascal风格重构：动态着色精灵存入Figures的运行时字段 =====
+        // 参考Pascal设计：原始精灵保持不可变，重着色结果存入运行时字段
+        // 这样每次build_world都从原始数据开始，无需_ORIG副本
         
-        // 恢复 BLOCK_001 原始数据
-        sprites.BLOCK_001 = sprites.BLOCK_001_ORIG.clone();
-        self.recolor(&mut sprites.BLOCK_001, None, options.brick_color);
+        // 使用临时变量来避免借用冲突
+        // 复制原始精灵，然后重着色，最后存入运行时字段
+        let mut block_tmp = sprites.BLOCK_001.clone();
+        Self::recolor_static(&mut block_tmp, None, options.brick_color);
+        self.block_rt = block_tmp;
         
-        // 恢复 WOOD_000 原始数据
-        sprites.WOOD_000 = sprites.WOOD_000_ORIG.clone();
-        self.recolor(&mut sprites.WOOD_000, None, options.wood_color);
+        let mut wood_tmp = sprites.WOOD_000.clone();
+        Self::recolor_static(&mut wood_tmp, None, options.wood_color);
+        self.wood_rt = wood_tmp;
         
-        // 恢复 XBLOCK_000 原始数据
-        sprites.XBLOCK_000 = sprites.XBLOCK_000_ORIG.clone();
-        self.recolor(&mut sprites.XBLOCK_000, None, options.xblock_color);
+        let mut xblock_tmp = sprites.XBLOCK_000.clone();
+        Self::recolor_static(&mut xblock_tmp, None, options.xblock_color);
+        self.xblock_rt = xblock_tmp;
+        
+        // 注意：wall_type1相关的重着色已在init_wall中处理到fig_list
+        // GPU渲染直接使用FIGLIST_xx精灵，无需修改原始GREEN精灵
+    }
+    
+    /// 静态版本的recolor，避免借用冲突
+    fn recolor_static<const WW: usize, const HH: usize>(
+        src: &mut [[u8; WW]; HH],
+        dst: Option<&mut [[u8; WW]; HH]>,
+        c: u8,
+    ) {
+        match dst {
+            Some(dst_buf) => {
+                for y in 0..HH {
+                    for x in 0..WW {
+                        let val = src[y][x];
+                        if val == 0 {
+                            dst_buf[y][x] = 0;
+                        } else {
+                            dst_buf[y][x] = (val & 0x07) + c;
+                        }
+                    }
+                }
+            }
+            None => {
+                for y in 0..HH {
+                    for x in 0..WW {
+                        let val = src[y][x];
+                        if val != 0 {
+                            src[y][x] = (val & 0x07) + c;
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 

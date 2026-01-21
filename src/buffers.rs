@@ -1,4 +1,4 @@
-use crate::vga256::MAX_PAGE;
+use crate::render_state::MAX_PAGE;
 
 pub const W: i32 = 20;
 pub const H: i32 = 14;

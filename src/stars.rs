@@ -4,7 +4,7 @@
 use crate::{
     buffers::{Buffers, W, WorldOptions},
     gpu::{FillRect, RenderCommand},
-    vga256::VGA,
+    render_state::RenderState,
 };
 
 pub const STAR_SPEED: i32 = 10;
@@ -74,7 +74,7 @@ impl Stars {
     }
 
     /// GPU版 - 显示星星
-    pub fn show_stars(&mut self, vga: &mut VGA, buffers: &Buffers) {
+    pub fn show_stars(&mut self, render_state: &mut RenderState, buffers: &Buffers) {
         use crate::utils::random_i32;
         
         let x_view = buffers.x_view;
@@ -106,7 +106,7 @@ impl Stars {
             }
             
             // 使用GPU填充1x1像素
-            vga.fill_gpu(ax, y, 1, 1, al);
+            render_state.fill_gpu(ax, y, 1, 1, al);
         }
     }
 

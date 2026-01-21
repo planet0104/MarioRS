@@ -37,7 +37,7 @@ use crate::{
     status::Status,
     tmpobj::TmpObjManager,
     txt::Txt,
-    vga256::{MAX_PAGE, VGA},
+    render_state::{MAX_PAGE, RenderState},
     worlds::intro::Intro,
 };
 
@@ -140,9 +140,6 @@ eprintln!("size StarBuffer = {}", std::mem::size_of::<crate::buffers::StarBuffer
         let mut buffers = Buffers::new();
         eprintln!("[DEBUG] MarioGame::new: 创建SpriteDataManager");
         let sprites = SpriteDataManager::new();
-        eprintln!("[DEBUG] MarioGame::new: 构建精灵图集");
-        // 构建GPU精灵图集
-        let atlas = sprites.build_atlas();
         eprintln!("[DEBUG] MarioGame::new: 创建MusicPlayer");
         let mut music = MusicPlayer::new();
         eprintln!("[DEBUG] MarioGame::new: 创建Players");
@@ -153,6 +150,9 @@ eprintln!("size StarBuffer = {}", std::mem::size_of::<crate::buffers::StarBuffer
         let backgr = BackGr::new(MAX_WORLD_SIZE as usize, W as usize, NV as usize, H as usize);
         eprintln!("[DEBUG] MarioGame::new: 初始化Figures");
         let figures = Self::init_figures(&sprites);
+        eprintln!("[DEBUG] MarioGame::new: 构建精灵图集");
+        // 构建GPU精灵图集（需要figures来获取fig_list和运行时精灵）
+        let atlas = sprites.build_atlas(&figures);
         eprintln!("[DEBUG] MarioGame::new: 创建其他组件");
         let blocks = Blocks::new();
         let stars = Stars::new();
@@ -235,8 +235,8 @@ eprintln!("size StarBuffer = {}", std::mem::size_of::<crate::buffers::StarBuffer
     }
     
     /// 初始化调色板
-    pub fn init_palette(&mut self, vga: &mut VGA) {
-        vga.palette_init(mpal256::mpal256_palette());
+    pub fn init_palette(&mut self, render_state:&mut RenderState) {
+         render_state.palette_init(mpal256::mpal256_palette());
         self.main_phase = MainPhase::Intro;
         self.intro.start();
     }
@@ -249,12 +249,12 @@ eprintln!("size StarBuffer = {}", std::mem::size_of::<crate::buffers::StarBuffer
     /// 每帧更新（统一的状态机驱动）
     /// 
     /// 这是游戏的核心更新函数，由main.rs的事件循环每帧调用一次
-    pub fn frame_update(&mut self, vga: &mut VGA) -> FrameResult {
+    pub fn frame_update(&mut self, render_state: &mut RenderState) -> FrameResult {
         self.frame_count += 1;
         
         // 处理调色板渐变
-        if vga.palette.is_fading() {
-            vga.palette_fade_step();
+        if  render_state.palette.is_fading() {
+             render_state.palette_fade_step();
         }
         
         // 主状态机
@@ -267,7 +267,7 @@ eprintln!("size StarBuffer = {}", std::mem::size_of::<crate::buffers::StarBuffer
             MainPhase::Intro => {
                 // Intro状态机更新 - 使用 GameContext 简化参数传递
                 let mut ctx = GameContext::new(
-                    vga,
+                    render_state,
                     &mut self.txt,
                     &mut self.buffers,
                     &mut self.players,
@@ -327,10 +327,10 @@ eprintln!("size StarBuffer = {}", std::mem::size_of::<crate::buffers::StarBuffer
                 
                 // 初始化阶段 (counter=1)
                 if self.show_player_counter == 1 {
-                    vga.palette_clear();
-                    vga.lock_pal();
-                    vga.clear_vga_mem();
-                    vga.set_view(0, 0);
+                    render_state.palette_clear();
+                    render_state.lock_pal();
+                    render_state.clear_vga_mem();
+                    render_state.set_view(0, 0);
                 }
                 
                 // 绘制图像阶段 (counter=2 to MAX_PAGE+2)
@@ -345,27 +345,27 @@ eprintln!("size StarBuffer = {}", std::mem::size_of::<crate::buffers::StarBuffer
                     };
                     // 居中显示（Pascal: 160 - iW div 2, 85 - iH div 2）
                     // 85 - 13/2 = 78.5 约等于 79
-                    self.txt.center_text(vga, 79, player_text, 0x1E, 0, crate::vga256::SCREEN_WIDTH);
-                    vga.show_page();
+                    self.txt.center_text(render_state, 79, player_text, 0x1E, 0, crate::render_state::SCREEN_WIDTH);
+                    render_state.show_page();
                     
                     // 在绘制完成后设置调色板
                     if self.show_player_counter == MAX_PAGE as i32 + 2 {
-                        vga.unlock_pal();
-                        vga.palette_init(mpal256::mpal256_palette());
+                        render_state.unlock_pal();
+                         render_state.palette_init(mpal256::mpal256_palette());
                     }
                 }
                 
                 // 显示阶段 (counter=MAX_PAGE+3 to MAX_PAGE+102)
                 // Pascal: for i := 1 to 100 do ShowPage
                 if self.show_player_counter > (MAX_PAGE as i32 + 2) && self.show_player_counter <= (MAX_PAGE as i32 + 102) {
-                    vga.show_page();
+                    render_state.show_page();
                 }
                 
                 // 结束阶段 (counter > MAX_PAGE+102)
                 if self.show_player_counter > MAX_PAGE as i32 + 102 {
                     // ClearPalette; ClearVGAMem
-                    vga.palette_clear();
-                    vga.clear_vga_mem();
+                     render_state.palette_clear();
+                    render_state.clear_vga_mem();
                     
                     // 闪屏结束，进入游戏
                     self.main_phase = MainPhase::Playing;
@@ -378,7 +378,7 @@ eprintln!("size StarBuffer = {}", std::mem::size_of::<crate::buffers::StarBuffer
             MainPhase::Playing => {
                 // 游戏状态机更新 - 使用 GameContext 简化参数传递
                 let mut ctx = GameContext::new(
-                    vga,
+                    render_state,
                     &mut self.txt,
                     &mut self.buffers,
                     &mut self.players,

@@ -22,7 +22,7 @@ use crate::{
     tmpobj::TmpObjManager,
     txt::{FontStyle, Txt},
     utils::random_i32,
-    vga256::{MAX_PAGE, SCREEN_WIDTH, VGA, YBASE},
+    render_state::{MAX_PAGE, SCREEN_WIDTH, RenderState, YBASE},
 };
 
 /// 游戏阶段状态机
@@ -31,7 +31,7 @@ pub enum PlayPhase {
     /// 未初始化
     NotStarted,
     /// 初始化VGA和调色板
-    InitVga,
+    InitRenderState,
     /// 构建关卡（BuildLevel）- 首次加载
     BuildLevel,
     /// 重建关卡 - 管道切换后使用当前buffers中的数据
@@ -216,16 +216,16 @@ impl Play {
         self.text_status = false;
         
         // 设置初始阶段
-        self.phase = PlayPhase::InitVga;
+        self.phase = PlayPhase::InitRenderState;
     }
     
     /// 每帧更新（由mario.rs的统一事件循环调用）
     /// 使用 GameContext 封装所有子系统引用，简化调用
     pub fn frame_update(&mut self, ctx: &mut GameContext) -> crate::mario::PlayResult {
         // 解构 GameContext 获取各子系统引用
-        // 注意：palette 现在统一使用 vga.palette，不再单独传递
+        // 注意：palette 现在统一使用  render_state.palette，不再单独传递
         self.frame_update_inner(
-            ctx.vga,
+            ctx.render_state,
             ctx.txt,
             ctx.music,
             ctx.buffers,
@@ -247,11 +247,11 @@ impl Play {
     }
     
     /// 内部实现：保持原有参数签名以最小化代码改动
-    /// 注意：palette 现在统一使用 vga.palette，不再作为独立参数
+    /// 注意：palette 现在统一使用  render_state.palette，不再作为独立参数
     #[allow(clippy::too_many_arguments)]
     fn frame_update_inner(
         &mut self,
-        vga: &mut VGA,
+        render_state: &mut RenderState,
         txt: &mut Txt,
         music: &mut MusicPlayer,
         buffers: &mut Buffers,
@@ -299,8 +299,8 @@ impl Play {
                 // ESC键刚被按下，启动渐隐后退出
                 self.esc_key_was_pressed = true;
                 buffers.quit_game = true;
-                // 启动非阻塞渐隐（vga.palette已经是当前显示的调色板）
-                vga.palette.start_fade_down_steps(64);
+                // 启动非阻塞渐隐（ render_state.palette已经是当前显示的调色板）
+                 render_state.palette.start_fade_down_steps(64);
                 self.phase = PlayPhase::FadingDownForQuit;
                 // 不要return，让状态机处理
             }
@@ -316,11 +316,11 @@ impl Play {
         // 状态机
         match self.phase {
             PlayPhase::NotStarted => {
-                self.phase = PlayPhase::InitVga;
+                self.phase = PlayPhase::InitRenderState;
                 PlayResult::Continue
             }
             
-            PlayPhase::InitVga => {
+            PlayPhase::InitRenderState => {
                 
                 // 对应Pascal play_world初始化：重置管道状态
                 // 确保新关卡开始时不会误触发管道处理
@@ -328,18 +328,18 @@ impl Play {
                 players.pipe_code = [b' ', b' '];
                 
                 // 初始化VGA
-                vga.set_y_offset(YBASE);
-                vga.set_y_start(0x12);
-                vga.set_y_end(0x7D);
-                vga.clear_palette();
-                vga.lock_pal();
-                vga.clear_vga_mem();
+                render_state.set_y_offset(YBASE);
+                render_state.set_y_start(0x12);
+                render_state.set_y_end(0x7D);
+                render_state.clear_palette();
+                render_state.lock_pal();
+                render_state.clear_vga_mem();
                 
                 // 锁定调色板，防止渲染初始帧时写入VGA导致闪烁
-                vga.lock_pal();
+                render_state.lock_pal();
                 
                 // 初始化调色板
-                vga.palette_init(mpal256::mpal256_palette());
+                 render_state.palette_init(mpal256::mpal256_palette());
                 
                 // 根据关卡索引加载对应的关卡数据
                 // Pascal关卡顺序（严格对应MARIO.PAS line 708-720）:
@@ -436,7 +436,7 @@ impl Play {
                 buffers.x_view = 0;
                 buffers.y_view = 0;
                 buffers.last_x_view = [0; MAX_PAGE as usize + 1];
-                vga.set_view(buffers.x_view, buffers.y_view);
+                render_state.set_view(buffers.x_view, buffers.y_view);
                 
                 self.phase = PlayPhase::BuildLevel;
                 PlayResult::Continue
@@ -463,9 +463,9 @@ impl Play {
                 }
                 
                 figures.build_world(&mut buffers.world_map, current_opt, sprites);
-                // BuildWorld 会重着色/转换草地等，会修改 sprites 内容
+                // BuildWorld 会重着色/转换草地等，运行时精灵存入figures
                 // GPU 图集必须同步更新，否则地面/砖块/草颜色与 Oldsrc 不一致
-                *atlas = sprites.build_atlas();
+                *atlas = sprites.build_atlas(figures);
                 
                 self.phase = PlayPhase::Restart;
                 PlayResult::Continue
@@ -475,8 +475,8 @@ impl Play {
                 // 管道切换后使用当前buffers中的数据重建关卡
                 
                 // 锁定调色板防止渲染初始帧时闪烁
-                vga.clear_palette();
-                vga.lock_pal();
+                render_state.clear_palette();
+                render_state.lock_pal();
                 
                 // 使用当前buffers.options（已被swap交换），保存快照后使用引用
                 self.current_opt = Some(buffers.options.clone());
@@ -497,7 +497,7 @@ impl Play {
                 }
                 
                 figures.build_world(&mut buffers.world_map, current_opt, sprites);
-                *atlas = sprites.build_atlas();
+                *atlas = sprites.build_atlas(figures);
                 
                 self.phase = PlayPhase::Restart;
                 PlayResult::Continue
@@ -555,21 +555,21 @@ impl Play {
                 
                 // 重置管道重启标志
                 self.pipe_restart = false;
-                vga.set_view(buffers.x_view, buffers.y_view);
+                render_state.set_view(buffers.x_view, buffers.y_view);
                 
                 // 对应 Pascal PLAY.PAS Restart 循环开始部分
-                vga.reset_stack();
+                render_state.reset_stack();
                 self.text_status = false;
                 status_mgr.init_status();
                 
                 blocks.init_blocks();
                 tmpobj.init_temp_obj(&current_opt, sprites, figures);
-                glitters.clear_glitter(vga, buffers);
+                glitters.clear_glitter(render_state, buffers);
                 enemies.clear_enemies();
                 
                 // 锁定调色板，防止渲染初始帧时闪烁
-                vga.clear_palette();
-                vga.lock_pal();
+                render_state.clear_palette();
+                render_state.lock_pal();
                 
                 buffers.game_done = false;
                 buffers.passed = false;
@@ -587,7 +587,7 @@ impl Play {
                     enemies.start_enemies(j, direction, buffers, music, &current_opt);
                 }
                 
-                vga.set_y_offset(YBASE);
+                render_state.set_y_offset(YBASE);
                 
                 // 初始化renderer
                 self.renderer = Renderer::new();
@@ -606,10 +606,10 @@ impl Play {
                 // 关键：在同一阶段内渲染所有页面，避免闪烁
                 // 对应 Pascal PLAY.PAS 中的 for page := 0 to MaxPage do
                 for page in 0..=MAX_PAGE {
-                    vga.page = page;
+                    render_state.page = page;
                     
                     let mut ctx = RenderContext {
-                        vga, buffers, backgr, figures, sprites, atlas: &*atlas, blocks,
+                        render_state, buffers, backgr, figures, sprites, atlas: &*atlas, blocks,
                         enemies, players, tmpobj, stars, glitters,
                         status: status_mgr, txt,
                     };
@@ -624,41 +624,41 @@ impl Play {
                 self.waiting = false;
                 
                 // 对应 Pascal PLAY.PAS 第719行：重置调色板到默认状态
-                vga.palette.new_palette(mpal256::mpal256_palette());
+                 render_state.palette.new_palette(mpal256::mpal256_palette());
                 
                 // 获取当前选项用于后续操作
                 let current_opt = self.get_current_opt(buffers);
                 
                 // 对应 Pascal PLAY.PAS 第720-723行：瀑布动画初始化（100次blink）
                 for _ in 1..=100 {
-                    vga.palette_blink_wrapper(&current_opt);
+                     render_state.palette_blink_wrapper(&current_opt);
                 }
                 
                 // 设置调色板（天空/远景/草地）
                 // 使用临时变量避免双重可变借用
                 {
-                    let mut pal = std::mem::take(&mut vga.palette);
+                    let mut pal = std::mem::take(&mut  render_state.palette);
                     figures.set_sky_palette(&mut pal, &current_opt);
-                    vga.palette = pal;
+                     render_state.palette = pal;
                 }
                 {
-                    let mut pal = std::mem::take(&mut vga.palette);
-                    backgr.draw_pal_backgr(&mut pal, vga, Some(&current_opt));
-                    vga.palette = pal;
+                    let mut pal = std::mem::take(&mut  render_state.palette);
+                    backgr.draw_pal_backgr(&mut pal, render_state, Some(&current_opt));
+                     render_state.palette = pal;
                 }
-                vga.palette_init_grass(&current_opt);
+                 render_state.palette_init_grass(&current_opt);
                 
                 // 开始淡入
-                vga.unlock_pal();
-                vga.palette.start_fade_up_steps(64);
+                render_state.unlock_pal();
+                 render_state.palette.start_fade_up_steps(64);
                 
                 self.phase = PlayPhase::FadingUp;
                 PlayResult::Continue
             }
             
             PlayPhase::FadingUp => {
-                if vga.palette.is_fading() {
-                    vga.palette_fade_step();
+                if  render_state.palette.is_fading() {
+                     render_state.palette_fade_step();
                     // 关键修复：淡入期间继续更新出管道动画
                     // 对应Pascal：fade_up是同步的，但Rust是异步的，需要在淡入期间更新动画
                     if buffers.demo != 0 {
@@ -670,13 +670,13 @@ impl Play {
                     let current_opt = self.get_current_opt(buffers);
                     if current_opt.sky_type == 8 && current_opt.backgr_type == 4 {
                         // Pascal FIGURES.PAS InitBackGr case 8 (地下室深棕色砖块):
-                        vga.palette_out(0xFD, 17, 10, 10);  // 深红棕色
-                        vga.palette_out(0xFE, 11,  5,  5);  // 暗红棕色
-                        vga.palette_out(0xFF, 20, 14, 14);  // 中红棕色
+                         render_state.palette_out(0xFD, 17, 10, 10);  // 深红棕色
+                         render_state.palette_out(0xFE, 11,  5,  5);  // 暗红棕色
+                         render_state.palette_out(0xFF, 20, 14, 14);  // 中红棕色
                         {
-                            let mut pal = std::mem::take(&mut vga.palette);
-                            backgr.brick_palette(0, &mut pal, vga);
-                            vga.palette = pal;
+                            let mut pal = std::mem::take(&mut  render_state.palette);
+                            backgr.brick_palette(0, &mut pal, render_state);
+                             render_state.palette = pal;
                         }
                     }
                     
@@ -692,10 +692,10 @@ impl Play {
             PlayPhase::ResumeFromPause => {
                 // 对所有页面重绘（类似RenderInitFrames但不重置游戏状态）
                 for page in 0..=MAX_PAGE {
-                    vga.page = page;
+                    render_state.page = page;
                     
                     let mut ctx = RenderContext {
-                        vga, buffers, backgr, figures, sprites, atlas: &*atlas, blocks,
+                        render_state, buffers, backgr, figures, sprites, atlas: &*atlas, blocks,
                         enemies, players, tmpobj, stars, glitters,
                         status: status_mgr, txt,
                     };
@@ -711,24 +711,24 @@ impl Play {
             
             PlayPhase::GameLoop => {
                 self.game_loop_tick(
-                    vga, txt, music, buffers, players, enemies, backgr, figures,
+                    render_state, txt, music, buffers, players, enemies, backgr, figures,
                     stars, blocks, status_mgr, glitters, tmpobj, sprites, &*atlas,
                     keyboard, joystick, cur_player,
                 )
             }
             
             PlayPhase::Paused => {
-                self.pause_tick(vga, txt, music, buffers, players, enemies, tmpobj, keyboard)
+                self.pause_tick(render_state, txt, music, buffers, players, enemies, tmpobj, keyboard)
             }
             
             // 管道传送渐隐中
             PlayPhase::FadingDownForPipe => {
-                if vga.palette.is_fading() {
-                    vga.palette_fade_step();
+                if  render_state.palette.is_fading() {
+                     render_state.palette_fade_step();
                     PlayResult::Continue
                 } else {
                     // 渐隐完成，执行管道传送逻辑
-                    self.execute_pipe_transition(vga, players, buffers, enemies, cur_player);
+                    self.execute_pipe_transition(render_state, players, buffers, enemies, cur_player);
                     PlayResult::Continue
                 }
             }
@@ -742,8 +742,8 @@ impl Play {
             
             // 关卡完成渐隐中
             PlayPhase::FadingDownForComplete => {
-                if vga.palette.is_fading() {
-                    vga.palette_fade_step();
+                if  render_state.palette.is_fading() {
+                     render_state.palette_fade_step();
                     PlayResult::Continue
                 } else {
                     // 渐隐完成，返回关卡完成
@@ -758,8 +758,8 @@ impl Play {
             
             // 玩家死亡渐隐中
             PlayPhase::FadingDownForDeath => {
-                if vga.palette.is_fading() {
-                    vga.palette_fade_step();
+                if  render_state.palette.is_fading() {
+                     render_state.palette_fade_step();
                     PlayResult::Continue
                 } else {
                     // 渐隐完成，返回玩家死亡
@@ -774,8 +774,8 @@ impl Play {
             
             // 游戏结束渐隐中
             PlayPhase::FadingDownForGameOver => {
-                if vga.palette.is_fading() {
-                    vga.palette_fade_step();
+                if  render_state.palette.is_fading() {
+                     render_state.palette_fade_step();
                     PlayResult::Continue
                 } else {
                     // 渐隐完成，返回游戏结束
@@ -790,8 +790,8 @@ impl Play {
             
             // 退出游戏渐隐中
             PlayPhase::FadingDownForQuit => {
-                if vga.palette.is_fading() {
-                    vga.palette_fade_step();
+                if  render_state.palette.is_fading() {
+                     render_state.palette_fade_step();
                     PlayResult::Continue
                 } else {
                     // 渐隐完成，返回退出
@@ -805,7 +805,7 @@ impl Play {
     #[allow(clippy::too_many_arguments)]
     fn game_loop_tick(
         &mut self,
-        vga: &mut VGA,
+        render_state: &mut RenderState,
         txt: &mut Txt,
         music: &mut MusicPlayer,
         buffers: &mut Buffers,
@@ -882,8 +882,8 @@ impl Play {
                 players.key_left_shift = keyboard.kb_left_shift();
                 players.key_right_shift = keyboard.kb_right_shift();
                 
-                enemies.move_enemies(vga, music, buffers, glitters, tmpobj);
-                players.move_player(buffers, enemies, tmpobj, blocks, vga, glitters, music, &current_opt);
+                enemies.move_enemies(render_state, music, buffers, glitters, tmpobj);
+                players.move_player(buffers, enemies, tmpobj, blocks, render_state, glitters, music, &current_opt);
             } else {
                 players.do_demo(buffers);
             }
@@ -900,9 +900,9 @@ impl Play {
                 
                 if !self.show_score && (buffers.text_counter >= 50 && buffers.text_counter <= 50 + MAX_PAGE) {
                     txt.set_font(0, FontStyle::BOLD | FontStyle::SHADOW);
-                    txt.center_text(vga, 20, &buffers.player_name[cur_player as usize], 0x1E, buffers.x_view, SCREEN_WIDTH);
+                    txt.center_text(render_state, 20, &buffers.player_name[cur_player as usize], 0x1E, buffers.x_view, SCREEN_WIDTH);
                     txt.set_font(1, FontStyle::BOLD | FontStyle::SHADOW);
-                    txt.center_text(vga, 40, "STAGE CLEAR!", 31, buffers.x_view, SCREEN_WIDTH);
+                    txt.center_text(render_state, 40, "STAGE CLEAR!", 31, buffers.x_view, SCREEN_WIDTH);
                     if buffers.text_counter == 50 + MAX_PAGE {
                         self.show_score = true;
                     }
@@ -930,7 +930,7 @@ impl Play {
                 if buffers.text_counter > 250 {
                     self.waiting = false;
                     // 启动非阻塞渐隐（对应Pascal FadeDown(64)）
-                    vga.palette.start_fade_down_steps(64);
+                     render_state.palette.start_fade_down_steps(64);
                     self.phase = PlayPhase::FadingDownForComplete;
                     return PlayResult::Continue;
                 }
@@ -938,14 +938,14 @@ impl Play {
                 // 当前玩家生命为0，显示 GAME OVER 后切换到另一个玩家
                 if buffers.text_counter >= 100 && buffers.text_counter <= 100 + MAX_PAGE {
                     txt.set_font(0, FontStyle::BOLD | FontStyle::SHADOW);
-                    txt.center_text(vga, 20, &buffers.player_name[cur_player as usize], 0x1E, buffers.x_view, SCREEN_WIDTH);
+                    txt.center_text(render_state, 20, &buffers.player_name[cur_player as usize], 0x1E, buffers.x_view, SCREEN_WIDTH);
                     txt.set_font(1, FontStyle::BOLD | FontStyle::SHADOW);
-                    txt.center_text(vga, 40, "GAME OVER", 31, buffers.x_view, SCREEN_WIDTH);
+                    txt.center_text(render_state, 40, "GAME OVER", 31, buffers.x_view, SCREEN_WIDTH);
                     self.show_score = true;
                 }
                 if buffers.text_counter > 350 {
                     // 启动非阻塞渐隐（对应Pascal FadeDown(64)）
-                    vga.palette.start_fade_down_steps(64);
+                     render_state.palette.start_fade_down_steps(64);
                     self.phase = PlayPhase::FadingDownForDeath;
                     return PlayResult::Continue;
                 }
@@ -962,7 +962,7 @@ impl Play {
             // P键刚被按下，进入暂停状态
             self.p_key_was_pressed = true;
             self.start_pause(
-                vga,
+                render_state,
                 txt,
                 music,
                 buffers,
@@ -1005,11 +1005,11 @@ impl Play {
         
         // 渲染（current_opt 已是值类型，可直接使用可变引用）
         let mut current_opt_mut = current_opt;
-        self.move_screen(backgr, players, enemies, vga, buffers, music, &mut current_opt_mut, figures, sprites);
+        self.move_screen(backgr, players, enemies, render_state, buffers, music, &mut current_opt_mut, figures, sprites);
         
         {
             let mut ctx = RenderContext {
-                vga, buffers, backgr, figures, sprites, atlas, blocks,
+                render_state, buffers, backgr, figures, sprites, atlas, blocks,
                 enemies, players, tmpobj, stars, glitters,
                 status: status_mgr, txt,
             };
@@ -1019,23 +1019,23 @@ impl Play {
         }
         
         if self.show_score {
-            self.show_total_back(buffers, vga, txt, music);
+            self.show_total_back(buffers, render_state, txt, music);
         }
         
         if self.show_retrace {
-            vga.set_palette(0, 0, 0, 0);
+            render_state.set_palette(0, 0, 0, 0);
         }
-        vga.show_page();
+        render_state.show_page();
         if self.show_retrace {
-            vga.set_palette(0, 63, 63, 63);
+            render_state.set_palette(0, 63, 63, 63);
         }
         
         {
-            let mut pal = std::mem::take(&mut vga.palette);
-            backgr.draw_pal_backgr(&mut pal, vga, Some(&current_opt_mut));
-            vga.palette = pal;
+            let mut pal = std::mem::take(&mut  render_state.palette);
+            backgr.draw_pal_backgr(&mut pal, render_state, Some(&current_opt_mut));
+             render_state.palette = pal;
         }
-        vga.palette_blink_wrapper(&current_opt_mut);
+         render_state.palette_blink_wrapper(&current_opt_mut);
         music.tick();
         music.play_music();
         
@@ -1045,10 +1045,10 @@ impl Play {
         // 不能检查 demo==0，否则会阻止管道处理！
         if players.in_pipe && !buffers.game_done && !self.waiting {
             enemies.stop_enemies(buffers);
-            glitters.clear_glitter(vga, buffers);
+            glitters.clear_glitter(render_state, buffers);
             
             // 启动非阻塞渐隐（对应Pascal FadeDown(64)）
-            vga.palette.start_fade_down_steps(64);
+             render_state.palette.start_fade_down_steps(64);
             self.phase = PlayPhase::FadingDownForPipe;
             return PlayResult::Continue;
         }
@@ -1083,23 +1083,23 @@ impl Play {
         &mut self,
         players: &mut Players,
         enemies: &mut Enemies,
-        vga: &mut VGA,
+        render_state: &mut RenderState,
         buffers: &mut Buffers,
         music: &mut MusicPlayer,
         options: &mut WorldOptions,
     ) -> i32 {
-        let page = vga.current_page() as usize;
+        let page = render_state.current_page() as usize;
         let scroll = buffers.x_view - buffers.last_x_view[page];
 
         // 1. 设置视口（带地震效果）
         if !players.earthquake {
-            vga.set_view(buffers.x_view, buffers.y_view);
+            render_state.set_view(buffers.x_view, buffers.y_view);
         } else {
             players.earthquake_counter += 1;
             if players.earthquake_counter > 0 {
                 players.earthquake = false;
             }
-            vga.set_view(
+            render_state.set_view(
                 buffers.x_view,
                 buffers.y_view + random_i32(2) - random_i32(2),
             );
@@ -1138,7 +1138,7 @@ impl Play {
         _backgr: &mut BackGr,
         players: &mut Players,
         enemies: &mut Enemies,
-        vga: &mut VGA,
+        render_state: &mut RenderState,
         buffers: &mut Buffers,
         music: &mut MusicPlayer,
         options: &mut WorldOptions,
@@ -1146,23 +1146,23 @@ impl Play {
         _sprites: &mut SpriteDataManager,
     ) {
         // 只执行逻辑部分，渲染由主循环中的 renderer.render_game_frame 统一处理
-        let _scroll = self.move_screen_logic(players, enemies, vga, buffers, music, options);
+        let _scroll = self.move_screen_logic(players, enemies, render_state, buffers, music, options);
     }
 
     /// 执行管道传送逻辑（渐隐完成后调用）
     /// 对应Pascal管道处理中FadeDown(64)之后的代码
     fn execute_pipe_transition(
         &mut self,
-        vga: &mut VGA,
+        render_state: &mut RenderState,
         players: &mut Players,
         buffers: &mut Buffers,
         enemies: &mut Enemies,
         cur_player: u8,
     ) {
         // 对应Pascal: ClearPalette; LockPal; ClearVGAMem;
-        vga.clear_palette();
-        vga.lock_pal();
-        vga.clear_vga_mem();
+        render_state.clear_palette();
+        render_state.lock_pal();
+        render_state.clear_vga_mem();
         
         match players.pipe_code[0] {
             // 0xE0: 同世界传送
@@ -1192,8 +1192,8 @@ impl Play {
         let init_y = (players.map_y - 1) * H;
         players.init_player(init_x, init_y, cur_player, buffers, enemies);
         
-        vga.set_view(buffers.x_view, buffers.y_view);
-        vga.set_y_offset(YBASE);
+        render_state.set_view(buffers.x_view, buffers.y_view);
+        render_state.set_y_offset(YBASE);
         
         for i in 0..=MAX_PAGE {
             buffers.last_x_view[i as usize] = buffers.x_view;
@@ -1279,7 +1279,7 @@ impl Play {
         }
     }
 
-    pub fn write_total_score(&self, buffers: &Buffers, vga: &mut VGA, txt: &mut Txt) {
+    pub fn write_total_score(&self, buffers: &Buffers, render_state: &mut RenderState, txt: &mut Txt) {
         txt.set_font(0, FontStyle::BOLD | FontStyle::SHADOW); // Bold + Shadow
         let score_str = format!("{:11}", buffers.data.score[buffers.player]);
         let mut s = String::new();
@@ -1291,38 +1291,37 @@ impl Play {
             }
         }
         let text = format!("TOTAL SCORE:{}", s);
-        txt.center_text(vga, 120, &text, 31, buffers.x_view, SCREEN_WIDTH);
+        txt.center_text(render_state, 120, &text, 31, buffers.x_view, SCREEN_WIDTH);
     }
 
     pub fn show_total_back(
         &mut self,
         buffers: &Buffers,
-        vga: &mut VGA,
+        render_state: &mut RenderState,
         txt: &mut Txt,
         music_player: &MusicPlayer,
     ) {
         if buffers.passed && self.counting_score {
             music_player.beep(4 * 880);
         }
-        let _ = vga;
         if buffers.passed && self.counting_score {
             music_player.beep(2 * 880);
         }
-        self.write_total_score(buffers, vga, txt);
+        self.write_total_score(buffers, render_state, txt);
         if buffers.passed && self.counting_score {
             music_player.beep(0);
         }
     }
 
-    pub fn hide_total_back(&mut self, vga: &mut VGA) {
-        let _ = vga;
+    pub fn hide_total_back(&mut self, render_state: &mut RenderState) {
+        let _ = render_state;
         // GPU渲染每帧完全重绘，不需要背景恢复
     }
 
     /// 开始暂停（初始化暂停状态）
     fn start_pause(
         &mut self,
-        vga: &mut VGA,
+        render_state: &mut RenderState,
         txt: &mut Txt,
         music: &mut MusicPlayer,
         buffers: &mut Buffers,
@@ -1347,13 +1346,13 @@ impl Play {
         // 暂停音乐
         music.pause_music();
         
-        // 淡出 - 使用vga.palette_fade_down_wrapper确保使用当前vga调色板
-        // 注意：不能用palette.fade_down，因为mario.palettes和vga.palette可能不同步
-        // （blink_palette通过vga.palette_blink_wrapper修改vga.palette，不更新mario.palettes）
-        vga.palette_fade_down_wrapper(8);
+        // 淡出 - 使用 render_state.palette_fade_down_wrapper确保使用当前vga调色板
+        // 注意：不能用palette.fade_down，因为mario.palettes和 render_state.palette可能不同步
+        // （blink_palette通过 render_state.palette_blink_wrapper修改 render_state.palette，不更新mario.palettes）
+         render_state.palette_fade_down_wrapper(8);
         
         // 交换页面 - 关键：在另一页上绘制暂停界面，原始游戏页面保持不变
-        vga.swap_pages();
+        render_state.swap_pages();
         
         // GPU 全量重绘：对齐 Oldsrc 的 hide_* 行为
         // 在暂停页先渲染一次“无玩家/无状态栏/无对象”的世界帧，避免暂停画面残留 Mario/状态栏
@@ -1369,7 +1368,7 @@ impl Play {
 
         {
             let mut ctx = RenderContext {
-                vga,
+                render_state,
                 buffers,
                 backgr,
                 figures,
@@ -1394,58 +1393,58 @@ impl Play {
         
         // 设置调色板 - 只设置0x0F为白色，与Pascal一致
         // 注意：不要设置0x07-0x0B等，因为它们被河流/瀑布动画使用（颜色索引7-11）
-        // 直接调用vga.set_palette，因为fade_down已经使用vga.palette完成
-        vga.set_palette(0x0F, 63, 63, 63); // 白色
+        // 直接调用render_state.set_palette，因为fade_down已经使用 render_state.palette完成
+        render_state.set_palette(0x0F, 63, 63, 63); // 白色
         
         // 使用8x8字体，带阴影
         txt.set_font(0, FontStyle::BOLD | FontStyle::SHADOW);
         
-        // 显示PAUSE标题
-        txt.center_text(vga, 8, "PAUSE", 0x0F, buffers.x_view, SCREEN_WIDTH);
+        // 显示PAUSE标题 - 使用UI层渲染确保在所有精灵之上
+        txt.center_text_ui(render_state, 8, "PAUSE", 0x0F, buffers.x_view, SCREEN_WIDTH);
         
         // 显示作弊码提示 - 使用阴影效果，只使用0x0F（白色）
         txt.set_font(0, FontStyle::SHADOW);
         
-        // 左列 - 游戏效果类作弊码
+        // 左列 - 游戏效果类作弊码（使用UI层渲染）
         let left_x = buffers.x_view + 20;
         let mut y = 24;
         
-        txt.write_text_world(vga, left_x, y, "Press TAB for cheats:", 0x0F);
+        txt.write_text_world_ui(render_state, left_x, y, "Press TAB for cheats:", 0x0F);
         y += 12;
         
-        txt.write_text_world(vga, left_x, y, "03E8 = +1 Life", 0x0F);
+        txt.write_text_world_ui(render_state, left_x, y, "03E8 = +1 Life", 0x0F);
         y += 10;
-        txt.write_text_world(vga, left_x, y, "B172 = 10000 Lives", 0x0F);
+        txt.write_text_world_ui(render_state, left_x, y, "B172 = 10000 Lives", 0x0F);
         y += 10;
-        txt.write_text_world(vga, left_x, y, "9C32 = Star", 0x0F);
+        txt.write_text_world_ui(render_state, left_x, y, "9C32 = Star", 0x0F);
         y += 10;
-        txt.write_text_world(vga, left_x, y, "F1F2 = Mushroom", 0x0F);
+        txt.write_text_world_ui(render_state, left_x, y, "F1F2 = Mushroom", 0x0F);
         y += 10;
-        txt.write_text_world(vga, left_x, y, "FFB5 = Fire Flower", 0x0F);
+        txt.write_text_world_ui(render_state, left_x, y, "FFB5 = Fire Flower", 0x0F);
         y += 10;
-        txt.write_text_world(vga, left_x, y, "2305 = Complete Level", 0x0F);
+        txt.write_text_world_ui(render_state, left_x, y, "2305 = Complete Level", 0x0F);
         y += 10;
-        txt.write_text_world(vga, left_x, y, "D235 = Turbo Mode", 0x0F);
+        txt.write_text_world_ui(render_state, left_x, y, "D235 = Turbo Mode", 0x0F);
         y += 10;
-        txt.write_text_world(vga, left_x, y, "1UP  = 1UP Mushroom", 0x0F);
+        txt.write_text_world_ui(render_state, left_x, y, "1UP  = 1UP Mushroom", 0x0F);
         
-        // 右列 - 演示和调试类作弊码
+        // 右列 - 演示和调试类作弊码（使用UI层渲染）
         let right_x = buffers.x_view + 175;
         y = 36;
         
-        txt.write_text_world(vga, right_x, y, "76DD = Record Demo", 0x0F);
+        txt.write_text_world_ui(render_state, right_x, y, "76DD = Record Demo", 0x0F);
         y += 10;
-        txt.write_text_world(vga, right_x, y, "C7B4 = Play Demo", 0x0F);
+        txt.write_text_world_ui(render_state, right_x, y, "C7B4 = Play Demo", 0x0F);
         y += 10;
-        txt.write_text_world(vga, right_x, y, "208D = Save Demo", 0x0F);
+        txt.write_text_world_ui(render_state, right_x, y, "208D = Save Demo", 0x0F);
         y += 10;
-        txt.write_text_world(vga, right_x, y, "TEST = Debug Retrace", 0x0F);
+        txt.write_text_world_ui(render_state, right_x, y, "TEST = Debug Retrace", 0x0F);
         y += 10;
-        txt.write_text_world(vga, right_x, y, "CREDITS = Author", 0x0F);
+        txt.write_text_world_ui(render_state, right_x, y, "CREDITS = Author", 0x0F);
         y += 14;
         
         // 底部提示
-        txt.write_text_world(vga, right_x, y, "Any key = Resume", 0x0F);
+        txt.write_text_world_ui(render_state, right_x, y, "Any key = Resume", 0x0F);
         
         // 进入暂停状态
         self.pause_state = PauseState::WaitingPRelease;
@@ -1456,7 +1455,7 @@ impl Play {
     #[allow(clippy::too_many_arguments)]
     fn pause_tick(
         &mut self,
-        vga: &mut VGA,
+        render_state: &mut RenderState,
         txt: &mut Txt,
         music: &mut MusicPlayer,
         buffers: &mut Buffers,
@@ -1506,8 +1505,9 @@ impl Play {
                     if current_scan_code == 15 && !self.pause_tab_mode {
                         self.pause_tab_mode = true;
                         // 在底部显示输入提示（使用白色0x0F，因为其他颜色被fade_down变暗了）
+                        // 使用UI层确保文字不被游戏精灵遮挡
                         txt.set_font(0, FontStyle::BOLD | FontStyle::SHADOW);
-                        txt.center_text(vga, 130, "CHEAT MODE - Enter code:", 0x0F, buffers.x_view, SCREEN_WIDTH);
+                        txt.center_text_ui(render_state, 130, "CHEAT MODE - Enter code:", 0x0F, buffers.x_view, SCREEN_WIDTH);
                     } else if self.pause_tab_mode {
                         // 作弊模式：处理按键输入
                         let ascii_char = keyboard.scan_code_to_ascii(current_scan_code);
@@ -1516,21 +1516,21 @@ impl Play {
                             // 有效的字母/数字键，添加到作弊码
                             self.pause_cheat.push(ch);
                             
-                            // 清除旧的回显区域（用黑色矩形覆盖）
+                            // 清除旧的回显区域（用黑色矩形覆盖）- 使用UI层确保在精灵之上
                             let clear_x = buffers.x_view + 100;
                             let clear_y = 145;
                             let clear_w = 120;
                             let clear_h = 10;
-                            vga.fill_world_gpu(clear_x, clear_y, clear_w, clear_h, 0);
+                            render_state.fill_ui_world_gpu(clear_x, clear_y, clear_w, clear_h, 0);
                             
-                            // 在底部显示当前输入的作弊码
+                            // 在底部显示当前输入的作弊码 - 使用UI层确保在精灵之上
                             txt.set_font(0, FontStyle::BOLD | FontStyle::SHADOW);
                             let display_text = format!("CODE: {}", self.pause_cheat);
-                            txt.center_text(vga, 145, &display_text, 0x0F, buffers.x_view, SCREEN_WIDTH);
+                            txt.center_text_ui(render_state, 145, &display_text, 0x0F, buffers.x_view, SCREEN_WIDTH);
                             
                             // 检查作弊码
                             end_pause = self.check_cheat_codes(
-                                vga, txt, buffers, players, enemies, tmpobj, keyboard, music,
+                                render_state, txt, buffers, players, enemies, tmpobj, keyboard, music,
                             );
                         } else {
                             // 非字母数字键（如ESC、Enter、空格等），退出作弊模式
@@ -1550,11 +1550,11 @@ impl Play {
             
             PauseState::Exiting => {
                 // 切换回原始游戏页面
-                vga.swap_pages();
+                render_state.swap_pages();
                 // GPU渲染每帧完全重绘，不需要背景恢复
                 
                 // 淡入恢复调色板（对应Pascal的FadeUp(8)）
-                vga.palette_fade_up_wrapper(8);
+                 render_state.palette_fade_up_wrapper(8);
                 
                 keyboard.reset();
                 keyboard.clear_key();
@@ -1573,7 +1573,7 @@ impl Play {
     #[allow(clippy::too_many_arguments)]
     fn check_cheat_codes(
         &mut self,
-        vga: &mut VGA,
+        render_state: &mut RenderState,
         txt: &mut Txt,
         buffers: &mut Buffers,
         players: &mut Players,
@@ -1710,36 +1710,36 @@ impl Play {
         
         // MONO - 黑白模式
         if cheat == "MONO" {
-            vga.palette.palette_effect = PE_BLACK_WHITE;
+             render_state.palette.palette_effect = PE_BLACK_WHITE;
             {
-                let mut pal = std::mem::take(&mut vga.palette);
+                let mut pal = std::mem::take(&mut  render_state.palette);
                 let p = pal.palette.clone();
-                pal.refresh_palette(&p, vga);
-                vga.palette = pal;
+                pal.refresh_palette(&p, render_state);
+                 render_state.palette = pal;
             }
             return true;
         }
         
         // EGAMODE - EGA 16色模式
         if cheat == "EGAMODE" {
-            vga.palette.palette_effect = PE_EGA_MODE;
+             render_state.palette.palette_effect = PE_EGA_MODE;
             {
-                let mut pal = std::mem::take(&mut vga.palette);
+                let mut pal = std::mem::take(&mut  render_state.palette);
                 let p = pal.palette.clone();
-                pal.refresh_palette(&p, vga);
-                vga.palette = pal;
+                pal.refresh_palette(&p, render_state);
+                 render_state.palette = pal;
             }
             return true;
         }
         
         // VGAMODE 或 COLOR - 恢复正常颜色模式
         if cheat == "VGAMODE" || cheat == "COLOR" {
-            vga.palette.palette_effect = PE_NO_EFFECT;
+             render_state.palette.palette_effect = PE_NO_EFFECT;
             {
-                let mut pal = std::mem::take(&mut vga.palette);
+                let mut pal = std::mem::take(&mut  render_state.palette);
                 let p = pal.palette.clone();
-                pal.refresh_palette(&p, vga);
-                vga.palette = pal;
+                pal.refresh_palette(&p, render_state);
+                 render_state.palette = pal;
             }
             return true;
         }
@@ -1755,7 +1755,7 @@ impl Play {
                 self.pause_text.push(decoded as char);
             }
             // GPU渲染每帧完全重绘，不需要背景保存/恢复
-            txt.center_text(vga, 85, &self.pause_text, 0x0F, buffers.x_view, SCREEN_WIDTH);
+            txt.center_text(render_state, 85, &self.pause_text, 0x0F, buffers.x_view, SCREEN_WIDTH);
             // 不立即退出，让用户看到信息
             return false;
         }

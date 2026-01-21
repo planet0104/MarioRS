@@ -3,7 +3,7 @@
 
 use crate::buffers::{H, MAX_WORLD_SIZE, NH, NV, W, WorldOptions};
 use crate::palettes::Palettes;
-use crate::vga256;
+use crate::render_state::RenderState;
 use crate::gpu::sprite_batch::{FillCommand, SpriteCommand};
 use crate::gpu::texture_atlas::SpriteUV;
 
@@ -184,30 +184,30 @@ impl BackGr {
 
     /// Rust严格模拟Pascal BrickPalette 逻辑
     /// i: 当前帧或砖块索引
-    pub fn brick_palette(&self, i: i32, palette: &mut Palettes, vga: &mut vga256::VGA) {
+    pub fn brick_palette(&self, i: i32, palette: &mut Palettes, render_state: &mut RenderState) {
         let i = i % 20;
         for j in 0..20 {
             if i == j {
-                palette.copy_palette(0xFE, 0xE0 + j as usize, vga);
+                palette.copy_palette(0xFE, 0xE0 + j as usize, render_state);
             } else if ((i + 2) % 20) == j {
-                palette.copy_palette(0xFF, 0xE0 + j as usize, vga);
+                palette.copy_palette(0xFF, 0xE0 + j as usize, render_state);
             } else {
-                palette.copy_palette(0xFD, 0xE0 + j as usize, vga);
+                palette.copy_palette(0xFD, 0xE0 + j as usize, render_state);
             }
         }
     }
 
     /// Rust严格模拟Pascal LargeBrickPalette 逻辑
     /// i: 当前帧或砖块索引
-    pub fn large_brick_palette(&self, i: i32, palette: &mut Palettes, vga: &mut vga256::VGA) {
+    pub fn large_brick_palette(&self, i: i32, palette: &mut Palettes, render_state: &mut RenderState) {
         let i = i % 32;
         for j in 0..32 {
             if i == j || ((i + 1) % 32) == j {
-                palette.copy_palette(0xD6, 0xE0 + j as usize, vga);
+                palette.copy_palette(0xD6, 0xE0 + j as usize, render_state);
             } else if ((i + 3) % 32) == j || ((i + 4) % 32) == j {
-                palette.copy_palette(0xD4, 0xE0 + j as usize, vga);
+                palette.copy_palette(0xD4, 0xE0 + j as usize, render_state);
             } else {
-                palette.copy_palette(0xD1, 0xE0 + j as usize, vga);
+                palette.copy_palette(0xD1, 0xE0 + j as usize, render_state);
             }
         }
     }
@@ -217,7 +217,7 @@ impl BackGr {
         &self,
         i: i32,
         palette: &mut Palettes,
-        vga: &mut vga256::VGA,
+        render_state: &mut RenderState,
         options: &WorldOptions,
     ) {
         const SHADOW_POS: i32 = 28;
@@ -235,8 +235,8 @@ impl BackGr {
             for l in j..=k {
                 let idx1 = 0xC0 + ((l + i) % 60) as usize;
                 let idx2 = 0xC0 + ((SHADOW_POS + i - l) % 60) as usize;
-                palette.out_palette(idx1, c1 + k as u8, c2 + k as u8, c3 + k as u8, vga);
-                palette.out_palette(idx2, c1 + k as u8, c2 + k as u8, c3 + k as u8, vga);
+                palette.out_palette(idx1, c1 + k as u8, c2 + k as u8, c3 + k as u8, render_state);
+                palette.out_palette(idx2, c1 + k as u8, c2 + k as u8, c3 + k as u8, render_state);
             }
             j = k;
             k += 1;
@@ -252,7 +252,7 @@ impl BackGr {
                 c3 -= 1;
             }
             let idx = 0xC0 + ((j + i) % 60) as usize;
-            palette.out_palette(idx, c1, c2, c3, vga);
+            palette.out_palette(idx, c1, c2, c3, render_state);
         }
         // 第二段 Base2
         base = options.backgr_color2;
@@ -262,21 +262,21 @@ impl BackGr {
         c3 /= 4;
         for j in (SHADOW_END + 1)..60 {
             let idx = 0xC0 + ((i + j) % 60) as usize;
-            palette.out_palette(idx, c1, c2, c3, vga);
+            palette.out_palette(idx, c1, c2, c3, render_state);
         }
     }
 
     /// Rust严格模拟Pascal WindowPalette 逻辑
     /// i: 当前帧或窗口索引
-    pub fn window_palette(&self, i: i32, palette: &mut Palettes, vga: &mut vga256::VGA) {
+    pub fn window_palette(&self, i: i32, palette: &mut Palettes, render_state: &mut RenderState) {
         let i = i % 32;
         for j in 0..6 {
             let idx = 0xE0 + ((i + j) % 32) as usize;
-            palette.copy_palette(1, idx, vga);
+            palette.copy_palette(1, idx, render_state);
         }
         for j in 6..32 {
             let idx = 0xE0 + ((i + j) % 32) as usize;
-            palette.copy_palette(16, idx, vga);
+            palette.copy_palette(16, idx, render_state);
         }
     }
 
@@ -284,7 +284,7 @@ impl BackGr {
     /// 调整背景砖块柱子窗口等的动态调色板
     ///
     /// palette: 调色板对象
-    /// vga: VGA 对象
+    /// vga: RenderState 对象
     /// options: 世界参数，仅柱子调色板需要
     ///
     /// 注意 地下场景 sky_type=8 时不更新 0xE0..0xFF 区域的动态调色板 防止闪烁
@@ -293,7 +293,7 @@ impl BackGr {
     pub fn draw_pal_backgr(
         &self,
         palette: &mut Palettes,
-        vga: &mut vga256::VGA,
+        render_state: &mut RenderState,
         options: Option<&WorldOptions>,
     ) {
         if let Some(opts) = options {
@@ -303,16 +303,16 @@ impl BackGr {
             }
         }
 
-        let i = ((vga.x_view as f32) / BRICK_SPEED as f32).round() as i32;
+        let i = ((render_state.x_view as f32) / BRICK_SPEED as f32).round() as i32;
         match self.background {
-            4 => self.brick_palette(i, palette, vga),
-            5 => self.large_brick_palette(i, palette, vga),
+            4 => self.brick_palette(i, palette, render_state),
+            5 => self.large_brick_palette(i, palette, render_state),
             6 => {
                 if let Some(opts) = options {
-                    self.pillar_palette(i, palette, vga, opts);
+                    self.pillar_palette(i, palette, render_state, opts);
                 }
             }
-            7 => self.window_palette(i, palette, vga),
+            7 => self.window_palette(i, palette, render_state),
             _ => {}
         }
     }
@@ -332,7 +332,7 @@ impl BackGr {
         let horizon = options.horizon as i32;
         let y_base = horizon - HEIGHT;
         let y_end = horizon - 1;
-        let screen_w = crate::vga256::SCREEN_WIDTH as i32;
+        let screen_w = crate::render_state::SCREEN_WIDTH as i32;
 
         // BackGrMap 是循环表，尾部 0 会在滚屏时被采样到
         let mut effective_len = self.backgr_map.len() as i32;
@@ -363,7 +363,7 @@ impl BackGr {
     /// GPU模式：收集 DrawBackGrMap 的背景装饰（允许指定高度表）
     pub fn collect_backgr_map_fills_from_map(&self, map: &[u8], y1: i32, y2: i32, shift: i32, c: u8) -> Vec<FillCommand> {
         let mut fills = Vec::new();
-        let screen_w = crate::vga256::SCREEN_WIDTH as i32;
+        let screen_w = crate::render_state::SCREEN_WIDTH as i32;
 
         let mut effective_len = map.len() as i32;
         while effective_len > 0 && map[(effective_len - 1) as usize] == 0 {
@@ -407,7 +407,7 @@ impl BackGr {
         sprites
     }
 
-    /// GPU模式：收集smooth_fill填充命令
+    /// GPU模式：收集smooth_fill填充命令（严格对齐 Oldsrc）
     pub fn collect_smooth_fills(
         &self,
         x: i32,
@@ -417,11 +417,21 @@ impl BackGr {
         options: &WorldOptions,
     ) -> Vec<FillCommand> {
         let mut fills = Vec::new();
-        let horizon = options.horizon as i32;
+        let horizon = options.horizon.saturating_sub(4) as i32;
         
         let mut cur_y = y;
-        let mut dl = 0xE0u8;
-        let mut dh = 0i32;
+        // 严格对齐 Oldsrc：根据起始 y 计算初始 dh 和 dl
+        let mut dh: i32 = ((cur_y % 6 + 6) % 6) as i32;
+        let mut dl: u8 = if cur_y >= horizon {
+            0xF0
+        } else {
+            let q = (cur_y / 6).max(0) as u8;
+            let mut v = 0xEFu8.wrapping_sub(q);
+            if v < 0xE0 {
+                v = 0xE0;
+            }
+            v
+        };
         
         for _ in 0..h {
             fills.push(FillCommand::new(x, cur_y, w, 1, dl));
@@ -471,7 +481,8 @@ impl BackGr {
     
     // ========== GPU直接渲染方法 ==========
     
-    /// GPU版smooth_fill - 直接向vga.sprite_batch添加填充命令
+    /// GPU版smooth_fill - 直接向render_state.sprite_batch添加填充命令
+    /// 严格对齐 Oldsrc BACKGR.PAS SmoothFill 的像素效果
     pub fn smooth_fill_gpu(
         &mut self,
         x: usize,
@@ -479,15 +490,30 @@ impl BackGr {
         w: usize,
         h: usize,
         options: &WorldOptions,
-        vga: &mut vga256::VGA,
+        render_state: &mut RenderState,
     ) {
-        let horizon = options.horizon as i32;
+        // 算法说明：按 6 行为一个周期生成渐变色
+        // cur_y >= horizon 时使用 0xF0，否则从 0xEF 开始随行数递减并下限到 0xE0
+        let horizon = options.horizon.saturating_sub(4) as i32;
         let mut cur_y = y as i32;
-        let mut dl = 0xE0u8;
-        let mut dh = 0i32;
+        
+        // 严格对齐 Oldsrc：根据起始 y 计算初始 dh
+        let mut dh: i32 = ((cur_y % 6 + 6) % 6) as i32;
+        
+        // 严格对齐 Oldsrc：根据起始 y 计算初始 dl
+        let mut dl: u8 = if cur_y >= horizon {
+            0xF0
+        } else {
+            let q = (cur_y / 6).max(0) as u8;
+            let mut v = 0xEFu8.wrapping_sub(q);
+            if v < 0xE0 {
+                v = 0xE0;
+            }
+            v
+        };
         
         for _ in 0..h {
-            vga.fill_world_gpu(x as i32, cur_y, w as i32, 1, dl);
+            render_state.fill_world_gpu(x as i32, cur_y, w as i32, 1, dl);
             
             cur_y += 1;
             if cur_y >= horizon {
@@ -504,31 +530,31 @@ impl BackGr {
     }
     
     /// GPU版draw_bricks - 平铺砖块纹理（使用填充颜色模拟）
-    pub fn draw_bricks_gpu(&self, x: i32, y: i32, w: i32, h: i32, vga: &mut vga256::VGA) {
+    pub fn draw_bricks_gpu(&self, x: i32, y: i32, w: i32, h: i32, render_state: &mut RenderState) {
         // 简化版本：使用填充色模拟砖块纹理
         let brick_color = 0x48u8; // 砖块基础色
-        vga.fill_world_gpu(x, y, w, h, brick_color);
+        render_state.fill_world_gpu(x, y, w, h, brick_color);
     }
     
     /// GPU版large_bricks - 大砖块填充
-    pub fn large_bricks_gpu(&self, x: i32, y: i32, w: i32, h: i32, vga: &mut vga256::VGA) {
+    pub fn large_bricks_gpu(&self, x: i32, y: i32, w: i32, h: i32, render_state: &mut RenderState) {
         // 渐变砖块效果
         for dy in 0..h {
             let color = 0xE0 + ((y + dy) & 0x1F) as u8;
-            vga.fill_world_gpu(x, y + dy, w, 1, color);
+            render_state.fill_world_gpu(x, y + dy, w, 1, color);
         }
     }
     
     /// GPU版pillar - 柱子装饰（使用精灵）
-    pub fn pillar_gpu(&self, x: i32, y: i32, _w: i32, _h: i32, vga: &mut vga256::VGA) {
+    pub fn pillar_gpu(&self, x: i32, y: i32, _w: i32, _h: i32, render_state: &mut RenderState) {
         // 柱子使用填充色模拟
         let pillar_color = 0x30u8;
-        vga.fill_world_gpu(x, y, W, H, pillar_color);
+        render_state.fill_world_gpu(x, y, W, H, pillar_color);
     }
     
     /// GPU版windows - 窗户填充
-    pub fn windows_gpu(&self, x: i32, y: i32, w: i32, h: i32, vga: &mut vga256::VGA) {
+    pub fn windows_gpu(&self, x: i32, y: i32, w: i32, h: i32, render_state: &mut RenderState) {
         // 窗户背景
-        vga.fill_world_gpu(x, y, w, h, 0x18);
+        render_state.fill_world_gpu(x, y, w, h, 0x18);
     }
 }

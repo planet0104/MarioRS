@@ -217,7 +217,7 @@ impl<const W: usize, const H: usize> Sprite<W, H> {
         &self.pixels
     }
 
-    /// 转换为一维切片（用于旧版 VGA API）
+    /// 转换为一维切片（用于旧版 RenderState API）
     /// 返回新分配的Vec，避免unsafe
     pub fn to_flat_vec(&self) -> Vec<u8> {
         self.pixels.iter().flatten().copied().collect()
@@ -245,7 +245,7 @@ pub type SpriteLarge = Sprite<108, 28>; // Intro 大图
 /// 说明：
 /// - Sprites 目录既有二进制 `.000`，也有 Pascal include 文本 `.$00`（db 列表）。
 /// - 游戏资源在 Pascal 原版里是编译期 include 进源码；Rust 这里用 include_dir 在编译期嵌入。
-/// - 像素数据采用 VGA Mode X 的 4-plane 平面布局，需要去平面化成线性 row-major 才能按 (x,y) 访问。
+/// - 像素数据采用 RenderState Mode X 的 4-plane 平面布局，需要去平面化成线性 row-major 才能按 (x,y) 访问。
 #[derive(Clone, Copy)]
 struct SpriteLoader;
 
@@ -498,13 +498,10 @@ pub struct SpriteDataManager {
     pub PALM3_002: ImageBuffer,
 
     pub WOOD_000: ImageBuffer,
-    pub WOOD_000_ORIG: ImageBuffer, // 原始数据副本，用于每次recolor前恢复
     pub XBLOCK_000: ImageBuffer,
-    pub XBLOCK_000_ORIG: ImageBuffer, // 原始数据副本
 
     pub BLOCK_000: ImageBuffer,
     pub BLOCK_001: ImageBuffer,
-    pub BLOCK_001_ORIG: ImageBuffer, // 原始数据副本
 
     pub COIN_000: ImageBuffer,
 
@@ -697,12 +694,9 @@ impl SpriteDataManager {
             PALM3_002: b20x14("PALM3_002"),
 
             WOOD_000: b20x14("WOOD_000"),
-            WOOD_000_ORIG: b20x14("WOOD_000"), // 原始数据副本
             XBLOCK_000: b20x14("XBLOCK_000"),
-            XBLOCK_000_ORIG: b20x14("XBLOCK_000"), // 原始数据副本
             BLOCK_000: b20x14("BLOCK_000"),
             BLOCK_001: b20x14("BLOCK_001"),
-            BLOCK_001_ORIG: b20x14("BLOCK_001"), // 原始数据副本
             COIN_000: b20x14("COIN_000"),
             EXIT_000: b20x14("EXIT_000"),
             EXIT_001: b20x14("EXIT_001"),
@@ -879,6 +873,17 @@ pub enum SpriteId {
     // Intro 大图
     INTRO_000, INTRO_001, INTRO_002,
     
+    // FigList墙体精灵（运行时由init_wall填充，包含重着色和变换）
+    // 对应Pascal的FigList[1, 1..13]
+    FIGLIST_01, FIGLIST_02, FIGLIST_03, FIGLIST_04, FIGLIST_05,
+    FIGLIST_06, FIGLIST_07, FIGLIST_08, FIGLIST_09, FIGLIST_10,
+    FIGLIST_11, FIGLIST_12, FIGLIST_13,
+    
+    // 动态着色精灵（运行时填充，避免修改原始精灵）
+    WOOD_000_RT,    // 运行时重着色的WOOD
+    XBLOCK_000_RT,  // 运行时重着色的XBLOCK
+    BLOCK_001_RT,   // 运行时重着色的BLOCK
+    
     // 总数标记
     COUNT,
 }
@@ -903,6 +908,33 @@ impl SpriteAtlas {
     // 获取图集尺寸
     pub fn size(&self) -> u32 {
         self.atlas.size
+    }
+    
+    /// 更新 FIGLIST 精灵（用于 init_walls 之后同步 GPU 纹理）
+    /// 当关卡切换导致 wall_type 变化时，需要调用此方法更新 GPU 纹理
+    pub fn update_figlist(&mut self, figures: &crate::figures::Figures) {
+        for idx in 1..=13 {
+            let pixels: Vec<u8> = figures.fig_list[0][idx].iter().flatten().copied().collect();
+            self.atlas.update_sprite(&format!("FIGLIST_{:02}", idx), &pixels);
+        }
+    }
+    
+    /// 更新运行时动态精灵（WOOD_RT, XBLOCK_RT, BLOCK_RT）
+    pub fn update_runtime_sprites(&mut self, figures: &crate::figures::Figures) {
+        let wood_rt_pixels: Vec<u8> = figures.wood_rt.iter().flatten().copied().collect();
+        self.atlas.update_sprite("WOOD_000_RT", &wood_rt_pixels);
+        
+        let xblock_rt_pixels: Vec<u8> = figures.xblock_rt.iter().flatten().copied().collect();
+        self.atlas.update_sprite("XBLOCK_000_RT", &xblock_rt_pixels);
+        
+        let block_rt_pixels: Vec<u8> = figures.block_rt.iter().flatten().copied().collect();
+        self.atlas.update_sprite("BLOCK_001_RT", &block_rt_pixels);
+    }
+    
+    /// 标记图集需要重新上传到 GPU（返回 true 表示有更新）
+    pub fn needs_gpu_update(&self) -> bool {
+        // 简化实现：每次更新后都需要重新上传
+        true
     }
     
     /// 获取敌人Chibibo精灵UV (frame: 0=正常, 1=扁平, sub_tp: 子类型)
@@ -997,7 +1029,8 @@ impl SpriteAtlas {
 
 impl SpriteDataManager {
     // 构建纹理图集
-    pub fn build_atlas(&self) -> SpriteAtlas {
+    // figures: 包含fig_list（运行时墙体精灵）和动态着色精灵
+    pub fn build_atlas(&self, figures: &crate::figures::Figures) -> SpriteAtlas {
         use crate::gpu::ATLAS_SIZE;
         
         let mut atlas = TextureAtlas::new(ATLAS_SIZE);
@@ -1210,6 +1243,25 @@ impl SpriteDataManager {
         uvs.push(atlas.add_sprite("INTRO_001", 24, 28, &intro_pixels_1).unwrap());
         let intro_pixels_2: Vec<u8> = self.INTRO_002.pixels.iter().flatten().copied().collect();
         uvs.push(atlas.add_sprite("INTRO_002", 84, 28, &intro_pixels_2).unwrap());
+        
+        // FigList墙体精灵（运行时由init_wall填充，参考Pascal设计）
+        // fig_list[0][1..13]包含重着色和变换后的墙体精灵
+        for idx in 1..=13 {
+            let pixels: Vec<u8> = figures.fig_list[0][idx].iter().flatten().copied().collect();
+            let uv = atlas.add_sprite(&format!("FIGLIST_{:02}", idx), 20, 14, &pixels)
+                .expect(&format!("Failed to add FIGLIST_{:02}", idx));
+            uvs.push(uv);
+        }
+        
+        // 运行时动态着色精灵（参考Pascal设计，保持原始精灵不可变）
+        let wood_rt_pixels: Vec<u8> = figures.wood_rt.iter().flatten().copied().collect();
+        uvs.push(atlas.add_sprite("WOOD_000_RT", 20, 14, &wood_rt_pixels).unwrap());
+        
+        let xblock_rt_pixels: Vec<u8> = figures.xblock_rt.iter().flatten().copied().collect();
+        uvs.push(atlas.add_sprite("XBLOCK_000_RT", 20, 14, &xblock_rt_pixels).unwrap());
+        
+        let block_rt_pixels: Vec<u8> = figures.block_rt.iter().flatten().copied().collect();
+        uvs.push(atlas.add_sprite("BLOCK_001_RT", 20, 14, &block_rt_pixels).unwrap());
         
         SpriteAtlas { atlas, uvs }
     }

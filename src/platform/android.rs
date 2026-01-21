@@ -34,7 +34,7 @@ use ndk::native_window::NativeWindow;
 // ============================================================================
 
 // 游戏分辨率 - 从 game_runner 导入，与其他平台保持一致
-// GAME_WIDTH = 320, GAME_HEIGHT = 182 (WINDOWHEIGHT，VGA framebuffer 已经是正确尺寸)
+// GAME_WIDTH = 320, GAME_HEIGHT = 182 (WINDOWHEIGHT，RenderState framebuffer 已经是正确尺寸)
 use crate::game_runner::{GAME_WIDTH, GAME_HEIGHT};
 
 // ============================================================================

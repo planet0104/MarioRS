@@ -18,7 +18,7 @@ use crate::{
     music::MusicPlayer,
     sprites::SpriteDataManager,
     tmpobj::{TP_NOTE, TmpObjManager},
-    vga256::{MAX_PAGE, VGA},
+    render_state::{MAX_PAGE, RenderState},
     gpu::sprite_batch::SpriteCommand,
     gpu::texture_atlas::SpriteUV,
 };
@@ -301,7 +301,7 @@ impl Players {
         &mut self,
         buffers: &mut Buffers,
         _figures: &Figures,
-        vga: &mut VGA,
+        render_state: &mut RenderState,
         _options: &WorldOptions,
         _backgr: &mut BackGr,
         _sprites: &mut SpriteDataManager,
@@ -319,7 +319,7 @@ impl Players {
                 // 实际绘制行数 = draw_height + 1，所以可见高度应为 2*H - demo_y
                 let visible_height = (2 * H - self.demo_y) as f32;
                 if visible_height > 0.0 {
-                    vga.draw_sprite_partial_world_gpu(
+                    render_state.draw_sprite_partial_world_gpu(
                         self.x,
                         self.y + self.demo_y,
                         uv,
@@ -331,7 +331,7 @@ impl Players {
                 // 从管道出来动画：玩家逐渐出现
                 let visible_height = (2 * H + self.demo_y) as f32;
                 if visible_height > 0.0 {
-                    vga.draw_sprite_partial_world_gpu(
+                    render_state.draw_sprite_partial_world_gpu(
                         self.x,
                         self.y + self.demo_y,
                         uv,
@@ -342,7 +342,7 @@ impl Players {
             }
             DM_DEAD => {
                 // 死亡动画
-                vga.draw_sprite_flipped_world_gpu(self.x, self.y, uv, flip_x, false);
+                render_state.draw_sprite_flipped_world_gpu(self.x, self.y, uv, flip_x, false);
             }
             _ => {}
         }
@@ -352,11 +352,11 @@ impl Players {
         self.old_y = self.y;
     }
 
-    /// GPU版draw_player - 直接向vga.sprite_batch添加GPU精灵
+    /// GPU版draw_player - 直接向render_state.sprite_batch添加GPU精灵
     pub fn draw_player(
         &mut self,
         buffers: &mut Buffers,
-        vga: &mut VGA,
+        render_state: &mut RenderState,
         sprites: &mut SpriteDataManager,
         figures: &Figures,
         options: &WorldOptions,
@@ -366,7 +366,7 @@ impl Players {
     ) {
         // Demo模式由draw_demo处理
         if buffers.demo != DM_NO_DEMO {
-            self.draw_demo(buffers, figures, vga, options, backgr, sprites, atlas);
+            self.draw_demo(buffers, figures, render_state, options, backgr, sprites, atlas);
             return;
         }
         
@@ -399,9 +399,9 @@ impl Players {
         // 添加精灵到GPU渲染队列
         // 对齐 Oldsrc: star/growing 时只画 recolor 版本，不能叠加画两次
         if palette_offset != 0 {
-            vga.draw_sprite_recolored_world_gpu(self.x, self.y, uv, palette_offset);
+            render_state.draw_sprite_recolored_world_gpu(self.x, self.y, uv, palette_offset);
         } else {
-            vga.draw_sprite_flipped_world_gpu(self.x, self.y, uv, flip_x, false);
+            render_state.draw_sprite_flipped_world_gpu(self.x, self.y, uv, flip_x, false);
         }
         
         self.old_x = self.x;
@@ -409,7 +409,7 @@ impl Players {
     }
 
     /// 擦除玩家（GPU模式下为空操作，每帧完整重绘�?
-    pub fn erase_player(&mut self, _vga: &mut VGA) {
+    pub fn erase_player(&mut self, _render_state:RenderState) {
         // GPU模式下不需要擦除，每帧完整重绘
     }
 
@@ -852,7 +852,7 @@ impl Players {
         tmp_obj_manager: &mut TmpObjManager,
         blocks: &mut Blocks,
         buffers: &mut Buffers,
-        vga: &mut VGA,
+        render_state: &mut RenderState,
         glitter_sys: &mut GlitterSystem,
         music_player: &MusicPlayer,
     ) {
@@ -965,7 +965,7 @@ impl Players {
         enemies: &mut Enemies,
         tmp_obj_manager: &mut TmpObjManager,
         blocks: &mut Blocks,
-        vga: &mut VGA,
+        render_state: &mut RenderState,
         glitter_sys: &mut GlitterSystem,
         music_player: &MusicPlayer,
     ) {
@@ -1079,7 +1079,7 @@ impl Players {
                     tmp_obj_manager,
                     blocks,
                     buffers,
-                    vga,
+                    render_state,
                     glitter_sys,
                     music_player,
                 );
@@ -1107,7 +1107,7 @@ impl Players {
                             tmp_obj_manager,
                             blocks,
                             buffers,
-                            vga,
+                            render_state,
                             glitter_sys,
                             music_player,
                         );
@@ -1403,7 +1403,7 @@ impl Players {
         enemies: &mut Enemies,
         tmp_obj_manager: &mut TmpObjManager,
         blocks: &mut Blocks,
-        vga: &mut VGA,
+        render_state: &mut RenderState,
         glitter_sys: &mut GlitterSystem,
         music_player: &MusicPlayer,
         options: &WorldOptions,
@@ -1653,7 +1653,7 @@ impl Players {
             enemies,
             tmp_obj_manager,
             blocks,
-            vga,
+            render_state,
             glitter_sys,
             music_player,
         );

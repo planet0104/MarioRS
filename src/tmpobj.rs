@@ -8,7 +8,7 @@ use crate::glitter::GlitterSystem;
 use crate::gpu::{RenderCommand, SpriteInstance};
 use crate::music::MusicPlayer;
 use crate::sprites::{SpriteAtlas, SpriteDataManager, SpriteId};
-use crate::vga256::VGA;
+use crate::render_state::RenderState;
 
 // 常量定义 - 临时对象类型
 pub const TP_BROKEN: i32 = 1; // 破碎方块类型
@@ -171,7 +171,7 @@ impl TmpObjManager {
     }
 
     /// GPU版 - 显示所有临时对象
-    pub fn show_temp_obj(&mut self, vga: &mut VGA, atlas: &SpriteAtlas) {
+    pub fn show_temp_obj(&mut self, render_state: &mut RenderState, atlas: &SpriteAtlas) {
         for i in 0..MAX_TEMP_OBJ {
             if self.temp_obj[i].alive {
                 let temp_obj = &self.temp_obj[i];
@@ -188,7 +188,7 @@ impl TmpObjManager {
 
                 // 使用GPU方法绘制精灵
                 let uv = atlas.get(sprite_id);
-                vga.draw_sprite_world_gpu(temp_obj.x_pos, temp_obj.y_pos, uv);
+                render_state.draw_sprite_world_gpu(temp_obj.x_pos, temp_obj.y_pos, uv);
             }
         }
     }
@@ -211,9 +211,9 @@ impl TmpObjManager {
             
             // 检查是否在可视区域内
             if temp_obj.x_pos + temp_obj.h_size < buffers.x_view
-                || temp_obj.x_pos > buffers.x_view + crate::vga256::SCREEN_WIDTH as i32
+                || temp_obj.x_pos > buffers.x_view + crate::render_state::SCREEN_WIDTH as i32
                 || temp_obj.y_pos + temp_obj.v_size < buffers.y_view
-                || temp_obj.y_pos > buffers.y_view + crate::vga256::SCREEN_HEIGHT as i32
+                || temp_obj.y_pos > buffers.y_view + crate::render_state::SCREEN_HEIGHT as i32
             {
                 continue;
             }
@@ -322,7 +322,7 @@ impl TmpObjManager {
     }
 
     /// GPU版 - 执行移除操作（绘制替换图像）
-    pub fn run_remove(&mut self, vga: &mut VGA, atlas: &SpriteAtlas) {
+    pub fn run_remove(&mut self, render_state: &mut RenderState, atlas: &SpriteAtlas) {
         for i in 0..MAX_REMOVE {
             if self.rem_list[i].active {
                 let rem_rec = &mut self.rem_list[i];
@@ -334,15 +334,15 @@ impl TmpObjManager {
                     }
                     1 => {
                         let uv = atlas.get(SpriteId::QUEST_001);
-                        vga.draw_sprite_world_gpu(rem_rec.rem_x, rem_rec.rem_y, uv);
+                        render_state.draw_sprite_world_gpu(rem_rec.rem_x, rem_rec.rem_y, uv);
                     }
                     2 => {
                         let uv = atlas.get(SpriteId::QUEST_000);
-                        vga.draw_sprite_world_gpu(rem_rec.rem_x, rem_rec.rem_y, uv);
+                        render_state.draw_sprite_world_gpu(rem_rec.rem_x, rem_rec.rem_y, uv);
                     }
                     5 => {
                         let uv = atlas.get(SpriteId::NOTE_000);
-                        vga.draw_sprite_world_gpu(rem_rec.rem_x, rem_rec.rem_y, uv);
+                        render_state.draw_sprite_world_gpu(rem_rec.rem_x, rem_rec.rem_y, uv);
                     }
                     _ => {}
                 }

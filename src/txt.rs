@@ -2,7 +2,7 @@
 
 // 严格转换自 TXT.PAS，包含字体数据、字体选择、字形解析、文本宽度计算、文本绘制和居中显示
 use crate::gpu::{FillRect, RenderCommand};
-use crate::vga256::VGA;
+use crate::render_state::RenderState;
 use bitflags::bitflags;
 
 bitflags! {
@@ -997,7 +997,7 @@ impl Txt {
     }
 
     /// 在指定位置写文本
-    pub fn write_text(&self, vga: &mut VGA, mut x: i32, y: i32, s: &str, attr: u8) {
+    pub fn write_text(&self, render_state: &mut RenderState, mut x: i32, y: i32, s: &str, attr: u8) {
         for c in s.chars() {
             let idx = c as usize;
             if let Some(glyph) = self.letter(idx) {
@@ -1005,19 +1005,19 @@ impl Txt {
 
                 // 阴影效果
                 if self.b_shadow {
-                    self.render_glyph_screen_gpu(vga, x + 1, y + 1, glyph, 16);
+                    self.render_glyph_screen_gpu(render_state, x + 1, y + 1, glyph, 16);
                 }
 
                 // 粗体效果
                 if self.b_bold {
                     if self.b_shadow {
-                        self.render_glyph_screen_gpu(vga, x, y + 1, glyph, 16);
+                        self.render_glyph_screen_gpu(render_state, x, y + 1, glyph, 16);
                     }
-                    self.render_glyph_screen_gpu(vga, x - 1, y, glyph, attr);
+                    self.render_glyph_screen_gpu(render_state, x - 1, y, glyph, attr);
                 }
 
                 // 主体
-                self.render_glyph_screen_gpu(vga, x, y, glyph, attr);
+                self.render_glyph_screen_gpu(render_state, x, y, glyph, attr);
                 x += width;
             } else {
                 // 找不到字形时按8像素跳过，避免刷屏
@@ -1027,7 +1027,7 @@ impl Txt {
     }
 
     /// 在指定位置写文本（世界坐标）。
-    pub fn write_text_world(&self, vga: &mut VGA, mut x: i32, y: i32, s: &str, attr: u8) {
+    pub fn write_text_world(&self, render_state: &mut RenderState, mut x: i32, y: i32, s: &str, attr: u8) {
         for c in s.chars() {
             let idx = c as usize;
             if let Some(glyph) = self.letter(idx) {
@@ -1035,19 +1035,19 @@ impl Txt {
 
                 // 阴影效果
                 if self.b_shadow {
-                    self.render_glyph_world_gpu(vga, x + 1, y + 1, glyph, 16);
+                    self.render_glyph_world_gpu(render_state, x + 1, y + 1, glyph, 16);
                 }
 
                 // 粗体效果
                 if self.b_bold {
                     if self.b_shadow {
-                        self.render_glyph_world_gpu(vga, x, y + 1, glyph, 16);
+                        self.render_glyph_world_gpu(render_state, x, y + 1, glyph, 16);
                     }
-                    self.render_glyph_world_gpu(vga, x - 1, y, glyph, attr);
+                    self.render_glyph_world_gpu(render_state, x - 1, y, glyph, attr);
                 }
 
                 // 主体
-                self.render_glyph_world_gpu(vga, x, y, glyph, attr);
+                self.render_glyph_world_gpu(render_state, x, y, glyph, attr);
                 x += width;
             } else {
                 x += 8;
@@ -1063,7 +1063,7 @@ impl Txt {
     /// 居中显示文本
     pub fn center_text(
         &self,
-        vga: &mut VGA,
+        render_state: &mut RenderState,
         y: i32,
         s: &str,
         attr: u8,
@@ -1071,13 +1071,13 @@ impl Txt {
         screen_width: i32,
     ) {
         let x = self.center_x(s, xview, screen_width);
-        self.write_text_world(vga, x, y, s, attr);
+        self.write_text_world(render_state, x, y, s, attr);
     }
 
     /// GPU版 - 在世界坐标写文本
     pub fn write_text_world_gpu(
         &self,
-        vga: &mut VGA,
+        render_state: &mut RenderState,
         mut x: i32,
         y: i32,
         s: &str,
@@ -1091,19 +1091,19 @@ impl Txt {
 
                 // 阴影效果
                 if self.b_shadow {
-                    self.render_glyph_world_gpu(vga, x + 1, y + 1, glyph, 16);
+                    self.render_glyph_world_gpu(render_state, x + 1, y + 1, glyph, 16);
                 }
                 
                 // 粗体效果
                 if self.b_bold {
                     if self.b_shadow {
-                        self.render_glyph_world_gpu(vga, x, y + 1, glyph, 16);
+                        self.render_glyph_world_gpu(render_state, x, y + 1, glyph, 16);
                     }
-                    self.render_glyph_world_gpu(vga, x - 1, y, glyph, attr);
+                    self.render_glyph_world_gpu(render_state, x - 1, y, glyph, attr);
                 }
                 
                 // 主要文字
-                self.render_glyph_world_gpu(vga, x, y, glyph, attr);
+                self.render_glyph_world_gpu(render_state, x, y, glyph, attr);
                 
                 x += width;
             } else {
@@ -1115,7 +1115,7 @@ impl Txt {
     /// GPU辅助: 在世界坐标渲染单个字形
     fn render_glyph_world_gpu(
         &self,
-        vga: &mut VGA,
+        render_state: &mut RenderState,
         x: i32,
         y: i32,
         glyph: &Glyph,
@@ -1135,15 +1135,22 @@ impl Txt {
                     let byte = bitmap_data[byte_index];
                     let bit = (byte >> bit_offset) & 1;
                     if bit == 1 {
-                        vga.fill_world_gpu(x + col, y + row, 1, 1, attr);
+                        render_state.fill_world_gpu(x + col, y + row, 1, 1, attr);
                     }
                 }
             }
         }
     }
 
-    /// GPU辅助: 在屏幕坐标渲染单个字形
-    fn render_glyph_screen_gpu(&self, vga: &mut VGA, x: i32, y: i32, glyph: &Glyph, attr: u8) {
+    /// GPU辅助: 在世界坐标渲染单个字形到UI层（在sprites之后渲染）
+    fn render_glyph_world_ui_gpu(
+        &self,
+        render_state: &mut RenderState,
+        x: i32,
+        y: i32,
+        glyph: &Glyph,
+        attr: u8,
+    ) {
         let width = glyph.width() as i32;
         let height = glyph.height() as i32;
         let bitmap_data = glyph.bitmap();
@@ -1158,7 +1165,73 @@ impl Txt {
                     let byte = bitmap_data[byte_index];
                     let bit = (byte >> bit_offset) & 1;
                     if bit == 1 {
-                        vga.fill_gpu(x + col, y + row, 1, 1, attr);
+                        render_state.fill_ui_world_gpu(x + col, y + row, 1, 1, attr);
+                    }
+                }
+            }
+        }
+    }
+
+    /// 在指定位置写文本到UI层（世界坐标，在sprites之后渲染）
+    pub fn write_text_world_ui(&self, render_state: &mut RenderState, mut x: i32, y: i32, s: &str, attr: u8) {
+        for c in s.chars() {
+            let idx = c as usize;
+            if let Some(glyph) = self.letter(idx) {
+                let width = glyph.width() as i32;
+
+                // 阴影效果
+                if self.b_shadow {
+                    self.render_glyph_world_ui_gpu(render_state, x + 1, y + 1, glyph, 16);
+                }
+
+                // 粗体效果
+                if self.b_bold {
+                    if self.b_shadow {
+                        self.render_glyph_world_ui_gpu(render_state, x, y + 1, glyph, 16);
+                    }
+                    self.render_glyph_world_ui_gpu(render_state, x - 1, y, glyph, attr);
+                }
+
+                // 主体
+                self.render_glyph_world_ui_gpu(render_state, x, y, glyph, attr);
+                x += width;
+            } else {
+                x += 8;
+            }
+        }
+    }
+
+    /// 居中显示文本到UI层（在sprites之后渲染）
+    pub fn center_text_ui(
+        &self,
+        render_state: &mut RenderState,
+        y: i32,
+        s: &str,
+        attr: u8,
+        xview: i32,
+        screen_width: i32,
+    ) {
+        let x = self.center_x(s, xview, screen_width);
+        self.write_text_world_ui(render_state, x, y, s, attr);
+    }
+
+    /// GPU辅助: 在屏幕坐标渲染单个字形
+    fn render_glyph_screen_gpu(&self, render_state: &mut RenderState, x: i32, y: i32, glyph: &Glyph, attr: u8) {
+        let width = glyph.width() as i32;
+        let height = glyph.height() as i32;
+        let bitmap_data = glyph.bitmap();
+
+        for row in 0..height {
+            for col in 0..width {
+                let bit_index = (row * width + col) as usize;
+                let byte_index = bit_index / 8;
+                let bit_offset = bit_index % 8;
+
+                if byte_index < bitmap_data.len() {
+                    let byte = bitmap_data[byte_index];
+                    let bit = (byte >> bit_offset) & 1;
+                    if bit == 1 {
+                        render_state.fill_gpu(x + col, y + row, 1, 1, attr);
                     }
                 }
             }

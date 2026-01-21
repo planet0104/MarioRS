@@ -17,7 +17,7 @@ use crate::{
     status::Status,
     tmpobj::TmpObjManager,
     txt::Txt,
-    vga256::VGA,
+    render_state::RenderState,
 };
 
 /// 游戏上下文 - 封装所有游戏子系统的可变引用
@@ -25,8 +25,8 @@ use crate::{
 /// 用于简化函数签名，避免传递过多参数
 /// 使用生命周期 `'a` 确保所有引用在上下文存活期间有效
 pub struct GameContext<'a> {
-    // 渲染相关（vga.palette 包含调色板）
-    pub vga: &'a mut VGA,
+    // 渲染相关（ render_state.palette 包含调色板）
+    pub render_state: &'a mut RenderState,
     pub txt: &'a mut Txt,
     
     // 游戏状态
@@ -62,7 +62,7 @@ impl<'a> GameContext<'a> {
     /// 创建游戏上下文
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        vga: &'a mut VGA,
+        render_state: &'a mut RenderState,
         txt: &'a mut Txt,
         buffers: &'a mut Buffers,
         players: &'a mut Players,
@@ -82,7 +82,7 @@ impl<'a> GameContext<'a> {
         cur_player: u8,
     ) -> Self {
         Self {
-            vga,
+            render_state,
             txt,
             buffers,
             players,

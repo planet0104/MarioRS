@@ -132,4 +132,31 @@ impl TextureAtlas {
     pub fn data(&self) -> &[u8] {
         &self.data
     }
+
+    /// 更新已存在精灵的像素数据（用于运行时动态精灵更新）
+    /// 返回 true 表示更新成功，false 表示精灵不存在
+    pub fn update_sprite(&mut self, name: &str, pixels: &[u8]) -> bool {
+        if let Some(uv) = self.sprites.get(name) {
+            let width = uv.width;
+            let height = uv.height;
+            let x = uv.x;
+            let y = uv.y;
+            
+            // 检查像素数据长度是否正确
+            if pixels.len() != (width * height) as usize {
+                return false;
+            }
+            
+            // 复制像素数据到图集对应位置
+            for row in 0..height {
+                let src_start = (row * width) as usize;
+                let dst_start = ((y + row) * self.size + x) as usize;
+                self.data[dst_start..dst_start + width as usize]
+                    .copy_from_slice(&pixels[src_start..src_start + width as usize]);
+            }
+            true
+        } else {
+            false
+        }
+    }
 }
