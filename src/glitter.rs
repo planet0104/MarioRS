@@ -139,7 +139,7 @@ impl GlitterSystem {
             // 只渲染活跃的闪光 (count > MAX_PAGE + 1 表示可见)
             if self.count[i] > (MAX_PAGE as u8 + 1) {
                 let glitter = &self.glitter_list[i];
-                // 注意：pos 在 Oldsrc 中存的是“屏幕坐标”（创建时已经减过 x_view/y_view）
+                // 注意：pos 在 原版 中存的是“屏幕坐标”（创建时已经减过 x_view/y_view）
                 let x = (glitter.pos % VIR_SCREEN_WIDTH as u16) as f32;
                 let y = (glitter.pos / VIR_SCREEN_WIDTH as u16) as f32;
 

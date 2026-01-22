@@ -312,7 +312,7 @@ impl Players {
         match buffers.demo {
             DM_DOWN_INTO_PIPE | DM_UP_OUT_OF_PIPE => {
                 // 进入管道动画：玩家逐渐消失
-                // 对齐 Oldsrc: draw_part_imagebuffer(0, draw_height) 绘制第0行到第draw_height行
+                // 对齐 原版: draw_part_imagebuffer(0, draw_height) 绘制第0行到第draw_height行
                 // 实际绘制行数 = draw_height + 1，所以可见高度应为 2*H - demo_y
                 let visible_height = (2 * H - self.demo_y) as f32;
                 if visible_height > 0.0 {
@@ -387,7 +387,7 @@ impl Players {
 
         // 计算调色板偏移（变身/无敌星闪烁效果）
         let palette_offset = if enemies.star || self.growing {
-            // 对齐 Oldsrc: color = (((GrowCounter + StarCounter) and 1) shl 4) - Ord(((...) and $0F) < 8)
+            // 对齐 原版: color = (((GrowCounter + StarCounter) and 1) shl 4) - Ord(((...) and $0F) < 8)
             let t = self.grow_counter + self.star_counter;
             (((t & 1) << 4) as i32) - (((t & 0xF) < 8) as i32)
         } else {
@@ -402,7 +402,7 @@ impl Players {
         }
 
         // 添加精灵到GPU渲染队列
-        // 对齐 Oldsrc: star/growing 时只画 recolor 版本，不能叠加画两次
+        // 对齐 原版: star/growing 时只画 recolor 版本，不能叠加画两次
         if palette_offset != 0 {
             render_state.draw_sprite_recolored_world_gpu(self.x, self.y, uv, palette_offset);
         } else {
@@ -447,17 +447,17 @@ impl Players {
     }
 
     /// GPU模式：获取当前玩家精灵ID (使用SpriteId枚举)
-    /// 对齐 Oldsrc: 开火射击时(mode=MD_FIRE, key_space=true, fire_counter<7)使用混合精灵
+    /// 对齐 原版: Pictures[Player, Mode, WalkingMode, Direction]
+    /// walking_mode: 0=行走帧1, 1=行走帧2, 2=跳跃帧, 3=下落帧
     pub fn get_player_sprite_id_enum(&self, buffers: &Buffers) -> crate::sprites::SpriteId {
         use crate::sprites::SpriteId;
 
         let player = buffers.player;
         let mode = buffers.data.mode[player] as usize;
         let is_mario = player == 0;
-        let is_jumping = self.walking_mode != 0;
 
         // 开火射击状态：使用混合精灵(上半身手臂伸出+下半身站立)
-        // 对齐 Oldsrc draw_player 416-434行的逻辑
+        // 对齐 原版 draw_player 416-434行的逻辑
         if mode == MD_FIRE && self.key_space && self.fire_counter < 7 {
             return if is_mario {
                 SpriteId::FFMAR_000
@@ -466,19 +466,40 @@ impl Players {
             };
         }
 
-        match (mode, is_jumping, is_mario) {
-            (0, false, true) => SpriteId::SWMAR_000,  // Small Walk Mario
-            (0, true, true) => SpriteId::SJMAR_000,   // Small Jump Mario
-            (1, false, true) => SpriteId::LWMAR_000,  // Large Walk Mario
-            (1, true, true) => SpriteId::LJMAR_000,   // Large Jump Mario
-            (2, false, true) => SpriteId::FWMAR_000,  // Fire Walk Mario
-            (2, true, true) => SpriteId::FJMAR_000,   // Fire Jump Mario
-            (0, false, false) => SpriteId::SWLUI_000, // Small Walk Luigi
-            (0, true, false) => SpriteId::SJLUI_000,  // Small Jump Luigi
-            (1, false, false) => SpriteId::LWLUI_000, // Large Walk Luigi
-            (1, true, false) => SpriteId::LJLUI_000,  // Large Jump Luigi
-            (2, false, false) => SpriteId::FWLUI_000, // Fire Walk Luigi
-            (2, true, false) => SpriteId::FJLUI_000,  // Fire Jump Luigi
+        // 对齐 原版: Pictures[Player, Mode, WalkingMode, Direction]
+        // walking_mode: 0=行走帧1(脚并拢), 1=行走帧2(脚分开), 2=跳跃帧, 3=下落帧
+        match (mode, self.walking_mode, is_mario) {
+            // Small Mario
+            (0, 0, true) => SpriteId::SWMAR_000,  // 行走帧1
+            (0, 1, true) => SpriteId::SWMAR_001,  // 行走帧2
+            (0, 2, true) => SpriteId::SJMAR_000,  // 跳跃帧
+            (0, 3, true) => SpriteId::SJMAR_001,  // 下落帧
+            // Large Mario
+            (1, 0, true) => SpriteId::LWMAR_000,
+            (1, 1, true) => SpriteId::LWMAR_001,
+            (1, 2, true) => SpriteId::LJMAR_000,
+            (1, 3, true) => SpriteId::LJMAR_001,
+            // Fire Mario
+            (2, 0, true) => SpriteId::FWMAR_000,
+            (2, 1, true) => SpriteId::FWMAR_001,
+            (2, 2, true) => SpriteId::FJMAR_000,
+            (2, 3, true) => SpriteId::FJMAR_001,
+            // Small Luigi
+            (0, 0, false) => SpriteId::SWLUI_000,
+            (0, 1, false) => SpriteId::SWLUI_001,
+            (0, 2, false) => SpriteId::SJLUI_000,
+            (0, 3, false) => SpriteId::SJLUI_001,
+            // Large Luigi
+            (1, 0, false) => SpriteId::LWLUI_000,
+            (1, 1, false) => SpriteId::LWLUI_001,
+            (1, 2, false) => SpriteId::LJLUI_000,
+            (1, 3, false) => SpriteId::LJLUI_001,
+            // Fire Luigi
+            (2, 0, false) => SpriteId::FWLUI_000,
+            (2, 1, false) => SpriteId::FWLUI_001,
+            (2, 2, false) => SpriteId::FJLUI_000,
+            (2, 3, false) => SpriteId::FJLUI_001,
+            // 默认: Small Mario 行走帧1
             _ => SpriteId::SWMAR_000,
         }
     }
@@ -523,7 +544,7 @@ impl Players {
                     return;
                 }
 
-                // 对齐 Oldsrc DrawPart：显示从顶部开始的 visible_height 像素
+                // 对齐 原版 DrawPart：显示从顶部开始的 visible_height 像素
                 let clip_ratio = visible_height / full_h;
                 let clipped_h = (base_uv.height as f32 * clip_ratio) as u32;
                 if clipped_h == 0 {
@@ -576,7 +597,7 @@ impl Players {
             match buffers.demo {
                 DM_DOWN_INTO_PIPE | DM_UP_OUT_OF_PIPE => {
                     // 进入管道动画：玩家逐渐消失
-                    // 对齐 Oldsrc: draw_part_imagebuffer(0, draw_height) 绘制第0行到第draw_height行
+                    // 对齐 原版: draw_part_imagebuffer(0, draw_height) 绘制第0行到第draw_height行
                     // 实际绘制行数 = draw_height + 1，所以可见高度应为 2*H - demo_y
                     let visible_height = (2 * H - self.demo_y) as f32;
                     push_partial(
@@ -591,7 +612,7 @@ impl Players {
                     // 从管道出来动画：玩家逐渐出现
                     let visible_height = (2 * H + self.demo_y) as f32;
                     if buffers.demo == DM_DOWN_OUT_OF_PIPE {
-                        // 对齐 Oldsrc：从上方管道往下出来时，应该先看到下半身，上半身被管道遮挡
+                        // 对齐 原版：从上方管道往下出来时，应该先看到下半身，上半身被管道遮挡
                         push_partial_bottom(
                             &mut commands,
                             sx,
@@ -647,7 +668,7 @@ impl Players {
             cmd = cmd.with_palette(color_offset, palette_index);
         }
 
-        // 开火动画：使用预生成的混合精灵FFMAR_000/FFLUI_000，对齐Oldsrc效果。
+        // 开火动画：使用预生成的混合精灵FFMAR_000/FFLUI_000，对齐原版效果。
         // 混合精灵由FWMAR_001上半身+FWMAR_000下半身合成，实现"手臂伸出发射火球"姿势。
 
         commands.push(cmd);
@@ -795,7 +816,7 @@ impl Players {
             }
             DM_DOWN_OUT_OF_PIPE => {
                 self.demo_y = -2 * H;
-                // 对齐 Oldsrc:
+                // 对齐 原版:
                 // Pascal: Inc (Y, H - 7 * Byte (Data.Mode [Player] in [mdSmall]) - 2);
                 // 小Mario: offset = H - 7 - 2 = 5
                 // 大Mario: offset = H - 0 - 2 = 12

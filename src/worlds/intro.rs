@@ -393,7 +393,7 @@ impl Intro {
 
                 figures.build_world(&mut buffers.world_map, &current_opt, sprites);
                 // 关键：BuildWorld 会重着色/转换草地等，运行时精灵存入figures
-                // GPU 图集必须同步更新，否则 Intro 地面/草/砖块颜色与 Oldsrc 不一致
+                // GPU 图集必须同步更新，否则 Intro 地面/草/砖块颜色与 原版 不一致
                 *atlas = sprites.build_atlas(figures);
 
                 // 设置天空调色板和草地调色板
@@ -452,7 +452,7 @@ impl Intro {
 
             IntroPhase::InitBackground => {
                 intro_dbg!("[INTRO] 初始化背景");
-                // 对齐 Oldsrc/Pascal：Intro 背景使用 Options_0.BackGrType，不应在这里强行改成 3
+                // 对齐 原版/Pascal：Intro 背景使用 Options_0.BackGrType，不应在这里强行改成 3
                 backgr.init_backgr(self.intro_opt.backgr_type, self.intro_opt.clouds);
                 self.phase = IntroPhase::SetPalette;
                 IntroResult::Continue
@@ -461,8 +461,8 @@ impl Intro {
             IntroPhase::SetPalette => {
                 intro_dbg!("[INTRO] 设置Intro调色板到source_palette");
                 // 直接修改 source_palette，不修改 palette（保持全黑）
-                // 严格对齐 Oldsrc：只改 0xA0/0xA1 等少量索引，不覆盖 0xE0..0xEF 的天空渐变
-                // 颜色对齐 Oldsrc 实机观感：
+                // 严格对齐 原版：只改 0xA0/0xA1 等少量索引，不覆盖 0xE0..0xEF 的天空渐变
+                // 颜色对齐 原版 实机观感：
                 // - 云：#E3E4F8 约等于 6bit [56,56,61]
                 // - 山：#86B1C2 约等于 6bit [33,44,48]
                 render_state.palette.source_palette[0xA0] = [56, 56, 61];
@@ -857,14 +857,14 @@ impl Intro {
             renderer.render_game_frame(&mut ctx);
         }
 
-        // 叠加 INTRO 标题/边框（对齐 Oldsrc DrawIntroScreen）
+        // 叠加 INTRO 标题/边框（对齐 原版 DrawIntroScreen）
         let palette_index: u32 = 0;
         let sprite_cmds = self.collect_intro_sprites_gpu(atlas, palette_index);
         let batch = render_state.get_sprite_batch_mut();
         for s in sprite_cmds {
             batch.push_sprite(s);
         }
-        // Oldsrc 最后 DrawPlayer，GPU 这里再绘制一次以保证层级一致
+        // 原版 最后 DrawPlayer，GPU 这里再绘制一次以保证层级一致
         for p in players.collect_player_sprites_gpu(buffers, atlas, palette_index, enemies.star) {
             batch.push_sprite(p);
         }
@@ -1171,7 +1171,7 @@ impl Intro {
                 batch.push_sprite(s);
             }
 
-            // Oldsrc 最后 DrawPlayer，GPU 这里再绘制一次以保证层级一致
+            // 原版 最后 DrawPlayer，GPU 这里再绘制一次以保证层级一致
             for p in players.collect_player_sprites_gpu(buffers, atlas, palette_index, enemies.star)
             {
                 batch.push_sprite(p);

@@ -544,7 +544,7 @@ impl Play {
 
                 figures.build_world(&mut buffers.world_map, current_opt, sprites);
                 // BuildWorld 会重着色/转换草地等，运行时精灵存入figures
-                // GPU 图集必须同步更新，否则地面/砖块/草颜色与 Oldsrc 不一致
+                // GPU 图集必须同步更新，否则地面/砖块/草颜色与 原版 不一致
                 *atlas = sprites.build_atlas(figures);
 
                 self.phase = PlayPhase::Restart;
@@ -676,7 +676,7 @@ impl Play {
                 self.renderer.only_draw = self.only_draw;
                 self.renderer.show_objects = self.show_objects;
                 self.renderer.show_score = self.show_score;
-                // 对齐 Oldsrc：游戏过程中状态栏一直显示（地下室也一样）
+                // 对齐 原版：游戏过程中状态栏一直显示（地下室也一样）
                 self.renderer.show_status = true;
                 self.renderer.show_retrace = self.show_retrace;
 
@@ -1196,7 +1196,7 @@ impl Play {
                 status: status_mgr,
                 txt,
             };
-            // 对齐 Oldsrc：游戏过程中状态栏一直显示（地下室也一样）
+            // 对齐 原版：游戏过程中状态栏一直显示（地下室也一样）
             self.renderer.show_status = true;
             self.renderer.render_game_frame(&mut ctx);
         }
@@ -1533,7 +1533,7 @@ impl Play {
         // 交换页面 - 关键：在另一页上绘制暂停界面，原始游戏页面保持不变
         render_state.swap_pages();
 
-        // GPU 全量重绘：对齐 Oldsrc 的 hide_* 行为
+        // GPU 全量重绘：对齐 原版 的 hide_* 行为
         // 在暂停页先渲染一次“无玩家/无状态栏/无对象”的世界帧，避免暂停画面残留 Mario/状态栏
         let prev_show_objects = self.renderer.show_objects;
         let prev_show_status = self.renderer.show_status;

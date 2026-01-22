@@ -181,7 +181,7 @@ impl Renderer {
         let y_view = ctx.buffers.y_view;
         let has_stars = ctx.buffers.options.stars != 0;
 
-        // 1. 背景层：对齐 Oldsrc 的 DrawSky 逻辑
+        // 1. 背景层：对齐 原版 的 DrawSky 逻辑
         for f in ctx.figures.collect_sky_fills(
             0,
             0,
@@ -199,9 +199,9 @@ impl Renderer {
             )));
         }
 
-        // 1.1 地下室砖墙背景（严格对齐 Oldsrc）
+        // 1.1 地下室砖墙背景（严格对齐 原版）
         //
-        // Oldsrc FIGURES.DrawSky(Sky=6/7/8, BackGrType=4) 会调用 BACKGR.DrawBricks，
+        // 原版 FIGURES.DrawSky(Sky=6/7/8, BackGrType=4) 会调用 BACKGR.DrawBricks，
         // 用 PALBRICK_000 以 PutImage 语义平铺整块背景（索引0也要绘制）。
         //
         // wgpu 模式下如果用 0x18 单色 fill 替代，会导致你反馈的现象：
@@ -234,9 +234,9 @@ impl Renderer {
             }
         }
 
-        // 1.2 地下室柱子背景（对齐 Oldsrc BACKGR.Pillar）
+        // 1.2 地下室柱子背景（对齐 原版 BACKGR.Pillar）
         //
-        // Oldsrc FIGURES.DrawSky(Sky=6/7/8, BackGrType=6) 会逐 tile 调用 BACKGR.Pillar，
+        // 原版 FIGURES.DrawSky(Sky=6/7/8, BackGrType=6) 会逐 tile 调用 BACKGR.Pillar，
         // 按 (x/20)%3 在 PALPILL_000/001/002 之间切换，形成黑色垂直渐变的柱子纹理。
         //
         // GPU 版用整屏 tile 平铺实现同样的像素效果（索引0也要绘制）。
@@ -262,7 +262,7 @@ impl Renderer {
             while y < screen_h {
                 let mut x = x0;
                 while x < screen_w {
-                    // Oldsrc: match (x/20)%3
+                    // 原版: match (x/20)%3
                     let world_x = x + x_view;
                     let which = world_x.div_euclid(tw).rem_euclid(3);
                     let uv = match which {
@@ -285,7 +285,7 @@ impl Renderer {
                 .collect_stars_gpu(&mut commands, ctx.buffers, palette_index);
         }
 
-        // 3. 背景装饰层：BackGrMap 形状（对齐 Oldsrc DrawBackGr 的云带/远景轮廓）
+        // 3. 背景装饰层：BackGrMap 形状（对齐 原版 DrawBackGr 的云带/远景轮廓）
         for f in ctx
             .backgr
             .collect_put_backgr_fills(x_view, &ctx.buffers.options)
@@ -318,14 +318,14 @@ impl Renderer {
             }
         }
 
-        // Intro 特例：对齐 Oldsrc WORLDS/INTRO.PAS::DrawIntroScreen 的 DrawBackGrMap
-        // Oldsrc 调用顺序是先画标题，再 DrawBackGrMap，但通过 GetPixel>=0xC0 的 mask 避免覆盖前景/标题。
+        // Intro 特例：对齐 原版 WORLDS/INTRO.PAS::DrawIntroScreen 的 DrawBackGrMap
+        // 原版 调用顺序是先画标题，再 DrawBackGrMap，但通过 GetPixel>=0xC0 的 mask 避免覆盖前景/标题。
         // GPU 无读回，这里把 DrawBackGrMap 放到“地形之前”渲染，达到与 mask 等价的像素效果。
         if self.only_draw
             && ctx.buffers.options.sky_type == 10
             && ctx.buffers.options.backgr_type == 10
         {
-            // Oldsrc: 云层/近景与山峰层使用同一套调用，但视觉上需要：
+            // 原版: 云层/近景与山峰层使用同一套调用，但视觉上需要：
             // - 云层更圆（BOGEN26）
             // - 山峰更尖（MOUNT）
             let cloud_map = crate::backgr::backgr_map_bogen26();
@@ -422,7 +422,7 @@ impl Renderer {
             }
         }
 
-        // 6.1 管道出入动画遮挡：对齐 Oldsrc（先画玩家，再重绘管道口在最上层进行遮挡）
+        // 6.1 管道出入动画遮挡：对齐 原版（先画玩家，再重绘管道口在最上层进行遮挡）
         if matches!(ctx.buffers.demo, DM_UP_INTO_PIPE | DM_DOWN_OUT_OF_PIPE) {
             // 用地图数据动态判断“管道口”在哪一行，避免 map_y 偏差导致遮挡失败
             let mx = ctx.players.map_x;
@@ -483,7 +483,7 @@ impl Renderer {
         // 10. 闪光特效层
         ctx.glitters
             .collect_glitter_gpu(&mut commands, x_view, y_view, palette_index);
-        // GPU 模式下每帧完全重绘，不需要 hide_glitter，但必须按 Oldsrc 的节奏递减闪光计数
+        // GPU 模式下每帧完全重绘，不需要 hide_glitter，但必须按 原版 的节奏递减闪光计数
         ctx.glitters.update_glitter_gpu();
 
         commands

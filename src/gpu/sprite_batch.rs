@@ -209,7 +209,7 @@ impl SpriteBatch {
         if cmd.palette_index == 0 {
             cmd.palette_index = self.current_palette;
         }
-        // 对齐 Oldsrc DrawPart：显示从顶部开始的 visible_height 像素
+        // 对齐 原版 DrawPart：显示从顶部开始的 visible_height 像素
         // 这里直接修改 UV 高度来实现部分渲染
         let full_height = cmd.uv.height as f32;
         if visible_height >= full_height {

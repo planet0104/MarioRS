@@ -568,6 +568,10 @@ pub struct SpriteDataManager {
     pub INTRO_001: Sprite<24, 28>,
     pub INTRO_002: Sprite<84, 28>,
 
+    // 关卡开始显示精灵 (MARIO START / LUIGI START)
+    pub START_000: Sprite<116, 13>, // Mario Start
+    pub START_001: Sprite<108, 13>, // Luigi Start
+
     // 背景柱子纹理
     pub PALPILL_000: SpritePlant,
     pub PALPILL_001: SpritePlant,
@@ -757,6 +761,10 @@ impl SpriteDataManager {
             INTRO_000: loader.load_sprite("INTRO", 0),
             INTRO_001: loader.load_sprite("INTRO", 1),
             INTRO_002: loader.load_sprite("INTRO", 2),
+
+            // 关卡开始显示精灵 (MARIO START / LUIGI START)
+            START_000: loader.load_sprite("START", 0),
+            START_001: loader.load_sprite("START", 1),
 
             // 背景柱子纹理
             PALPILL_000: loader.load_sprite("PALPILL", 0),
@@ -960,6 +968,10 @@ pub enum SpriteId {
     INTRO_001,
     INTRO_002,
 
+    // 关卡开始显示精灵 (MARIO START / LUIGI START)
+    START_000,
+    START_001,
+
     // FigList墙体精灵（运行时由init_wall填充，包含重着色和变换）
     // 对应Pascal的FigList[1, 1..13]
     FIGLIST_01,
@@ -981,7 +993,7 @@ pub enum SpriteId {
     XBLOCK_000_RT, // 运行时重着色的XBLOCK
     BLOCK_001_RT,  // 运行时重着色的BLOCK
 
-    // 运行时砖块精灵（对齐 Oldsrc：BuildWorld 会把 BRICKx 重着色到 Figures.bricks[0..2]）
+    // 运行时砖块精灵（对齐 原版：BuildWorld 会把 BRICKx 重着色到 Figures.bricks[0..2]）
     BRICK_RT_000,
     BRICK_RT_001,
     BRICK_RT_002,
@@ -1327,7 +1339,7 @@ impl SpriteDataManager {
         add_sprite!(FJMAR_001, 20, 28);
 
         // FFMAR_000: 开火射击混合精灵 (Mario)
-        // 对齐 Oldsrc draw_player 416-434行:
+        // 对齐 原版 draw_player 416-434行:
         //   上半身(FWMAR_001[0..20])绘制到y+1位置（向下偏移1像素）
         //   下半身(FWMAR_000[21..28])绘制到y位置
         // 混合精灵模拟这个偏移效果：
@@ -1368,7 +1380,7 @@ impl SpriteDataManager {
         add_sprite!(FJLUI_001, 20, 28);
 
         // FFLUI_000: 开火射击混合精灵 (Luigi)
-        // 对齐 Oldsrc draw_player（同Mario的偏移逻辑）
+        // 对齐 原版 draw_player（同Mario的偏移逻辑）
         {
             let mut fflui_pixels: Vec<u8> = Vec::with_capacity(20 * 28);
             // 第0行: 使用FWLUI_000[0]填充顶部
@@ -1428,6 +1440,20 @@ impl SpriteDataManager {
                 .unwrap(),
         );
 
+        // 关卡开始显示精灵 (MARIO START / LUIGI START)
+        let start_pixels_0: Vec<u8> = self.START_000.pixels.iter().flatten().copied().collect();
+        uvs.push(
+            atlas
+                .add_sprite("START_000", 116, 13, &start_pixels_0)
+                .unwrap(),
+        );
+        let start_pixels_1: Vec<u8> = self.START_001.pixels.iter().flatten().copied().collect();
+        uvs.push(
+            atlas
+                .add_sprite("START_001", 108, 13, &start_pixels_1)
+                .unwrap(),
+        );
+
         // FigList墙体精灵（运行时由init_wall填充，参考Pascal设计）
         // fig_list[0][1..13]包含重着色和变换后的墙体精灵
         for idx in 1..=13 {
@@ -1460,7 +1486,7 @@ impl SpriteDataManager {
                 .unwrap(),
         );
 
-        // 运行时砖块精灵：对齐 Oldsrc 的 b'A' 渲染路径（使用 Figures.bricks 而不是原始 BRICKx 精灵）
+        // 运行时砖块精灵：对齐 原版 的 b'A' 渲染路径（使用 Figures.bricks 而不是原始 BRICKx 精灵）
         let brick0_rt_pixels: Vec<u8> = figures.bricks[0].iter().flatten().copied().collect();
         uvs.push(
             atlas

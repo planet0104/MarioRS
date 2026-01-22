@@ -108,7 +108,7 @@ impl BackGr {
         c[m + 7] = [1240, 0];
     }
 
-    // 云朵（Oldsrc PutClouds/TraceCloud）在纯 GPU 管线下通过批量命令绘制实现，
+    // 云朵（原版 PutClouds/TraceCloud）在纯 GPU 管线下通过批量命令绘制实现，
     // 不再依赖 CPU framebuffer 的 GetPixel/PutPixel 读写与覆盖语义。
 
     /// Rust严格模拟Pascal InitBackGr 逻辑
@@ -323,7 +323,7 @@ impl BackGr {
 
     // ========== GPU渲染支持方法 ==========
 
-    /// GPU模式：收集 PutBackGr 的背景形状（对齐 Oldsrc put_backgr 的填充效果）
+    /// GPU模式：收集 PutBackGr 的背景形状（对齐 原版 put_backgr 的填充效果）
     /// 说明：
     /// - 原版会用 get_pixel_world 做“天空掩码”避免覆盖前景
     /// - GPU 版无读回，这里只负责生成背景形状，渲染顺序保证它在前景之前
@@ -363,7 +363,7 @@ impl BackGr {
         fills
     }
 
-    /// GPU模式：收集 DrawBackGrMap 的背景装饰（对齐 Oldsrc draw_backgr_map）
+    /// GPU模式：收集 DrawBackGrMap 的背景装饰（对齐 原版 draw_backgr_map）
     pub fn collect_backgr_map_fills(
         &self,
         y1: i32,
@@ -454,7 +454,7 @@ impl BackGr {
         fills
     }
 
-    /// GPU模式：收集smooth_fill填充命令（严格对齐 Oldsrc）
+    /// GPU模式：收集smooth_fill填充命令（严格对齐 原版）
     pub fn collect_smooth_fills(
         &self,
         x: i32,
@@ -467,7 +467,7 @@ impl BackGr {
         let horizon = options.horizon.saturating_sub(4) as i32;
 
         let mut cur_y = y;
-        // 严格对齐 Oldsrc：根据起始 y 计算初始 dh 和 dl
+        // 严格对齐 原版：根据起始 y 计算初始 dh 和 dl
         let mut dh: i32 = ((cur_y % 6 + 6) % 6) as i32;
         let mut dl: u8 = if cur_y >= horizon {
             0xF0
@@ -533,7 +533,7 @@ impl BackGr {
     // ========== GPU直接渲染方法 ==========
 
     /// GPU版smooth_fill - 直接向render_state.sprite_batch添加填充命令
-    /// 严格对齐 Oldsrc BACKGR.PAS SmoothFill 的像素效果
+    /// 严格对齐 原版 BACKGR.PAS SmoothFill 的像素效果
     pub fn smooth_fill_gpu(
         &mut self,
         x: usize,
@@ -548,10 +548,10 @@ impl BackGr {
         let horizon = options.horizon.saturating_sub(4) as i32;
         let mut cur_y = y as i32;
 
-        // 严格对齐 Oldsrc：根据起始 y 计算初始 dh
+        // 严格对齐 原版：根据起始 y 计算初始 dh
         let mut dh: i32 = ((cur_y % 6 + 6) % 6) as i32;
 
-        // 严格对齐 Oldsrc：根据起始 y 计算初始 dl
+        // 严格对齐 原版：根据起始 y 计算初始 dl
         let mut dl: u8 = if cur_y >= horizon {
             0xF0
         } else {

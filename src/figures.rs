@@ -689,7 +689,7 @@ impl Figures {
                 }
             }
             2 | 5 | 9 | 10 | 11 | 12 => {
-                // smooth_fill - 对齐 Oldsrc BACKGR.smooth_fill 的颜色变化（不包含抖动像素）
+                // smooth_fill - 对应原版 BACKGR.smooth_fill 的颜色变化（不包含抖动像素）
                 // 规则：每6行下降1级，从0xEF开始，最低到0xE0；接近horizon后切换为0xF0
                 let horizon = options.horizon.saturating_sub(4) as i32;
                 for row in y..(y + h) {
@@ -709,7 +709,7 @@ impl Figures {
             6 | 7 | 8 => {
                 // 地下室背景
                 //
-                // Oldsrc 语义：
+                // 原版语义：
                 // - BackGrType=4: 背景墙面用 PALBRICK_000 平铺（不透明 PutImage 语义）
                 // - BackGrType=5/6/7: 分别是大砖/柱子/窗口的背景效果
                 //
@@ -769,8 +769,8 @@ impl Figures {
             return commands;
         }
 
-        // Oldsrc 特例：如果上方 tile 是 18，则先叠加 FigList[0][5]（不透明）
-        // 对齐 Oldsrc FIGURES.redraw 中的特殊覆盖
+        // 特例：如果上方 tile 是 18，则先叠加 FigList[0][5]（不透明）
+        // 对应原版 FIGURES.redraw 中的特殊覆盖
         if get(x, y - 1) == 18 {
             let (base_id, rotation, flip_x, flip_y) =
                 Self::wall_variant_to_sprite(options.wall_type1, 5);
@@ -792,7 +792,7 @@ impl Figures {
             b'K' => Some(SpriteId::NOTE_000),
             b'X' => Some(SpriteId::XBLOCK_000_RT), // 使用运行时重着色版本
             b'W' => {
-                // 对齐 Oldsrc：WOOD使用DrawImage（透明绘制），索引0的像素不绘制
+                // WOOD使用DrawImage（透明绘制），索引0的像素不绘制
                 // 这样WOOD精灵边缘的透明像素会正确显示背景色
                 Some(SpriteId::WOOD_000_RT) // 使用运行时重着色版本
             }
@@ -809,7 +809,7 @@ impl Figures {
                 }
             }
             0xF7 => {
-                // 草地逻辑对齐 Oldsrc 的 redraw:
+                // 草地逻辑对应原版 redraw:
                 // 1. 若左右邻居存在墙体(1..=26)，先绘制无边缘墙体背景
                 // 对齐 Pascal: 使用fig_list[0][5]，即无边缘中央墙块（已包含正确着色）
                 let left = get(x - 1, y);
@@ -827,7 +827,7 @@ impl Figures {
                 }
 
                 // 3. 若上方是棕榈树干(0xF6)且 design=1，先叠加一层 WPALM_000
-                // 对齐 Oldsrc: 确保草地透明处显示树干而非天空
+                // 确保草地透明处显示树干而非天空
                 if get(x, y - 1) == 0xF6 && options.design == 1 {
                     let uv = atlas.get(SpriteId::WPALM_000);
                     commands.push(RenderCommand::Sprite(SpriteCommand::new(xpos, ypos, uv)));
@@ -872,7 +872,7 @@ impl Figures {
             }
             0xFA => {
                 if options.design == 1 {
-                    // 对齐 Oldsrc: 棕榈叶中心精灵
+                    // 棕榈叶中心精灵
                     // 如果左边是0xF9(右侧棕榈叶位置)，先绘制PALM3作为overlay
                     if get(x - 1, y) == 0xF9 {
                         let uv = atlas.get(SpriteId::PALM3_000);
@@ -889,7 +889,7 @@ impl Figures {
             }
             0xF4 => {
                 if options.design == 1 {
-                    // 对齐 Oldsrc: 左侧棕榈叶
+                    // 左侧棕榈叶
                     // 如果下方是树干(0xF6)，先绘制WPALM作为overlay确保树干可见
                     if get(x, y + 1) == 0xF6 {
                         let uv = atlas.get(SpriteId::WPALM_000);
@@ -909,7 +909,7 @@ impl Figures {
             }
             0xF5 => {
                 if options.design == 1 {
-                    // 对齐 Oldsrc: 右侧棕榈叶
+                    // 右侧棕榈叶
                     // 如果下方是树干(0xF6)，先绘制WPALM作为overlay确保树干可见
                     if get(x, y + 1) == 0xF6 {
                         let uv = atlas.get(SpriteId::WPALM_000);
@@ -923,10 +923,10 @@ impl Figures {
             b'#' => match options.design {
                 1 => Some(SpriteId::FALL_000),
                 2 => {
-                    // 对齐 Oldsrc:
+                    // 树木渲染规则:
                     // - 上方也是 '#': Put TREE_001 (opaque)
                     // - 上方是 '%': Put TREE_000 (opaque) 然后 Draw TREE_003 (transparent leaves)
-                    // - 其它: Oldsrc 只 Draw TREE_003，但 CPU 版不是每帧全量重绘，树干像素会“留在背景”里。
+                    // - 其它: 原版 只 Draw TREE_003，但 CPU 版不是每帧全量重绘，树干像素会“留在背景”里。
                     //   GPU 全量重绘需要显式补一层树干底图，避免树叶动画帧透明处露出背景。
                     match get(x, y - 1) {
                         b'#' => {
@@ -947,7 +947,7 @@ impl Figures {
                             None
                         }
                         _ => {
-                            // 对齐 Oldsrc：顶部树叶只绘制透明树叶层
+                            // 顶部树叶只绘制透明树叶层
                             // 注意：TREE_003 的圆角依赖透明像素，若先铺不透明底图会导致圆角变直角
                             let uv = atlas.get(SpriteId::TREE_003);
                             commands
@@ -957,7 +957,7 @@ impl Figures {
                     }
                 }
                 3 => {
-                    // 对齐 Oldsrc：窗户是覆盖在地下砖墙上的透明图层。
+                    // 窗户是覆盖在地下砖墙上的透明图层。
                     // 这里不能用 WOOD_000 当底图，否则会出现你反馈的“窗户上方圆形部分露出木纹”。
                     let uv = atlas.get(SpriteId::PALBRICK_000);
                     commands.push(RenderCommand::Sprite(
@@ -968,7 +968,7 @@ impl Figures {
                     None
                 }
                 4 => {
-                    // 对齐 Oldsrc：岩浆使用 PutImage 语义（索引0也要绘制），否则会出现“高度变小且不贴底”
+                    // 对齐 原版：岩浆使用 PutImage 语义（索引0也要绘制），否则会出现“高度变小且不贴底”
                     let uv = atlas.get(SpriteId::LAVA_000);
                     commands.push(RenderCommand::Sprite(
                         SpriteCommand::new(xpos, ypos, uv).with_opaque(true),
@@ -976,7 +976,7 @@ impl Figures {
                     None
                 }
                 5 => {
-                    // 对齐 Oldsrc: design=5时填充颜色5
+                    // design=5时填充颜色5
                     // Pascal: vga.fill_world(xpos, ypos, W, H, 5)
                     commands.push(RenderCommand::FillRect(FillRect::new(
                         xpos as f32,
@@ -993,10 +993,10 @@ impl Figures {
             b'%' => match options.design {
                 1 => Some(SpriteId::FALL_001),
                 2 => {
-                    // 对齐 Oldsrc:
+                    // 树叶渲染规则:
                     // - 上方也是 '%': Put TREE_000 (opaque)
                     // - 上方是 '#': Put TREE_001 (opaque) 然后 Draw TREE_002 (transparent leaves)
-                    // - 其它: Oldsrc 只 Draw TREE_002，但 CPU 版背景会保留树干像素；GPU 需要补树干底图
+                    // - 其它: 原版只 Draw TREE_002，但 CPU 版背景会保留树干像素；GPU 需要补树干底图
                     match get(x, y - 1) {
                         b'%' => {
                             let uv = atlas.get(SpriteId::TREE_000);
@@ -1016,7 +1016,7 @@ impl Figures {
                             None
                         }
                         _ => {
-                            // 对齐 Oldsrc：顶部树叶只绘制透明树叶层
+                            // 顶部树叶只绘制透明树叶层
                             // 注意：TREE_002 的圆角依赖透明像素，若先铺不透明底图会导致圆角变直角
                             let uv = atlas.get(SpriteId::TREE_002);
                             commands
@@ -1026,7 +1026,7 @@ impl Figures {
                     }
                 }
                 3 => {
-                    // 对齐 Oldsrc：窗户是覆盖在地下砖墙上的透明图层
+                    // 窗户是覆盖在地下砖墙上的透明图层
                     let uv = atlas.get(SpriteId::PALBRICK_000);
                     commands.push(RenderCommand::Sprite(
                         SpriteCommand::new(xpos, ypos, uv).with_opaque(true),
@@ -1036,7 +1036,7 @@ impl Figures {
                     None
                 }
                 4 => {
-                    // 对齐 Oldsrc：岩浆使用 PutImage 语义（索引0也要绘制）
+                    // 岩浆使用 PutImage 语义（索引0也要绘制）
                     let uv = atlas.get(SpriteId::LAVA_001);
                     commands.push(RenderCommand::Sprite(
                         SpriteCommand::new(xpos, ypos, uv).with_opaque(true),
@@ -1044,8 +1044,8 @@ impl Figures {
                     None
                 }
                 5 => {
-                    // 对齐 Oldsrc: LAVA2 动画 (001~005)
-                    // 注意: Oldsrc 中没有 LAVA2_000 精灵, 底部红色由 '#' 字符的颜色5填充实现
+                    // LAVA2 动画 (001~005)
+                    // 注意: 原版中没有 LAVA2_000 精灵, 底部红色由 '#' 字符的颜色5填充实现
                     let idx = ((x + (buffers.lava_counter as i32 / 8)) % 5) as u8;
                     Some(match idx {
                         0 => SpriteId::LAVA2_001,
@@ -1066,7 +1066,7 @@ impl Figures {
                     // 这里不应该遇到 b'A'，如果遇到则跳过
                     None
                 } else {
-                    // 对齐 Oldsrc：A 砖块应使用 BuildWorld 重着色后的 Figures.bricks[0..2]
+                    // A 砖块应使用 BuildWorld 重着色后的 Figures.bricks[0..2]
                     // CPU 版 Redraw 会直接从 self.bricks 取图像；wgpu 版通过纹理图集中的 BRICK_RT_* 实现同样效果
                     let l = get(x - 1, y) == b'A';
                     let r = get(x + 1, y) == b'A';
@@ -1082,7 +1082,7 @@ impl Figures {
                 }
             }
             b'=' => {
-                // 对齐 Oldsrc: PIN精灵根据下方tile决定是否上下颠倒
+                // PIN精灵根据下方tile决定是否上下颠倒
                 // 如果下方是可以抓住的tile(CAN_HOLD_YOU)，正常绘制；否则上下颠倒
                 let below = get(x, y + 1);
                 let can_hold = crate::buffers::CAN_HOLD_YOU.contains(&below);
@@ -1097,9 +1097,9 @@ impl Figures {
                     None
                 }
             }
-            // 墙体精灵 1-26：对齐 Oldsrc 的 redraw 分支（14-26 会先减13再参与选择）
+            // 墙体精灵 1-26：对应原版 redraw 分支（14-26 会先减13再参与选择）
             1..=26 => {
-                // 对齐 Oldsrc 的 FigList 变体逻辑：
+                // FigList 变体逻辑：
                 // - ch>13: ch:=ch-13
                 // - 否则根据左右邻居 14..=26 + 当前 ch in [1,4,7]/[3,6,9] 做 overlay（不透明 put）
                 // - 然后绘制 FigList[0][ch_modified]：若 ch_modified 不在 [1,3,4,6,7,9] 则不透明 put，否则透明 draw
@@ -1155,8 +1155,8 @@ impl Figures {
 
         if let Some(id) = sprite_id {
             let uv = atlas.get(id);
-            // 默认对齐 DrawImage 语义: 索引0透明
-            // Oldsrc 的 PutImage/DrawImage 差异只在明确分支里使用 with_opaque(true) 处理
+            // 默认使用 DrawImage 语义: 索引0透明
+            // PutImage/DrawImage 差异只在明确分支里使用 with_opaque(true) 处理
             commands.push(RenderCommand::Sprite(SpriteCommand::new(xpos, ypos, uv)));
         }
 

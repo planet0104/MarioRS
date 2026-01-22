@@ -220,7 +220,7 @@ impl Enemies {
                 enemy.tp = TP_DEAD_VERT_PLANT;
                 enemy.delay_counter = 0;
                 enemy.y_vel = 0;
-                // 对齐 Oldsrc：死亡特效必须固定在击中位置，不能回到管道口
+                // 对齐 原版：死亡特效必须固定在击中位置，不能回到管道口
                 enemy.status = 0;
                 enemy.last_x_pos = enemy.x_pos;
                 enemy.last_y_pos = enemy.y_pos;
@@ -469,7 +469,7 @@ impl Enemies {
 
             match enemy.tp {
                 TP_CHIBIBO => {
-                    // 对齐 Oldsrc: TP_CHIBIBO 使用 FigList[1 + 3*sub_tp] 的单个图像，
+                    // 对齐 原版: TP_CHIBIBO 使用 FigList[1 + 3*sub_tp] 的单个图像，
                     // 并用 dir_counter 在左右镜像之间切换（作为走路动画效果）。
                     let sprite_id = if enemy.sub_tp == 0 {
                         SpriteId::CHIBIBO_000
@@ -693,7 +693,7 @@ impl Enemies {
                     commands.push(RenderCommand::DrawSprite(inst));
                 }
                 TP_KOOPA => {
-                    // 对齐 Oldsrc: 乌龟本体（有头）使用 GRKOOPA/RDKOOPA + y_pos-10
+                    // 对齐 原版: 乌龟本体（有头）使用 GRKOOPA/RDKOOPA + y_pos-10
                     let sprite_id = match (enemy.sub_tp, enemy.dir_counter % 16 <= 8) {
                         (0, true) => SpriteId::GRKOOPA_000,
                         (0, false) => SpriteId::GRKOOPA_001,
@@ -706,7 +706,7 @@ impl Enemies {
                     commands.push(RenderCommand::DrawSprite(inst));
                 }
                 TP_WAKING_KOOPA | TP_RUNNING_KOOPA => {
-                    // 对齐 Oldsrc: shell 跑动/抖动帧 = GRKP_000/001 + 左右镜像切换
+                    // 对齐 原版: shell 跑动/抖动帧 = GRKP_000/001 + 左右镜像切换
                     let base0 = if enemy.sub_tp == 0 {
                         SpriteId::GRKP_000
                     } else {
@@ -727,7 +727,7 @@ impl Enemies {
                     commands.push(RenderCommand::DrawSprite(inst));
                 }
                 TP_SLEEPING_KOOPA => {
-                    // Oldsrc: enemy_pictures[8 + 2*sub_tp][0]（固定使用镜像帧）
+                    // 原版: enemy_pictures[8 + 2*sub_tp][0]（固定使用镜像帧）
                     let sprite_id = if enemy.sub_tp == 0 {
                         SpriteId::GRKP_000
                     } else {
@@ -737,7 +737,7 @@ impl Enemies {
                     commands.push(RenderCommand::DrawSprite(inst));
                 }
                 TP_DEAD_KOOPA => {
-                    // Oldsrc: up_side_down(enemy_pictures[8 + 2*sub_tp][(dir_counter%16<=8)])
+                    // 原版: up_side_down(enemy_pictures[8 + 2*sub_tp][(dir_counter%16<=8)])
                     let sprite_id = if enemy.sub_tp == 0 {
                         SpriteId::GRKP_000
                     } else {
@@ -1322,7 +1322,7 @@ impl Enemies {
                         }
                     }
 
-                    // TP_VERT_FIREBALL 火花效果（对齐 Oldsrc show_enemies 逻辑）
+                    // TP_VERT_FIREBALL 火花效果（对齐 原版 show_enemies 逻辑）
                     if self.enemies[j].tp == TP_VERT_FIREBALL {
                         if (self.enemies[j].delay_counter - self.enemies[j].move_delay).abs() <= 1 {
                             // 在火球附近生成随机火花
@@ -1370,7 +1370,7 @@ impl Enemies {
                     }
                 }
 
-                // 处理死亡食人花动画（对齐Oldsrc：show_enemies中的TP_DEAD_VERT_PLANT逻辑）
+                // 处理死亡食人花动画（对齐原版：show_enemies中的TP_DEAD_VERT_PLANT逻辑）
                 // wgpu版本使用collect_enemy_sprites_gpu渲染，需要在move_enemies中更新状态
                 if self.enemies[j].tp == TP_DEAD_VERT_PLANT {
                     self.enemies[j].delay_counter = 0;

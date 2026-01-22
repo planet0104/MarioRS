@@ -338,26 +338,19 @@ impl MarioGame {
                     && self.show_player_counter <= (MAX_PAGE as i32 + 2)
                 {
                     // 显示 "MARIO START" 或 "LUIGI START"
-                    // Pascal: DrawImage 显示 Start000/Start001 图像，这里用文本渲染实现
-                    self.txt.set_font(
-                        0,
-                        crate::txt::FontStyle::BOLD | crate::txt::FontStyle::SHADOW,
-                    );
-                    let player_text = if self.cur_player == 0 {
-                        "MARIO START"
+                    // 对齐 原版 Pascal: DrawImage(160-iW/2, 85-iH/2, iW, iH, @Start000/001^)
+                    use crate::sprites::SpriteId;
+                    let (sprite_id, iw) = if self.cur_player == 0 {
+                        (SpriteId::START_000, 116) // Mario: 116x13
                     } else {
-                        "LUIGI START"
+                        (SpriteId::START_001, 108) // Luigi: 108x13
                     };
-                    // 居中显示（Pascal: 160 - iW div 2, 85 - iH div 2）
-                    // 85 - 13/2 = 78.5 约等于 79
-                    self.txt.center_text(
-                        render_state,
-                        79,
-                        player_text,
-                        0x1E,
-                        0,
-                        crate::render_state::SCREEN_WIDTH,
-                    );
+                    let ih = 13;
+                    let x = 160 - iw / 2;
+                    let y = 85 - ih / 2;
+                    let uv = self.atlas.get(sprite_id);
+                    // 使用屏幕坐标直接绘制（不经过世界坐标转换）
+                    render_state.sprite_batch.add_sprite(x, y, uv);
                     render_state.show_page();
 
                     // 在绘制完成后设置调色板
