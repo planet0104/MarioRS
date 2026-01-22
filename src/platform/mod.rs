@@ -17,6 +17,7 @@
 
 pub mod audio;
 pub mod touch_panel;
+pub mod common;
 
 #[cfg(all(target_os = "windows", feature = "gdi-backend"))]
 mod windows;
