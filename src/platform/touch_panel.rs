@@ -14,19 +14,19 @@ use super::{KeyCode as PlatformKeyCode, KeyEvent as PlatformKeyEvent};
 pub const LAYOUT_SAVE_KEY: &str = "touch_layout.dat";
 
 // 按钮尺寸常量
-const DEFAULT_DPAD_SIZE: f32 = 300.0;       // D-Pad 尺寸
-const DEFAULT_BUTTON_SIZE: f32 = 200.0;     // 右侧按钮尺寸
-const DEFAULT_SCREEN_WIDTH: f32 = 1080.0;   // 参考屏幕宽度
-const DEFAULT_SCREEN_HEIGHT: f32 = 1920.0;  // 参考屏幕高度
+const DEFAULT_DPAD_SIZE: f32 = 300.0; // D-Pad 尺寸
+const DEFAULT_BUTTON_SIZE: f32 = 200.0; // 右侧按钮尺寸
+const DEFAULT_SCREEN_WIDTH: f32 = 1080.0; // 参考屏幕宽度
+const DEFAULT_SCREEN_HEIGHT: f32 = 1920.0; // 参考屏幕高度
 
 // 编辑按钮常量
-const EDIT_BUTTON_RADIUS: f32 = 75.0;       // 编辑按钮半径
-const EDIT_BUTTON_MARGIN: f32 = 90.0;       // 编辑按钮距离屏幕边缘
-const EDIT_BUTTON_Y: f32 = 90.0;            // 编辑按钮 Y 坐标
-const EDIT_BUTTON_SPACING: f32 = 180.0;     // 编辑按钮和重置按钮间距
+const EDIT_BUTTON_RADIUS: f32 = 75.0; // 编辑按钮半径
+const EDIT_BUTTON_MARGIN: f32 = 90.0; // 编辑按钮距离屏幕边缘
+const EDIT_BUTTON_Y: f32 = 90.0; // 编辑按钮 Y 坐标
+const EDIT_BUTTON_SPACING: f32 = 180.0; // 编辑按钮和重置按钮间距
 
 // 暂停按钮常量
-const PAUSE_BUTTON_Y: f32 = 250.0;          // 暂停按钮 Y 坐标
+const PAUSE_BUTTON_Y: f32 = 250.0; // 暂停按钮 Y 坐标
 
 // ============================================================================
 // PNG 图片资源 (编译时内嵌) - 仅启用 touch-panel feature 时
@@ -341,11 +341,14 @@ impl VirtualButtonsRenderer {
         self.needs_redraw = true;
     }
 
-    /// 渲染并返回 RGBA buffer (带缓存，只在需要时重新绘制)
+    /// 渲染并返回 RGBA buffer (只在需要重绘时返回 Some)
+    ///
+    /// 返回 None 表示没有变化，调用者无需更新 overlay
+    /// 返回 Some 表示有新数据，调用者需要复制并上传
     pub fn render(&mut self, _states: &ButtonStates) -> Option<&[u8]> {
-        // 如果不需要重新渲染，直接返回缓存的数据
+        // 如果不需要重新渲染，返回 None（告诉调用者无需更新）
         if !self.needs_redraw {
-            return self.pixmap.as_ref().map(|p| p.data());
+            return None;
         }
 
         // 标记已渲染

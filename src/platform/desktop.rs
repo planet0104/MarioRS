@@ -5,7 +5,7 @@
 //
 // 重要:只有这个模块依赖 winit,其他游戏模块通过 platform.rs 抽象访问
 
-use super::common::{CommonRandom, CommonTime, FileStorage, FrameTimer};
+use super::common::{CommonRandom, CommonTime, FileStorage, FpsCounter, FrameTimer};
 use super::{
     DisplayBackend, InputBackend, KeyCode as PlatformKeyCode, KeyEvent as PlatformKeyEvent,
     LogBackend, LogLevel,
@@ -423,6 +423,7 @@ struct GameApp {
     input: DesktopInput,
     game_state: Option<GameState>,
     frame_timer: FrameTimer,
+    fps_counter: FpsCounter,
     #[allow(dead_code)]
     running: bool,
     is_fullscreen: bool,
@@ -435,6 +436,7 @@ impl GameApp {
             input: DesktopInput::new(),
             game_state: None,
             frame_timer: FrameTimer::new(60.0),
+            fps_counter: FpsCounter::new(),
             running: true,
             is_fullscreen: false,
         }
@@ -543,14 +545,44 @@ impl ApplicationHandler for GameApp {
                 }
                 self.frame_timer.advance();
 
+                let frame_start = std::time::Instant::now();
+
                 if let Some(state) = &mut self.game_state {
+                    // 设置FPS显示数据（内置到游戏状态栏）
+                    state.set_fps_display(self.fps_counter.fps(), self.fps_counter.frame_time_ms());
+
                     let result = state.frame_update();
 
-                    if let Some(gpu_renderer) = self.display.gpu_renderer_mut() {
-                        state.submit_to_gpu(gpu_renderer);
-                    }
+                    // 使用合并渲染：一次GPU提交完成所有渲染
+                    // 先获取需要的配置信息
+                    let surface_config = self
+                        .display
+                        .wgpu_config
+                        .as_ref()
+                        .map(|c| (c.width, c.height));
 
-                    let _ = self.display.present();
+                    if let Some((width, height)) = surface_config {
+                        if let Some(gpu_renderer) = self.display.gpu_renderer_mut() {
+                            // 准备渲染数据
+                            state.submit_to_gpu(gpu_renderer);
+                        }
+
+                        // 获取surface纹理并渲染
+                        if let Some(surface) = &self.display.wgpu_surface {
+                            if let Ok(output) = surface.get_current_texture() {
+                                let view = output
+                                    .texture
+                                    .create_view(&wgpu::TextureViewDescriptor::default());
+
+                                if let Some(gpu_renderer) = self.display.gpu_renderer_mut() {
+                                    gpu_renderer.update_scale(width, height);
+                                    gpu_renderer.render_frame_and_present(&view);
+                                }
+
+                                output.present();
+                            }
+                        }
+                    }
 
                     if result == FrameResult::Exit {
                         state.shutdown();
@@ -558,6 +590,10 @@ impl ApplicationHandler for GameApp {
                         event_loop.exit();
                     }
                 }
+
+                // 记录帧时间
+                let frame_time_ms = frame_start.elapsed().as_secs_f32() * 1000.0;
+                self.fps_counter.record_frame(frame_time_ms);
 
                 self.display.request_redraw();
             }

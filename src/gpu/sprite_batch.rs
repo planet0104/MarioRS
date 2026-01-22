@@ -267,21 +267,49 @@ impl SpriteBatch {
         self.push_fill(FillCommand::new(x, y, w, h, color_index));
     }
 
-    // 获取精灵实例数据
+    // 获取精灵实例数据（分配新Vec，保留兼容性）
     pub fn sprite_instances(&self) -> Vec<SpriteInstance> {
         let mut out: Vec<SpriteInstance> = self.sprites.iter().map(|s| s.to_instance()).collect();
         out.extend_from_slice(&self.instances);
         out
     }
 
-    // 获取填充矩形数据
+    // 获取填充矩形数据（分配新Vec，保留兼容性）
     pub fn fill_rects(&self) -> Vec<FillRect> {
         self.fills.iter().map(|f| f.to_fill_rect()).collect()
     }
 
-    /// 获取UI层填充矩形数据
+    /// 获取UI层填充矩形数据（分配新Vec，保留兼容性）
     pub fn ui_fill_rects(&self) -> Vec<FillRect> {
         self.ui_fills.iter().map(|f| f.to_fill_rect()).collect()
+    }
+
+    // ========================================================================
+    // 零分配迭代器方法（性能优化）
+    // ========================================================================
+
+    /// 迭代精灵命令（零分配）
+    #[inline]
+    pub fn sprites_iter(&self) -> impl Iterator<Item = &SpriteCommand> {
+        self.sprites.iter()
+    }
+
+    /// 迭代直接实例（零分配）
+    #[inline]
+    pub fn instances_iter(&self) -> impl Iterator<Item = &SpriteInstance> {
+        self.instances.iter()
+    }
+
+    /// 迭代填充命令（零分配）
+    #[inline]
+    pub fn fills_iter(&self) -> impl Iterator<Item = &FillCommand> {
+        self.fills.iter()
+    }
+
+    /// 迭代UI层填充命令（零分配）
+    #[inline]
+    pub fn ui_fills_iter(&self) -> impl Iterator<Item = &FillCommand> {
+        self.ui_fills.iter()
     }
 
     // 精灵数量
@@ -292,6 +320,16 @@ impl SpriteBatch {
     // 填充数量
     pub fn fill_count(&self) -> usize {
         self.fills.len()
+    }
+
+    /// 直接实例数量
+    pub fn instance_count(&self) -> usize {
+        self.instances.len()
+    }
+
+    /// UI层填充数量
+    pub fn ui_fill_count(&self) -> usize {
+        self.ui_fills.len()
     }
 }
 

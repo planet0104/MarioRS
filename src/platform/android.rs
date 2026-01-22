@@ -5,9 +5,7 @@
 //
 // 重要: 这个模块依赖 android-activity, 其他游戏模块通过 platform.rs 抽象访问
 
-use super::common::{
-    CommonRandom, CommonTime, FileStorage, FpsCounter, FrameTimer, draw_fps_to_overlay_rgba,
-};
+use super::common::{CommonRandom, CommonTime, FileStorage, FpsCounter, FrameTimer};
 use super::{
     DisplayBackend, InputBackend, KeyCode as PlatformKeyCode, KeyEvent as PlatformKeyEvent,
     LogBackend, LogLevel, StorageBackend,
@@ -349,22 +347,21 @@ impl AndroidDisplay {
             }
         };
 
-        let (device, queue) = match futures::executor::block_on(adapter.request_device(
-            &wgpu::DeviceDescriptor {
+        let (device, queue) =
+            match futures::executor::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
                 label: Some("Mario Android Device"),
                 required_features: wgpu::Features::empty(),
                 required_limits: wgpu::Limits::default(),
                 memory_hints: wgpu::MemoryHints::Performance,
                 experimental_features: wgpu::ExperimentalFeatures::disabled(),
                 trace: wgpu::Trace::Off,
-            },
-        )) {
-            Ok(v) => v,
-            Err(e) => {
-                log_error(&format!("[GPU] request_device_failed {:?}", e));
-                return;
-            }
-        };
+            })) {
+                Ok(v) => v,
+                Err(e) => {
+                    log_error(&format!("[GPU] request_device_failed {:?}", e));
+                    return;
+                }
+            };
 
         let device = std::sync::Arc::new(device);
         let queue: std::sync::Arc<wgpu::Queue> = std::sync::Arc::new(queue);
@@ -620,6 +617,12 @@ pub fn android_main(app: AndroidApp) {
     let mut fps_counter = FpsCounter::new();
     let mut running = true;
 
+    // 预分配overlay buffer（避免每帧分配）
+    let mut overlay_buffer: Vec<u8> = Vec::new();
+    let mut overlay_buffer_size: (u32, u32) = (0, 0);
+    // 上一帧是否显示了虚拟按钮（用于检测变化）
+    let mut last_show_buttons = false;
+
     while running {
         app.poll_events(Some(Duration::ZERO), |event| match event {
             PollEvent::Main(main_event) => match main_event {
@@ -752,6 +755,9 @@ pub fn android_main(app: AndroidApp) {
         if let Some(state) = &mut game_state {
             let frame_start = Instant::now();
 
+            // FPS显示内置到游戏状态栏（使用GPU渲染，无需overlay）
+            state.set_fps_display(fps_counter.fps(), fps_counter.frame_time_ms());
+
             let result = state.frame_update();
 
             let (ow, oh) = match display.wgpu_config.as_ref() {
@@ -759,43 +765,81 @@ pub fn android_main(app: AndroidApp) {
                 None => (0, 0),
             };
 
-            let mut overlay_vec_opt: Option<Vec<u8>> = None;
+            // 优化: overlay只用于触摸面板按钮，FPS已内置到游戏
+            let mut needs_overlay_upload = false;
             if ow > 0 && oh > 0 {
-                let mut overlay_vec = if input.should_show_virtual_buttons() {
+                let required_size = (ow * oh * 4) as usize;
+                let show_buttons = input.should_show_virtual_buttons();
+
+                // 检查buffer尺寸是否需要重新分配
+                if overlay_buffer_size != (ow, oh) {
+                    overlay_buffer.resize(required_size, 0);
+                    overlay_buffer_size = (ow, oh);
+                    // 尺寸变化时需要重新渲染
+                    input.touch_panel_mut().renderer_mut().mark_dirty();
+                    needs_overlay_upload = true;
+                }
+
+                // 只有在需要显示虚拟按钮或状态变化时才更新overlay
+                if show_buttons {
+                    // 从不显示切换到显示时，强制重绘
+                    if !last_show_buttons {
+                        input.touch_panel_mut().renderer_mut().mark_dirty();
+                    }
+
                     let button_states = input.touch_panel().button_states();
-                    match input
+                    if let Some(rendered) = input
                         .touch_panel_mut()
                         .renderer_mut()
                         .render(&button_states)
                     {
-                        Some(s) => s.to_vec(),
-                        None => vec![0u8; (ow * oh * 4) as usize],
+                        // 只有在渲染器返回新数据时才复制和上传
+                        overlay_buffer.copy_from_slice(rendered);
+                        needs_overlay_upload = true;
                     }
-                } else {
-                    vec![0u8; (ow * oh * 4) as usize]
-                };
-                // 使用公共模块的 FPS 绘制函数
-                draw_fps_to_overlay_rgba(
-                    &mut overlay_vec,
-                    ow,
-                    oh,
-                    fps_counter.fps(),
-                    fps_counter.frame_time_ms(),
-                );
-                overlay_vec_opt = Some(overlay_vec);
+                } else if last_show_buttons {
+                    // 从显示切换到不显示，清空buffer
+                    overlay_buffer.fill(0);
+                    needs_overlay_upload = true;
+                }
+
+                last_show_buttons = show_buttons;
             }
 
-            if let Some(gpu_renderer) = display.gpu_renderer_mut() {
-                state.submit_to_gpu(gpu_renderer);
+            // 使用合并渲染：一次GPU提交完成所有渲染
+            // 先获取需要的配置信息，避免借用冲突
+            let surface_config = display.wgpu_config.as_ref().map(|c| (c.width, c.height));
 
-                if let Some(overlay_vec) = overlay_vec_opt.as_ref() {
-                    gpu_renderer.upload_overlay_rgba(ow, oh, overlay_vec);
-                } else {
-                    gpu_renderer.clear_overlay();
+            if let Some((width, height)) = surface_config {
+                if let Some(gpu_renderer) = display.gpu_renderer_mut() {
+                    // 准备渲染数据
+                    state.submit_to_gpu(gpu_renderer);
+
+                    // 只在需要时上传overlay（仅触摸面板按钮）
+                    if needs_overlay_upload && !overlay_buffer.is_empty() {
+                        gpu_renderer.upload_overlay_rgba(ow, oh, &overlay_buffer);
+                    }
+                }
+
+                // 获取surface纹理并渲染
+                if let Some(surface) = &display.wgpu_surface {
+                    if let Ok(output) = surface.get_current_texture() {
+                        let view = output
+                            .texture
+                            .create_view(&wgpu::TextureViewDescriptor::default());
+
+                        if let Some(gpu_renderer) = display.gpu_renderer_mut() {
+                            // 更新缩放参数
+                            gpu_renderer.update_scale(width, height);
+
+                            // 一次性完成渲染和呈现（单次GPU提交）
+                            gpu_renderer.render_frame_and_present(&view);
+                        }
+
+                        output.present();
+                    }
                 }
             }
-
-            let _ = display.present();
 
             // 使用公共模块的 FPS 计数器
             let frame_time_ms = frame_start.elapsed().as_secs_f32() * 1000.0;

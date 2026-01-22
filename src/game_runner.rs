@@ -16,6 +16,12 @@ pub const GAME_HEIGHT: u32 = WINDOWHEIGHT as u32;
 pub struct GameState {
     pub render_state: RenderState,
     pub game: MarioGame,
+
+    // GPU资源上传优化标志
+    /// 上次上传的图集版本号（用于检测变化）
+    last_atlas_version: u64,
+    /// 上一帧的调色板数据（用于检测变化）
+    last_palette: [[u8; 3]; 256],
 }
 
 impl GameState {
@@ -30,7 +36,12 @@ impl GameState {
         game.init_palette(&mut render_state);
         eprintln!("[DEBUG] GameState::new: 调色板初始化完成");
 
-        Self { render_state, game }
+        Self {
+            render_state,
+            game,
+            last_atlas_version: 0, // 初始版本不匹配，确保首次上传
+            last_palette: [[0u8; 3]; 256],
+        }
     }
 
     /// 处理键盘事件
@@ -41,6 +52,12 @@ impl GameState {
     /// 帧更新
     pub fn frame_update(&mut self) -> FrameResult {
         self.game.frame_update(&mut self.render_state)
+    }
+
+    /// 设置FPS显示数据（由平台层调用）
+    /// FPS将显示在游戏状态栏中，使用GPU渲染
+    pub fn set_fps_display(&mut self, fps: u32, frame_time_ms: f32) {
+        self.game.set_fps_display(fps, frame_time_ms);
     }
 
     /// 获取GPU精灵批次数据用于渲染
@@ -82,49 +99,59 @@ impl GameState {
         (atlas.data(), size, size)
     }
 
-    /// 提交渲染数据到GPU
+    /// 准备渲染数据（不执行渲染）
     ///
-    /// 这个方法封装了所有GPU渲染数据的提交逻辑，包括：
-    /// 1. 上传调色板
-    /// 2. 上传精灵图集
-    /// 3. 提交fills、sprites、ui_fills
-    /// 4. 渲染到GPU内部纹理
+    /// 性能优化：
+    /// 1. 只在图集版本变化时上传（关卡切换时build_atlas会递增版本号）
+    /// 2. 只在调色板变化时上传（淡入淡出效果时）
+    /// 3. 直接传递SpriteBatch引用避免Vec分配
     ///
-    /// 平台层只需调用此方法，然后将GPU内部纹理缩放输出到窗口即可
-    pub fn submit_to_gpu(&self, gpu: &mut GpuRenderer) {
-        // 获取渲染数据
-        let sprites = self.get_sprite_instances();
-        let fills = self.get_fill_rects();
-        let ui_fills = self.get_ui_fill_rects();
-        let palette = self.get_palette_rgba();
+    /// 调用此方法后，平台层应调用 gpu.render_frame_and_present() 一次性完成渲染
+    pub fn submit_to_gpu(&mut self, gpu: &mut GpuRenderer) {
+        // 检查图集版本是否变化（关卡切换时会重建图集）
+        let current_atlas_version = self.game.atlas.version();
+        if current_atlas_version != self.last_atlas_version {
+            let (atlas_data, atlas_w, atlas_h) = self.get_atlas_data();
+            gpu.upload_atlas(atlas_data, atlas_w, atlas_h);
+            self.last_atlas_version = current_atlas_version;
+        }
 
-        // 上传调色板到GPU
-        gpu.upload_palette(0, &palette);
+        // 检查调色板是否变化
+        let current_palette = &self.render_state.palette.palette;
+        if current_palette != &self.last_palette {
+            let palette_rgba = self.get_palette_rgba();
+            gpu.upload_palette(0, &palette_rgba);
+            self.last_palette = *current_palette;
+        }
 
-        // 上传图集到GPU（BuildWorld 可能会重建/重着色 sprites）
-        let (atlas_data, atlas_w, atlas_h) = self.get_atlas_data();
-        gpu.upload_atlas(atlas_data, atlas_w, atlas_h);
-
-        // 开始新一帧渲染
+        // 开始新一帧渲染（只准备数据，不执行渲染）
         gpu.begin_frame();
 
+        // 直接从SpriteBatch获取数据并提交（避免额外Vec分配）
+        let batch = self.render_state.get_sprite_batch();
+
         // 添加填充矩形（背景层）
-        for fill in fills {
-            gpu.draw_fill(fill);
+        for fill in batch.fills_iter() {
+            gpu.draw_fill(fill.to_fill_rect());
         }
 
         // 添加精灵（实体层）
-        for sprite in sprites {
-            gpu.draw_sprite(sprite);
+        for sprite in batch.sprites_iter() {
+            gpu.draw_sprite(sprite.to_instance());
+        }
+
+        // 添加直接实例
+        for inst in batch.instances_iter() {
+            gpu.draw_sprite(*inst);
         }
 
         // 添加UI层填充矩形（状态栏等，在sprites之后渲染）
-        for fill in ui_fills {
-            gpu.draw_ui_fill(fill);
+        for fill in batch.ui_fills_iter() {
+            gpu.draw_ui_fill(fill.to_fill_rect());
         }
 
-        // 渲染到GPU内部纹理
-        gpu.render_frame();
+        // 注意：不再调用 render_frame()
+        // 由平台层调用 render_frame_and_present() 完成渲染和呈现
     }
 
     /// 请求退出

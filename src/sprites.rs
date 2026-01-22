@@ -994,6 +994,8 @@ pub enum SpriteId {
 pub struct SpriteAtlas {
     pub atlas: TextureAtlas,
     uvs: Vec<SpriteUV>,
+    /// 版本号 - 每次重建图集时递增，用于检测变化
+    version: u64,
 }
 
 impl SpriteAtlas {
@@ -1010,6 +1012,11 @@ impl SpriteAtlas {
     // 获取图集尺寸
     pub fn size(&self) -> u32 {
         self.atlas.size
+    }
+
+    /// 获取版本号（用于检测图集是否被重建）
+    pub fn version(&self) -> u64 {
+        self.version
     }
 
     /// 更新 FIGLIST 精灵（用于 init_walls 之后同步 GPU 纹理）
@@ -1473,6 +1480,14 @@ impl SpriteDataManager {
                 .unwrap(),
         );
 
-        SpriteAtlas { atlas, uvs }
+        // 使用静态计数器生成递增的版本号
+        static VERSION_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        let version = VERSION_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
+        SpriteAtlas {
+            atlas,
+            uvs,
+            version,
+        }
     }
 }

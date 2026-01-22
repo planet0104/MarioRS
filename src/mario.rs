@@ -162,7 +162,7 @@ impl MarioGame {
         eprintln!("[DEBUG] MarioGame::new: 创建其他组件");
         let blocks = Blocks::new();
         let stars = Stars::new();
-        let status = Status; // GPU版Status是空结构体
+        let status = Status::new(); // GPU版Status包含FPS显示数据
         let glitters = GlitterSystem {
             count: vec![0u8; MAX_GLITTER + 1],
             glitter_list: vec![Glitter { attr: 0, pos: 0 }; MAX_GLITTER + 1],
@@ -663,6 +663,12 @@ impl MarioGame {
     /// 检查是否应该退出
     pub fn should_exit(&self) -> bool {
         self.quit_requested || self.main_phase == MainPhase::Exiting
+    }
+
+    /// 设置FPS显示数据
+    /// 由平台层调用，FPS将显示在游戏状态栏中
+    pub fn set_fps_display(&mut self, fps: u32, frame_time_ms: f32) {
+        self.status.set_fps(fps, frame_time_ms);
     }
 
     /// 关闭游戏

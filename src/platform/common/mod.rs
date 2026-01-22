@@ -5,15 +5,13 @@
 
 pub mod frame_timer;
 pub mod input;
-pub mod overlay;
 pub mod random;
 pub mod storage;
 pub mod time;
 
 // 导出公共类型
-pub use frame_timer::{FrameTimer, FpsCounter};
+pub use frame_timer::{FpsCounter, FrameTimer};
 pub use input::InputState;
-pub use overlay::draw_fps_to_overlay_rgba;
 pub use random::CommonRandom;
 pub use storage::FileStorage;
 pub use time::CommonTime;

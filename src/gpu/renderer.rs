@@ -807,4 +807,138 @@ impl GpuRenderer {
 
         self.queue.submit(std::iter::once(encoder.finish()));
     }
+
+    /// 一次性渲染游戏帧并输出到surface（性能优化版本）
+    ///
+    /// 将 render_frame() 和 render_to_surface() 合并，减少GPU命令提交次数
+    pub fn render_frame_and_present(&mut self, surface_view: &wgpu::TextureView) {
+        // 确保缓冲区容量足够
+        self.ensure_sprite_buffer_capacity(self.sprite_instances.len().max(1));
+        self.ensure_fill_buffer_capacity(self.fill_rects.len().max(1));
+        self.ensure_ui_fill_buffer_capacity(self.ui_fill_rects.len().max(1));
+
+        // 上传数据到GPU
+        if !self.sprite_instances.is_empty() {
+            self.queue.write_buffer(
+                &self.sprite_buffer,
+                0,
+                bytemuck::cast_slice(&self.sprite_instances),
+            );
+        }
+        if !self.fill_rects.is_empty() {
+            self.queue
+                .write_buffer(&self.fill_buffer, 0, bytemuck::cast_slice(&self.fill_rects));
+        }
+        if !self.ui_fill_rects.is_empty() {
+            self.queue.write_buffer(
+                &self.ui_fill_buffer,
+                0,
+                bytemuck::cast_slice(&self.ui_fill_rects),
+            );
+        }
+
+        // 创建单一命令编码器（减少submit次数）
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("combined_frame_encoder"),
+            });
+
+        // Pass 1: 游戏渲染到内部纹理
+        {
+            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("game_render_pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &self.render_texture_view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color {
+                            r: 0.0,
+                            g: 0.0,
+                            b: 0.0,
+                            a: 1.0,
+                        }),
+                        store: wgpu::StoreOp::Store,
+                    },
+                    depth_slice: None,
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+
+            if !self.fill_rects.is_empty() {
+                render_pass.set_pipeline(&self.fill_pipeline);
+                render_pass.set_bind_group(0, &self.fill_bind_group, &[]);
+                render_pass.set_vertex_buffer(0, self.fill_buffer.slice(..));
+                render_pass.draw(0..6, 0..self.fill_rects.len() as u32);
+            }
+
+            if !self.sprite_instances.is_empty() {
+                render_pass.set_pipeline(&self.sprite_pipeline);
+                render_pass.set_bind_group(0, &self.sprite_bind_group, &[]);
+                render_pass.set_vertex_buffer(0, self.sprite_buffer.slice(..));
+                render_pass.draw(0..6, 0..self.sprite_instances.len() as u32);
+            }
+
+            if !self.ui_fill_rects.is_empty() {
+                render_pass.set_pipeline(&self.fill_pipeline);
+                render_pass.set_bind_group(0, &self.fill_bind_group, &[]);
+                render_pass.set_vertex_buffer(0, self.ui_fill_buffer.slice(..));
+                render_pass.draw(0..6, 0..self.ui_fill_rects.len() as u32);
+            }
+        }
+
+        // Pass 2: 缩放输出到surface
+        {
+            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("scale_render_pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: surface_view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                    depth_slice: None,
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+
+            render_pass.set_pipeline(&self.scale_pipeline);
+            render_pass.set_bind_group(0, &self.scale_bind_group, &[]);
+            render_pass.draw(0..6, 0..1);
+        }
+
+        // Pass 3: 叠加层
+        {
+            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("overlay_render_pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: surface_view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                    depth_slice: None,
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+
+            render_pass.set_pipeline(&self.overlay_pipeline);
+            render_pass.set_bind_group(0, &self.overlay_bind_group, &[]);
+            render_pass.draw(0..6, 0..1);
+        }
+
+        // 单次提交所有命令
+        self.queue.submit(std::iter::once(encoder.finish()));
+    }
 }

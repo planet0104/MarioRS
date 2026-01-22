@@ -13,7 +13,7 @@
 #![allow(static_mut_refs)]
 
 use super::audio::WaveOutAudio;
-use super::common::{CommonTime, FileStorage, FrameTimer};
+use super::common::{CommonTime, FileStorage, FpsCounter, FrameTimer};
 use super::{DisplayBackend, FrameResult, InputBackend, KeyCode, KeyEvent, LogBackend, LogLevel};
 use crate::game_runner::{GAME_HEIGHT, GAME_WIDTH, GameState};
 use crate::gpu::GpuRenderer;
@@ -581,7 +581,7 @@ unsafe fn init_gpu_renderer(hwnd: HWND) -> bool {
 
 unsafe fn render_frame(_hwnd: HWND) {
     unsafe {
-        let state = match GAME_STATE.as_ref() {
+        let state = match GAME_STATE.as_mut() {
             Some(s) => s,
             None => return,
         };
@@ -593,7 +593,12 @@ unsafe fn render_frame(_hwnd: HWND) {
             Some(s) => s,
             None => return,
         };
+        let config = match GPU_SURFACE_CONFIG.as_ref() {
+            Some(c) => c,
+            None => return,
+        };
 
+        // 准备渲染数据
         state.submit_to_gpu(gpu);
 
         match surface.get_current_texture() {
@@ -609,7 +614,11 @@ unsafe fn render_frame(_hwnd: HWND) {
                 let view = output
                     .texture
                     .create_view(&wgpu::TextureViewDescriptor::default());
-                gpu.render_to_surface(&view);
+
+                // 使用合并渲染：一次GPU提交完成所有渲染
+                gpu.update_scale(config.width, config.height);
+                gpu.render_frame_and_present(&view);
+
                 output.present();
             }
             Err(wgpu::SurfaceError::Lost) => {
@@ -723,8 +732,9 @@ pub fn run_game() -> std::result::Result<(), Box<dyn std::error::Error>> {
         ShowWindow(hwnd, SW_SHOW);
         UpdateWindow(hwnd);
 
-        // 使用公共帧率控制器
+        // 使用公共帧率控制器和FPS计数器
         let mut frame_timer = FrameTimer::new(60.0);
+        let mut fps_counter = FpsCounter::new();
         let mut msg: MSG = zeroed();
 
         while RUNNING {
@@ -741,7 +751,12 @@ pub fn run_game() -> std::result::Result<(), Box<dyn std::error::Error>> {
                 break;
             }
 
+            let frame_start = std::time::Instant::now();
+
             if let Some(state) = GAME_STATE.as_mut() {
+                // 设置FPS显示数据（内置到游戏状态栏）
+                state.set_fps_display(fps_counter.fps(), fps_counter.frame_time_ms());
+
                 let result = state.frame_update();
 
                 if result == FrameResult::Exit {
@@ -752,6 +767,10 @@ pub fn run_game() -> std::result::Result<(), Box<dyn std::error::Error>> {
             }
 
             render_frame(hwnd);
+
+            // 记录帧时间
+            let frame_time_ms = frame_start.elapsed().as_secs_f32() * 1000.0;
+            fps_counter.record_frame(frame_time_ms);
 
             // 使用公共帧率控制
             frame_timer.wait_if_needed();
