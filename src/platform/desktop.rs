@@ -104,8 +104,8 @@ impl DesktopDisplay {
         let window = Arc::new(event_loop.create_window(window_attributes)?);
         let window_size = window.inner_size();
         
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-            backends: Backends::VULKAN | Backends::GL | Backends::DX12,
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+            backends: Backends::VULKAN | Backends::GL,
             ..Default::default()
         });
         
@@ -115,7 +115,7 @@ impl DesktopDisplay {
             power_preference: wgpu::PowerPreference::HighPerformance,
             compatible_surface: Some(&surface),
             force_fallback_adapter: false,
-        })).ok_or("找不到合适的GPU适配器")?;
+        }))?;
         
         let (device, queue) = futures::executor::block_on(adapter.request_device(
             &wgpu::DeviceDescriptor {
@@ -123,8 +123,9 @@ impl DesktopDisplay {
                 required_features: wgpu::Features::empty(),
                 required_limits: wgpu::Limits::downlevel_webgl2_defaults(),
                 memory_hints: wgpu::MemoryHints::Performance,
+                experimental_features: wgpu::ExperimentalFeatures::disabled(),
+                trace: wgpu::Trace::Off,
             },
-            None,
         ))?;
         
         let device = Arc::new(device);

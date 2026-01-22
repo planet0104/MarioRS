@@ -416,7 +416,7 @@ impl GpuRenderer {
             address_mode_w: wgpu::AddressMode::ClampToEdge,
             mag_filter: wgpu::FilterMode::Nearest,
             min_filter: wgpu::FilterMode::Nearest,
-            mipmap_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::MipmapFilterMode::Nearest,
             ..Default::default()
         });
 
@@ -575,7 +575,7 @@ impl GpuRenderer {
         let sprite_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("sprite_pipeline_layout"),
             bind_group_layouts: &[&sprite_bind_group_layout],
-            push_constant_ranges: &[],
+            immediate_size: 0,
         });
 
         let sprite_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -603,7 +603,7 @@ impl GpuRenderer {
             },
             depth_stencil: None,
             multisample: wgpu::MultisampleState::default(),
-            multiview: None,
+            multiview_mask: None,
             cache: None,
         });
 
@@ -669,7 +669,7 @@ impl GpuRenderer {
         let fill_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("fill_pipeline_layout"),
             bind_group_layouts: &[&fill_bind_group_layout],
-            push_constant_ranges: &[],
+            immediate_size: 0,
         });
 
         let fill_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -697,7 +697,7 @@ impl GpuRenderer {
             },
             depth_stencil: None,
             multisample: wgpu::MultisampleState::default(),
-            multiview: None,
+            multiview_mask: None,
             cache: None,
         });
 
@@ -768,7 +768,7 @@ impl GpuRenderer {
         let scale_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("scale_pipeline_layout"),
             bind_group_layouts: &[&scale_bind_group_layout],
-            push_constant_ranges: &[],
+            immediate_size: 0,
         });
 
         let scale_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -796,7 +796,7 @@ impl GpuRenderer {
             },
             depth_stencil: None,
             multisample: wgpu::MultisampleState::default(),
-            multiview: None,
+            multiview_mask: None,
             cache: None,
         });
 
@@ -862,7 +862,7 @@ impl GpuRenderer {
         let overlay_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("overlay_pipeline_layout"),
             bind_group_layouts: &[&overlay_bind_group_layout],
-            push_constant_ranges: &[],
+            immediate_size: 0,
         });
 
         let overlay_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -890,7 +890,7 @@ impl GpuRenderer {
             },
             depth_stencil: None,
             multisample: wgpu::MultisampleState::default(),
-            multiview: None,
+            multiview_mask: None,
             cache: None,
         });
 
@@ -938,14 +938,14 @@ impl GpuRenderer {
         }
         self.ensure_overlay_texture(width, height);
         self.queue.write_texture(
-            wgpu::ImageCopyTexture {
+            wgpu::TexelCopyTextureInfo {
                 texture: &self.overlay_texture,
                 mip_level: 0,
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
             },
             rgba,
-            wgpu::ImageDataLayout {
+            wgpu::TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(width * 4),
                 rows_per_image: Some(height),
@@ -963,14 +963,14 @@ impl GpuRenderer {
         self.ensure_overlay_texture(1, 1);
         let transparent = [0u8, 0u8, 0u8, 0u8];
         self.queue.write_texture(
-            wgpu::ImageCopyTexture {
+            wgpu::TexelCopyTextureInfo {
                 texture: &self.overlay_texture,
                 mip_level: 0,
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
             },
             &transparent,
-            wgpu::ImageDataLayout {
+            wgpu::TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(4),
                 rows_per_image: Some(1),
@@ -1027,14 +1027,14 @@ impl GpuRenderer {
     // 上传精灵图集到GPU
     pub fn upload_atlas(&self, data: &[u8], width: u32, height: u32) {
         self.queue.write_texture(
-            wgpu::ImageCopyTexture {
+            wgpu::TexelCopyTextureInfo {
                 texture: &self.atlas_texture,
                 mip_level: 0,
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
             },
             data,
-            wgpu::ImageDataLayout {
+            wgpu::TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(width),
                 rows_per_image: Some(height),
@@ -1051,14 +1051,14 @@ impl GpuRenderer {
     pub fn upload_palette(&self, row: u32, colors: &[[u8; 4]; 256]) {
         let data: Vec<u8> = colors.iter().flat_map(|c| c.iter().copied()).collect();
         self.queue.write_texture(
-            wgpu::ImageCopyTexture {
+            wgpu::TexelCopyTextureInfo {
                 texture: &self.palette_texture,
                 mip_level: 0,
                 origin: wgpu::Origin3d { x: 0, y: row, z: 0 },
                 aspect: wgpu::TextureAspect::All,
             },
             &data,
-            wgpu::ImageDataLayout {
+            wgpu::TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(256 * 4),
                 rows_per_image: Some(1),
@@ -1164,10 +1164,12 @@ impl GpuRenderer {
                         load: wgpu::LoadOp::Clear(wgpu::Color { r: 0.0, g: 0.0, b: 0.0, a: 1.0 }),
                         store: wgpu::StoreOp::Store,
                     },
+                    depth_slice: None,
                 })],
                 depth_stencil_attachment: None,
                 timestamp_writes: None,
                 occlusion_query_set: None,
+                multiview_mask: None,
             });
 
             // 先渲染填充矩形 (背景层)
@@ -1229,10 +1231,12 @@ impl GpuRenderer {
                         load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
                         store: wgpu::StoreOp::Store,
                     },
+                    depth_slice: None,
                 })],
                 depth_stencil_attachment: None,
                 timestamp_writes: None,
                 occlusion_query_set: None,
+                multiview_mask: None,
             });
 
             render_pass.set_pipeline(&self.scale_pipeline);
@@ -1251,10 +1255,12 @@ impl GpuRenderer {
                         load: wgpu::LoadOp::Load,
                         store: wgpu::StoreOp::Store,
                     },
+                    depth_slice: None,
                 })],
                 depth_stencil_attachment: None,
                 timestamp_writes: None,
                 occlusion_query_set: None,
+                multiview_mask: None,
             });
 
             render_pass.set_pipeline(&self.overlay_pipeline);

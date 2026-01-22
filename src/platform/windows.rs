@@ -458,8 +458,8 @@ unsafe fn init_gpu_renderer(hwnd: HWND) -> bool {
     
     let hinstance = unsafe { GetModuleHandleW(null_mut()) };
     
-    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-        backends: wgpu::Backends::DX12 | wgpu::Backends::VULKAN,
+    let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+        backends: wgpu::Backends::VULKAN,
         ..Default::default()
     });
     
@@ -500,9 +500,9 @@ unsafe fn init_gpu_renderer(hwnd: HWND) -> bool {
         compatible_surface: Some(&surface),
         force_fallback_adapter: false,
     })) {
-        Some(a) => a,
-        None => {
-            eprintln!("[GPU] Cannot get GPU adapter");
+        Ok(a) => a,
+        Err(e) => {
+            eprintln!("[GPU] Cannot get GPU adapter: {:?}", e);
             return false;
         }
     };
@@ -513,8 +513,9 @@ unsafe fn init_gpu_renderer(hwnd: HWND) -> bool {
             required_features: wgpu::Features::empty(),
             required_limits: wgpu::Limits::default(),
             memory_hints: wgpu::MemoryHints::Performance,
+            experimental_features: wgpu::ExperimentalFeatures::disabled(),
+            trace: wgpu::Trace::Off,
         },
-        None,
     )) {
         Ok((d, q)) => (d, q),
         Err(e) => {
