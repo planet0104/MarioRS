@@ -279,24 +279,31 @@ impl AndroidDisplay {
         let win_width = window.width().max(1) as u32;
         let win_height = window.height().max(1) as u32;
 
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
             backends: wgpu::Backends::VULKAN | wgpu::Backends::GL,
             ..Default::default()
         });
 
         use std::ffi::c_void;
+        use std::ptr::NonNull;
         use wgpu::rwh::{
             AndroidDisplayHandle, AndroidNdkWindowHandle, HasDisplayHandle, HasWindowHandle,
             RawDisplayHandle, RawWindowHandle,
         };
+
+        // Android 窗口句柄包装器
         struct AndroidHandle {
-            a_native_window: *mut c_void,
+            a_native_window: NonNull<c_void>,
         }
+
+        // SAFETY: AndroidHandle 仅包含指向 Android native window 的指针
+        // 该指针在 surface 生命周期内有效
+        unsafe impl Send for AndroidHandle {}
+        unsafe impl Sync for AndroidHandle {}
+
         impl HasWindowHandle for AndroidHandle {
             fn window_handle(&self) -> Result<wgpu::rwh::WindowHandle<'_>, wgpu::rwh::HandleError> {
-                let mut handle = AndroidNdkWindowHandle::empty();
-                handle.a_native_window = self.a_native_window;
-                handle.api_version = 0;
+                let handle = AndroidNdkWindowHandle::new(self.a_native_window);
                 let raw = RawWindowHandle::AndroidNdk(handle);
                 Ok(unsafe { wgpu::rwh::WindowHandle::borrow_raw(raw) })
             }
@@ -305,14 +312,20 @@ impl AndroidDisplay {
             fn display_handle(
                 &self,
             ) -> Result<wgpu::rwh::DisplayHandle<'_>, wgpu::rwh::HandleError> {
-                let raw = RawDisplayHandle::Android(AndroidDisplayHandle::empty());
+                let raw = RawDisplayHandle::Android(AndroidDisplayHandle::new());
                 Ok(unsafe { wgpu::rwh::DisplayHandle::borrow_raw(raw) })
             }
         }
 
-        let android_handle = AndroidHandle {
-            a_native_window: window.ptr().as_ptr() as *mut c_void,
+        let a_native_window = match NonNull::new(window.ptr().as_ptr() as *mut c_void) {
+            Some(ptr) => ptr,
+            None => {
+                log_error("[GPU] native_window_ptr_is_null");
+                return;
+            }
         };
+
+        let android_handle = AndroidHandle { a_native_window };
 
         let surface = match instance.create_surface(&android_handle) {
             Ok(s) => s,
@@ -329,9 +342,9 @@ impl AndroidDisplay {
                 force_fallback_adapter: false,
             },
         )) {
-            Some(a) => a,
-            None => {
-                log_error("[GPU] request_adapter_failed");
+            Ok(a) => a,
+            Err(e) => {
+                log_error(&format!("[GPU] request_adapter_failed {:?}", e));
                 return;
             }
         };
@@ -342,8 +355,9 @@ impl AndroidDisplay {
                 required_features: wgpu::Features::empty(),
                 required_limits: wgpu::Limits::default(),
                 memory_hints: wgpu::MemoryHints::Performance,
+                experimental_features: wgpu::ExperimentalFeatures::disabled(),
+                trace: wgpu::Trace::Off,
             },
-            None,
         )) {
             Ok(v) => v,
             Err(e) => {
@@ -353,7 +367,7 @@ impl AndroidDisplay {
         };
 
         let device = std::sync::Arc::new(device);
-        let queue = std::sync::Arc::new(queue);
+        let queue: std::sync::Arc<wgpu::Queue> = std::sync::Arc::new(queue);
 
         let caps = surface.get_capabilities(&adapter);
         let surface_format = caps.formats[0];
@@ -556,8 +570,6 @@ pub type DesktopAudio = AndroidAudio;
 
 pub use super::common::{now_ms, random_f32, random_i32, random_u8, random_u32, random_usize};
 
-use std::cell::RefCell;
-
 thread_local! {
     static LOG: AndroidLog = AndroidLog::new();
 }
@@ -722,6 +734,13 @@ pub fn android_main(app: AndroidApp) {
             }
         }
 
+        // 立即处理输入事件 - 确保触摸响应及时，不受帧率限制影响
+        if let Some(state) = &mut game_state {
+            for event in input.poll_events() {
+                state.handle_key_event(&event);
+            }
+        }
+
         // 帧率限制
         if !frame_timer.should_render() {
             frame_timer.wait_if_needed();
@@ -732,10 +751,6 @@ pub fn android_main(app: AndroidApp) {
         // 游戏帧更新
         if let Some(state) = &mut game_state {
             let frame_start = Instant::now();
-
-            for event in input.poll_events() {
-                state.handle_key_event(&event);
-            }
 
             let result = state.frame_update();
 
