@@ -1,5 +1,5 @@
 // RenderState 模块 - GPU渲染状态管理
-// 
+//
 // 架构说明：
 // - 管理视口状态（x_view, y_view）用于世界坐标转换
 // - 管理调色板数据用于GPU着色器
@@ -37,7 +37,7 @@ pub struct RenderState {
     pub y_offset: i32,
     pub page_offset: i32,
     pub stack: [i32; 2],
-    
+
     // GPU渲染命令收集器
     pub sprite_batch: SpriteBatch,
 }
@@ -107,14 +107,30 @@ impl RenderState {
     }
 
     /// 添加翻转的精灵（屏幕坐标）
-    pub fn draw_sprite_flipped_gpu(&mut self, x: i32, y: i32, uv: SpriteUV, flip_x: bool, flip_y: bool) {
-        self.sprite_batch.add_sprite_flipped(x, y, uv, flip_x, flip_y);
+    pub fn draw_sprite_flipped_gpu(
+        &mut self,
+        x: i32,
+        y: i32,
+        uv: SpriteUV,
+        flip_x: bool,
+        flip_y: bool,
+    ) {
+        self.sprite_batch
+            .add_sprite_flipped(x, y, uv, flip_x, flip_y);
     }
 
     /// 添加翻转的精灵（世界坐标）
-    pub fn draw_sprite_flipped_world_gpu(&mut self, x_world: i32, y_world: i32, uv: SpriteUV, flip_x: bool, flip_y: bool) {
+    pub fn draw_sprite_flipped_world_gpu(
+        &mut self,
+        x_world: i32,
+        y_world: i32,
+        uv: SpriteUV,
+        flip_x: bool,
+        flip_y: bool,
+    ) {
         let (x, y) = self.world_to_screen(x_world, y_world);
-        self.sprite_batch.add_sprite_flipped(x, y, uv, flip_x, flip_y);
+        self.sprite_batch
+            .add_sprite_flipped(x, y, uv, flip_x, flip_y);
     }
 
     /// 添加上下颠倒的精灵（世界坐标）
@@ -124,15 +140,29 @@ impl RenderState {
     }
 
     /// 添加带调色板偏移的精灵（世界坐标）
-    pub fn draw_sprite_recolored_world_gpu(&mut self, x_world: i32, y_world: i32, uv: SpriteUV, palette_offset: i32) {
+    pub fn draw_sprite_recolored_world_gpu(
+        &mut self,
+        x_world: i32,
+        y_world: i32,
+        uv: SpriteUV,
+        palette_offset: i32,
+    ) {
         let (x, y) = self.world_to_screen(x_world, y_world);
-        self.sprite_batch.add_sprite_recolored(x, y, uv, palette_offset);
+        self.sprite_batch
+            .add_sprite_recolored(x, y, uv, palette_offset);
     }
 
     /// 添加部分可见的精灵（用于升起动画，世界坐标）
-    pub fn draw_sprite_partial_world_gpu(&mut self, x_world: i32, y_world: i32, uv: SpriteUV, visible_height: f32) {
+    pub fn draw_sprite_partial_world_gpu(
+        &mut self,
+        x_world: i32,
+        y_world: i32,
+        uv: SpriteUV,
+        visible_height: f32,
+    ) {
         let (x, y) = self.world_to_screen(x_world, y_world);
-        self.sprite_batch.push_sprite_partial(SpriteCommand::new(x, y, uv), visible_height);
+        self.sprite_batch
+            .push_sprite_partial(SpriteCommand::new(x, y, uv), visible_height);
     }
 
     /// 添加填充矩形到GPU渲染队列（屏幕坐标）
@@ -150,12 +180,20 @@ impl RenderState {
     /// UI层在所有sprites之后渲染，用于状态栏、暂停文本等
     pub fn fill_ui_gpu(&mut self, x: i32, y: i32, w: i32, h: i32, color_index: u8) {
         use crate::gpu::sprite_batch::FillCommand;
-        self.sprite_batch.push_ui_fill(FillCommand::new(x, y, w, h, color_index));
+        self.sprite_batch
+            .push_ui_fill(FillCommand::new(x, y, w, h, color_index));
     }
 
     /// 添加UI层填充矩形到GPU渲染队列（世界坐标）
     /// UI层在所有sprites之后渲染，用于状态栏、暂停文本等
-    pub fn fill_ui_world_gpu(&mut self, x_world: i32, y_world: i32, w: i32, h: i32, color_index: u8) {
+    pub fn fill_ui_world_gpu(
+        &mut self,
+        x_world: i32,
+        y_world: i32,
+        w: i32,
+        h: i32,
+        color_index: u8,
+    ) {
         let (x, y) = self.world_to_screen(x_world, y_world);
         self.fill_ui_gpu(x, y, w, h, color_index);
     }
@@ -201,7 +239,9 @@ impl RenderState {
     }
 
     pub fn set_palette(&mut self, color: u8, red: u8, green: u8, blue: u8) {
-        if self.palette.lock_palette { return; }
+        if self.palette.lock_palette {
+            return;
+        }
         let idx = color as usize;
         if idx < self.palette.palette.len() {
             self.palette.palette[idx] = [red, green, blue];
@@ -216,7 +256,9 @@ impl RenderState {
 
     pub fn clear_palette(&mut self) {
         for c in self.palette.palette.iter_mut() {
-            c[0] = 0; c[1] = 0; c[2] = 0;
+            c[0] = 0;
+            c[1] = 0;
+            c[2] = 0;
         }
     }
 
@@ -230,13 +272,27 @@ impl RenderState {
         self.set_viewport(self.x_view, self.y_view, self.page);
     }
 
-    pub fn set_y_offset(&mut self, new_y_offset: i32) { self.y_offset = new_y_offset; }
-    pub fn get_y_offset(&self) -> i32 { self.y_offset }
-    pub fn set_y_start(&mut self, y_start: i32) { self.y_start = y_start; }
-    pub fn set_y_end(&mut self, y_end: i32) { self.y_end = y_end; }
-    pub fn lock_pal(&mut self) { self.palette.lock_pal(); }
-    pub fn unlock_pal(&mut self) { self.palette.unlock_pal(); }
-    pub fn clear_vga_mem(&mut self) { self.clear(); }
+    pub fn set_y_offset(&mut self, new_y_offset: i32) {
+        self.y_offset = new_y_offset;
+    }
+    pub fn get_y_offset(&self) -> i32 {
+        self.y_offset
+    }
+    pub fn set_y_start(&mut self, y_start: i32) {
+        self.y_start = y_start;
+    }
+    pub fn set_y_end(&mut self, y_end: i32) {
+        self.y_end = y_end;
+    }
+    pub fn lock_pal(&mut self) {
+        self.palette.lock_pal();
+    }
+    pub fn unlock_pal(&mut self) {
+        self.palette.unlock_pal();
+    }
+    pub fn clear_vga_mem(&mut self) {
+        self.clear();
+    }
 
     pub fn reset_stack(&mut self) {
         let safe = 34 * BYTES_PER_LINE;
@@ -249,7 +305,9 @@ impl RenderState {
     // ========================================================================
 
     pub fn palette_blink_wrapper(&mut self, options: &crate::buffers::WorldOptions) {
-        if self.palette.lock_palette { return; }
+        if self.palette.lock_palette {
+            return;
+        }
         let was_locked = self.palette.lock_palette;
         let mut pal = std::mem::take(&mut self.palette);
         pal.lock_palette = was_locked;

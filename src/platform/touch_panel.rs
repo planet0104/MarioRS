@@ -13,21 +13,6 @@ use super::{KeyCode as PlatformKeyCode, KeyEvent as PlatformKeyEvent};
 // 布局保存的文件名
 pub const LAYOUT_SAVE_KEY: &str = "touch_layout.dat";
 
-// 按钮默认尺寸（基于 1080p 屏幕，会根据实际屏幕缩放）
-const DEFAULT_DPAD_SIZE: f32 = 300.0;      // D-Pad 尺寸 (放大约 2.5 倍)
-const DEFAULT_BUTTON_SIZE: f32 = 200.0;    // 右侧按钮尺寸 (放大约 2.8 倍)
-const DEFAULT_SCREEN_WIDTH: f32 = 1080.0;
-const DEFAULT_SCREEN_HEIGHT: f32 = 1920.0;
-
-// 编辑按钮尺寸
-const EDIT_BUTTON_RADIUS: f32 = 75.0;      // 编辑按钮半径 (放大 3 倍)
-const EDIT_BUTTON_MARGIN: f32 = 90.0;      // 编辑按钮距离屏幕边缘
-const EDIT_BUTTON_Y: f32 = 90.0;           // 编辑按钮 Y 坐标
-const EDIT_BUTTON_SPACING: f32 = 180.0;    // 编辑按钮和重置按钮间距
-
-// 暂停按钮位置 (在编辑按钮下方)
-const PAUSE_BUTTON_Y: f32 = 250.0;         // 暂停按钮 Y 坐标 (E按钮下方)
-
 // ============================================================================
 // PNG 图片资源 (编译时内嵌) - 仅启用 touch-panel feature 时
 // ============================================================================
@@ -35,13 +20,18 @@ const PAUSE_BUTTON_Y: f32 = 250.0;         // 暂停按钮 Y 坐标 (E按钮下�
 #[cfg(feature = "touch-panel")]
 mod assets {
     use tiny_skia::Pixmap;
-    
+
     // 内嵌 PNG 图片数据
-    static DPAD_PNG: &[u8] = include_bytes!("../../assets/onscreen_controls/pngs/transparency/d-pad_3.png");
-    static BUTTON_A_PNG: &[u8] = include_bytes!("../../assets/onscreen_controls/pngs/transparency/a_button.png");
-    static BUTTON_B_PNG: &[u8] = include_bytes!("../../assets/onscreen_controls/pngs/transparency/b_button.png");
-    static BUTTON_X_PNG: &[u8] = include_bytes!("../../assets/onscreen_controls/pngs/transparency/x_button.png");
-    static BUTTON_Y_PNG: &[u8] = include_bytes!("../../assets/onscreen_controls/pngs/transparency/y_button.png");
+    static DPAD_PNG: &[u8] =
+        include_bytes!("../../assets/onscreen_controls/pngs/transparency/d-pad_3.png");
+    static BUTTON_A_PNG: &[u8] =
+        include_bytes!("../../assets/onscreen_controls/pngs/transparency/a_button.png");
+    static BUTTON_B_PNG: &[u8] =
+        include_bytes!("../../assets/onscreen_controls/pngs/transparency/b_button.png");
+    static BUTTON_X_PNG: &[u8] =
+        include_bytes!("../../assets/onscreen_controls/pngs/transparency/x_button.png");
+    static BUTTON_Y_PNG: &[u8] =
+        include_bytes!("../../assets/onscreen_controls/pngs/transparency/y_button.png");
 
     /// 从 PNG 字节解码为 Pixmap
     fn decode_png(data: &[u8]) -> Option<Pixmap> {
@@ -70,8 +60,10 @@ mod assets {
                 button_y: decode_png(BUTTON_Y_PNG),
             }
         }
-        
-        pub fn get_dpad(&self) -> Option<&Pixmap> { self.dpad.as_ref() }
+
+        pub fn get_dpad(&self) -> Option<&Pixmap> {
+            self.dpad.as_ref()
+        }
         pub fn get_button(&self, name: &str) -> Option<&Pixmap> {
             match name {
                 "a" => self.button_a.as_ref(),
@@ -82,9 +74,11 @@ mod assets {
             }
         }
     }
-    
+
     impl Default for ButtonAssets {
-        fn default() -> Self { Self::load() }
+        fn default() -> Self {
+            Self::load()
+        }
     }
 }
 
@@ -96,12 +90,16 @@ pub struct ButtonAssets;
 
 #[cfg(not(feature = "touch-panel"))]
 impl ButtonAssets {
-    pub fn load() -> Self { Self }
+    pub fn load() -> Self {
+        Self
+    }
 }
 
 #[cfg(not(feature = "touch-panel"))]
 impl Default for ButtonAssets {
-    fn default() -> Self { Self::load() }
+    fn default() -> Self {
+        Self::load()
+    }
 }
 
 // ============================================================================
@@ -158,15 +156,15 @@ impl ButtonLayout {
     /// 默认布局 (基于比例坐标)
     pub fn default_layout() -> Self {
         // D-Pad 在左下角
-        let dpad_x = 0.0;  // 距离左边 2%
-        let dpad_y = 0.68;  // 距离顶部 68% (稍微上移给更大的 D-Pad 留空间)
-        
+        let dpad_x = 0.0; // 距离左边 2%
+        let dpad_y = 0.68; // 距离顶部 68% (稍微上移给更大的 D-Pad 留空间)
+
         // 右侧按钮组在右下角
-        let right_x = 0.93;  // 距离左边 82%
-        let right_y = 0.82;  // 距离顶部 82%
-        let spacing_h = 0.12;  // 水平间距 12%
-        let spacing_v = 0.22;  // 垂直间距 22%
-        
+        let right_x = 0.93; // 距离左边 82%
+        let right_y = 0.82; // 距离顶部 82%
+        let spacing_h = 0.12; // 水平间距 12%
+        let spacing_v = 0.22; // 垂直间距 22%
+
         Self {
             dpad_x,
             dpad_y,
@@ -180,7 +178,7 @@ impl ButtonLayout {
             button_y_y: right_y - spacing_v,
         }
     }
-    
+
     /// 序列化为字节数组
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut data = Vec::with_capacity(40);
@@ -196,7 +194,7 @@ impl ButtonLayout {
         data.extend_from_slice(&self.button_y_y.to_le_bytes());
         data
     }
-    
+
     /// 从字节数组反序列化
     pub fn from_bytes(data: &[u8]) -> Option<Self> {
         if data.len() < 40 {
@@ -218,7 +216,9 @@ impl ButtonLayout {
 }
 
 impl Default for ButtonLayout {
-    fn default() -> Self { Self::default_layout() }
+    fn default() -> Self {
+        Self::default_layout()
+    }
 }
 
 // ============================================================================
@@ -230,23 +230,23 @@ pub struct VirtualButtonsRenderer {
     // 屏幕尺寸
     screen_width: u32,
     screen_height: u32,
-    
+
     // 渲染缓冲区
     pixmap: Option<tiny_skia::Pixmap>,
-    
+
     // 布局 (比例坐标)
     layout: ButtonLayout,
-    
+
     // 按钮尺寸 (像素)
     dpad_size: f32,
     button_size: f32,
-    
+
     // 编辑模式
     edit_mode: bool,
-    
+
     // 图片资源
     assets: ButtonAssets,
-    
+
     // 渲染缓存标志 - 只在需要时重新渲染
     needs_redraw: bool,
 }
@@ -266,18 +266,19 @@ impl VirtualButtonsRenderer {
             needs_redraw: true,
         }
     }
-    
+
     /// 设置屏幕尺寸并重新分配缓冲区
     pub fn set_screen_size(&mut self, width: u32, height: u32) {
         if self.screen_width != width || self.screen_height != height {
             self.screen_width = width;
             self.screen_height = height;
-            
+
             // 根据屏幕尺寸调整按钮大小
-            let scale = (width.min(height) as f32) / DEFAULT_SCREEN_WIDTH.min(DEFAULT_SCREEN_HEIGHT);
+            let scale =
+                (width.min(height) as f32) / DEFAULT_SCREEN_WIDTH.min(DEFAULT_SCREEN_HEIGHT);
             self.dpad_size = DEFAULT_DPAD_SIZE * scale;
             self.button_size = DEFAULT_BUTTON_SIZE * scale;
-            
+
             // 重新分配 Pixmap
             if let Some(size) = tiny_skia::IntSize::from_wh(width, height) {
                 self.pixmap = tiny_skia::Pixmap::new(size.width(), size.height());
@@ -285,29 +286,29 @@ impl VirtualButtonsRenderer {
             self.needs_redraw = true;
         }
     }
-    
+
     /// 获取屏幕尺寸
     pub fn screen_size(&self) -> (u32, u32) {
         (self.screen_width, self.screen_height)
     }
-    
+
     /// 应用布局
     pub fn apply_layout(&mut self, layout: &ButtonLayout) {
         self.layout = *layout;
         self.needs_redraw = true;
     }
-    
+
     /// 获取当前布局
     pub fn get_layout(&self) -> ButtonLayout {
         self.layout
     }
-    
+
     /// 重置为默认布局
     pub fn reset_layout(&mut self) {
         self.layout = ButtonLayout::default_layout();
         self.needs_redraw = true;
     }
-    
+
     /// 设置编辑模式
     pub fn set_edit_mode(&mut self, edit: bool) {
         if self.edit_mode != edit {
@@ -315,26 +316,26 @@ impl VirtualButtonsRenderer {
             self.needs_redraw = true;
         }
     }
-    
+
     pub fn is_edit_mode(&self) -> bool {
         self.edit_mode
     }
-    
+
     /// 标记需要重新渲染
     pub fn mark_dirty(&mut self) {
         self.needs_redraw = true;
     }
-    
+
     /// 渲染并返回 RGBA buffer (带缓存，只在需要时重新绘制)
     pub fn render(&mut self, _states: &ButtonStates) -> Option<&[u8]> {
         // 如果不需要重新渲染，直接返回缓存的数据
         if !self.needs_redraw {
             return self.pixmap.as_ref().map(|p| p.data());
         }
-        
+
         // 标记已渲染
         self.needs_redraw = false;
-        
+
         // 先获取需要的值，避免借用冲突
         let w = self.screen_width as f32;
         let h = self.screen_height as f32;
@@ -344,7 +345,7 @@ impl VirtualButtonsRenderer {
         let btn_size = self.button_size as u32;
         let half = (btn_size / 2) as i32;
         let edit_mode = self.edit_mode;
-        
+
         // 收集按钮布局信息
         let buttons = [
             ("a", self.layout.button_a_x, self.layout.button_a_y),
@@ -352,33 +353,40 @@ impl VirtualButtonsRenderer {
             ("x", self.layout.button_x_x, self.layout.button_x_y),
             ("y", self.layout.button_y_x, self.layout.button_y_y),
         ];
-        
+
         // 编辑按钮参数
         let edit_btn_x = self.screen_width as f32 - EDIT_BUTTON_MARGIN;
         let edit_btn_y = EDIT_BUTTON_Y;
         let edit_btn_r = EDIT_BUTTON_RADIUS;
         let reset_btn_x = self.screen_width as f32 - EDIT_BUTTON_MARGIN - EDIT_BUTTON_SPACING;
-        
+
         // 暂停按钮参数 (E按钮下方)
         let pause_btn_x = self.screen_width as f32 - EDIT_BUTTON_MARGIN;
         let pause_btn_y = PAUSE_BUTTON_Y;
-        
+
         // 编辑高亮参数
         let dpad_cx = self.layout.dpad_x * w + self.dpad_size / 2.0;
         let dpad_cy = self.layout.dpad_y * h + self.dpad_size / 2.0;
         let dpad_highlight_r = self.dpad_size / 2.0 + 5.0;
         let btn_r = self.button_size / 2.0 + 5.0;
-        
+
         let pixmap = self.pixmap.as_mut()?;
-        
+
         // 清空为透明
         pixmap.fill(tiny_skia::Color::TRANSPARENT);
-        
+
         // 绘制 D-Pad
         if let Some(src) = self.assets.get_dpad() {
-            Self::draw_scaled_image_static(pixmap, src, dpad_x, dpad_y, dpad_size_u32, dpad_size_u32);
+            Self::draw_scaled_image_static(
+                pixmap,
+                src,
+                dpad_x,
+                dpad_y,
+                dpad_size_u32,
+                dpad_size_u32,
+            );
         }
-        
+
         // 绘制右侧按钮
         for (name, bx, by) in buttons {
             if let Some(src) = self.assets.get_button(name) {
@@ -387,7 +395,7 @@ impl VirtualButtonsRenderer {
                 Self::draw_scaled_image_static(pixmap, src, px, py, btn_size, btn_size);
             }
         }
-        
+
         // 绘制编辑按钮 (右上角)
         let edit_color = if edit_mode {
             tiny_skia::Color::from_rgba8(100, 200, 100, 180)
@@ -396,18 +404,30 @@ impl VirtualButtonsRenderer {
         };
         Self::draw_circle(pixmap, edit_btn_x, edit_btn_y, edit_btn_r, edit_color);
         Self::draw_letter_static(pixmap, edit_btn_x, edit_btn_y, "E", tiny_skia::Color::WHITE);
-        
+
         // 绘制暂停按钮 (编辑按钮下方)
         let pause_color = tiny_skia::Color::from_rgba8(100, 100, 200, 180);
         Self::draw_circle(pixmap, pause_btn_x, pause_btn_y, edit_btn_r, pause_color);
-        Self::draw_letter_static(pixmap, pause_btn_x, pause_btn_y, "P", tiny_skia::Color::WHITE);
-        
+        Self::draw_letter_static(
+            pixmap,
+            pause_btn_x,
+            pause_btn_y,
+            "P",
+            tiny_skia::Color::WHITE,
+        );
+
         if edit_mode {
             // 绘制重置按钮
             let reset_color = tiny_skia::Color::from_rgba8(200, 100, 100, 180);
             Self::draw_circle(pixmap, reset_btn_x, edit_btn_y, edit_btn_r, reset_color);
-            Self::draw_letter_static(pixmap, reset_btn_x, edit_btn_y, "R", tiny_skia::Color::WHITE);
-            
+            Self::draw_letter_static(
+                pixmap,
+                reset_btn_x,
+                edit_btn_y,
+                "R",
+                tiny_skia::Color::WHITE,
+            );
+
             // 绘制编辑高亮边框
             let highlight_color = tiny_skia::Color::from_rgba8(255, 255, 0, 200);
             Self::draw_circle_outline(pixmap, dpad_cx, dpad_cy, dpad_highlight_r, highlight_color);
@@ -420,19 +440,25 @@ impl VirtualButtonsRenderer {
                 Self::draw_circle_outline(pixmap, bx * w, by * h, btn_r, highlight_color);
             }
         }
-        
+
         Some(pixmap.data())
     }
-    
+
     /// 缩放绘制图片 (静态方法)
-    fn draw_scaled_image_static(dst: &mut tiny_skia::Pixmap, src: &tiny_skia::Pixmap, 
-                                 x: i32, y: i32, w: u32, h: u32) {
+    fn draw_scaled_image_static(
+        dst: &mut tiny_skia::Pixmap,
+        src: &tiny_skia::Pixmap,
+        x: i32,
+        y: i32,
+        w: u32,
+        h: u32,
+    ) {
         let scale_x = w as f32 / src.width() as f32;
         let scale_y = h as f32 / src.height() as f32;
-        
-        let transform = tiny_skia::Transform::from_translate(x as f32, y as f32)
-            .pre_scale(scale_x, scale_y);
-        
+
+        let transform =
+            tiny_skia::Transform::from_translate(x as f32, y as f32).pre_scale(scale_x, scale_y);
+
         let pattern = tiny_skia::Pattern::new(
             src.as_ref(),
             tiny_skia::SpreadMode::Pad,
@@ -440,23 +466,29 @@ impl VirtualButtonsRenderer {
             1.0,
             tiny_skia::Transform::identity(),
         );
-        
+
         let paint = tiny_skia::Paint {
             shader: pattern,
             blend_mode: tiny_skia::BlendMode::SourceOver,
             anti_alias: true,
             force_hq_pipeline: false,
         };
-        
+
         let rect = tiny_skia::Rect::from_xywh(0.0, 0.0, src.width() as f32, src.height() as f32);
         if let Some(rect) = rect {
             let path = tiny_skia::PathBuilder::from_rect(rect);
             dst.fill_path(&path, &paint, tiny_skia::FillRule::Winding, transform, None);
         }
     }
-    
+
     /// 绘制实心圆
-    fn draw_circle(pixmap: &mut tiny_skia::Pixmap, cx: f32, cy: f32, r: f32, color: tiny_skia::Color) {
+    fn draw_circle(
+        pixmap: &mut tiny_skia::Pixmap,
+        cx: f32,
+        cy: f32,
+        r: f32,
+        color: tiny_skia::Color,
+    ) {
         if let Some(path) = tiny_skia::PathBuilder::from_circle(cx, cy, r) {
             let paint = tiny_skia::Paint {
                 shader: tiny_skia::Shader::SolidColor(color),
@@ -464,13 +496,24 @@ impl VirtualButtonsRenderer {
                 anti_alias: true,
                 force_hq_pipeline: false,
             };
-            pixmap.fill_path(&path, &paint, tiny_skia::FillRule::Winding, 
-                            tiny_skia::Transform::identity(), None);
+            pixmap.fill_path(
+                &path,
+                &paint,
+                tiny_skia::FillRule::Winding,
+                tiny_skia::Transform::identity(),
+                None,
+            );
         }
     }
-    
+
     /// 绘制圆形边框
-    fn draw_circle_outline(pixmap: &mut tiny_skia::Pixmap, cx: f32, cy: f32, r: f32, color: tiny_skia::Color) {
+    fn draw_circle_outline(
+        pixmap: &mut tiny_skia::Pixmap,
+        cx: f32,
+        cy: f32,
+        r: f32,
+        color: tiny_skia::Color,
+    ) {
         if let Some(path) = tiny_skia::PathBuilder::from_circle(cx, cy, r) {
             let stroke = tiny_skia::Stroke {
                 width: 3.0,
@@ -482,39 +525,52 @@ impl VirtualButtonsRenderer {
                 anti_alias: true,
                 force_hq_pipeline: false,
             };
-            pixmap.stroke_path(&path, &paint, &stroke, tiny_skia::Transform::identity(), None);
+            pixmap.stroke_path(
+                &path,
+                &paint,
+                &stroke,
+                tiny_skia::Transform::identity(),
+                None,
+            );
         }
     }
-    
+
     /// 绘制简单字母 (静态方法)
-    fn draw_letter_static(pixmap: &mut tiny_skia::Pixmap, cx: f32, cy: f32, letter: &str, color: tiny_skia::Color) {
+    fn draw_letter_static(
+        pixmap: &mut tiny_skia::Pixmap,
+        cx: f32,
+        cy: f32,
+        letter: &str,
+        color: tiny_skia::Color,
+    ) {
         let patterns: &[(&str, &[&str])] = &[
             ("E", &["#####", "#    ", "#####", "#    ", "#####"]),
             ("P", &["#### ", "#   #", "#### ", "#    ", "#    "]),
             ("R", &["#### ", "#   #", "#### ", "#  # ", "#   #"]),
         ];
-        
+
         if let Some((_, pattern)) = patterns.iter().find(|(l, _)| *l == letter) {
-            let scale = 6.0;  // 字母缩放 (与编辑按钮放大比例匹配)
+            let scale = 6.0; // 字母缩放 (与编辑按钮放大比例匹配)
             let h = pattern.len() as f32 * scale;
             let w = pattern[0].len() as f32 * scale;
             let start_x = cx - w / 2.0;
             let start_y = cy - h / 2.0;
-            
+
             let paint = tiny_skia::Paint {
                 shader: tiny_skia::Shader::SolidColor(color),
                 blend_mode: tiny_skia::BlendMode::SourceOver,
                 anti_alias: false,
                 force_hq_pipeline: false,
             };
-            
+
             for (row, line) in pattern.iter().enumerate() {
                 for (col, ch) in line.chars().enumerate() {
                     if ch == '#' {
                         let rect = tiny_skia::Rect::from_xywh(
                             start_x + col as f32 * scale,
                             start_y + row as f32 * scale,
-                            scale, scale
+                            scale,
+                            scale,
                         );
                         if let Some(rect) = rect {
                             pixmap.fill_rect(rect, &paint, tiny_skia::Transform::identity(), None);
@@ -524,68 +580,100 @@ impl VirtualButtonsRenderer {
             }
         }
     }
-    
+
     // ========== 碰撞检测方法 ==========
-    
+
     /// D-Pad 中心点 (屏幕像素)
     pub fn dpad_center(&self) -> (f32, f32) {
         let w = self.screen_width as f32;
         let h = self.screen_height as f32;
-        (self.layout.dpad_x * w + self.dpad_size / 2.0,
-         self.layout.dpad_y * h + self.dpad_size / 2.0)
+        (
+            self.layout.dpad_x * w + self.dpad_size / 2.0,
+            self.layout.dpad_y * h + self.dpad_size / 2.0,
+        )
     }
-    
+
     /// D-Pad 尺寸
-    pub fn dpad_size(&self) -> f32 { self.dpad_size }
-    
+    pub fn dpad_size(&self) -> f32 {
+        self.dpad_size
+    }
+
     /// 按钮位置和半径 (屏幕像素)
     pub fn button_a(&self) -> (f32, f32, f32) {
         let w = self.screen_width as f32;
         let h = self.screen_height as f32;
-        (self.layout.button_a_x * w, self.layout.button_a_y * h, self.button_size / 2.0)
+        (
+            self.layout.button_a_x * w,
+            self.layout.button_a_y * h,
+            self.button_size / 2.0,
+        )
     }
-    
+
     pub fn button_b(&self) -> (f32, f32, f32) {
         let w = self.screen_width as f32;
         let h = self.screen_height as f32;
-        (self.layout.button_b_x * w, self.layout.button_b_y * h, self.button_size / 2.0)
+        (
+            self.layout.button_b_x * w,
+            self.layout.button_b_y * h,
+            self.button_size / 2.0,
+        )
     }
-    
+
     pub fn button_x(&self) -> (f32, f32, f32) {
         let w = self.screen_width as f32;
         let h = self.screen_height as f32;
-        (self.layout.button_x_x * w, self.layout.button_x_y * h, self.button_size / 2.0)
+        (
+            self.layout.button_x_x * w,
+            self.layout.button_x_y * h,
+            self.button_size / 2.0,
+        )
     }
-    
+
     pub fn button_y(&self) -> (f32, f32, f32) {
         let w = self.screen_width as f32;
         let h = self.screen_height as f32;
-        (self.layout.button_y_x * w, self.layout.button_y_y * h, self.button_size / 2.0)
+        (
+            self.layout.button_y_x * w,
+            self.layout.button_y_y * h,
+            self.button_size / 2.0,
+        )
     }
-    
+
     /// 编辑按钮位置和半径
     pub fn edit_button(&self) -> (f32, f32, f32) {
-        (self.screen_width as f32 - EDIT_BUTTON_MARGIN, EDIT_BUTTON_Y, EDIT_BUTTON_RADIUS)
+        (
+            self.screen_width as f32 - EDIT_BUTTON_MARGIN,
+            EDIT_BUTTON_Y,
+            EDIT_BUTTON_RADIUS,
+        )
     }
-    
+
     /// 重置按钮位置和半径
     pub fn reset_button(&self) -> (f32, f32, f32) {
-        (self.screen_width as f32 - EDIT_BUTTON_MARGIN - EDIT_BUTTON_SPACING, EDIT_BUTTON_Y, EDIT_BUTTON_RADIUS)
+        (
+            self.screen_width as f32 - EDIT_BUTTON_MARGIN - EDIT_BUTTON_SPACING,
+            EDIT_BUTTON_Y,
+            EDIT_BUTTON_RADIUS,
+        )
     }
-    
+
     /// 暂停按钮位置和半径 (在编辑按钮下方)
     pub fn pause_button(&self) -> (f32, f32, f32) {
-        (self.screen_width as f32 - EDIT_BUTTON_MARGIN, PAUSE_BUTTON_Y, EDIT_BUTTON_RADIUS)
+        (
+            self.screen_width as f32 - EDIT_BUTTON_MARGIN,
+            PAUSE_BUTTON_Y,
+            EDIT_BUTTON_RADIUS,
+        )
     }
-    
+
     /// 检测点是否在编辑按钮上
     pub fn is_on_edit_button(&self, x: f32, y: f32) -> bool {
         let (ex, ey, r) = self.edit_button();
         let dx = x - ex;
         let dy = y - ey;
-        dx * dx + dy * dy <= r * r * 2.25  // 1.5x 触摸区域
+        dx * dx + dy * dy <= r * r * 2.25 // 1.5x 触摸区域
     }
-    
+
     /// 检测点是否在重置按钮上
     pub fn is_on_reset_button(&self, x: f32, y: f32) -> bool {
         let (rx, ry, r) = self.reset_button();
@@ -593,7 +681,7 @@ impl VirtualButtonsRenderer {
         let dy = y - ry;
         dx * dx + dy * dy <= r * r * 2.25
     }
-    
+
     /// 检测点是否在暂停按钮上
     pub fn is_on_pause_button(&self, x: f32, y: f32) -> bool {
         let (px, py, r) = self.pause_button();
@@ -601,14 +689,14 @@ impl VirtualButtonsRenderer {
         let dy = y - py;
         dx * dx + dy * dy <= r * r * 2.25
     }
-    
+
     /// 获取所有需要混合的边界框 (x, y, width, height)
     /// 用于优化 overlay 混合 - 只混合按钮区域而不是整个屏幕
     pub fn get_blend_rects(&self) -> Vec<(u32, u32, u32, u32)> {
         let mut rects = Vec::with_capacity(8);
         let w = self.screen_width as f32;
         let h = self.screen_height as f32;
-        
+
         // D-Pad 边界框
         let dpad_x = (self.layout.dpad_x * w) as i32;
         let dpad_y = (self.layout.dpad_y * h) as i32;
@@ -619,7 +707,7 @@ impl VirtualButtonsRenderer {
             dpad_size.min(self.screen_width.saturating_sub(dpad_x.max(0) as u32)),
             dpad_size.min(self.screen_height.saturating_sub(dpad_y.max(0) as u32)),
         ));
-        
+
         // 右侧 4 个按钮边界框
         let btn_size = self.button_size as u32;
         let half = btn_size / 2;
@@ -640,7 +728,7 @@ impl VirtualButtonsRenderer {
                 btn_size.min(self.screen_height.saturating_sub(y)),
             ));
         }
-        
+
         // 编辑按钮边界框
         let (ex, ey, er) = self.edit_button();
         let edit_size = (er * 2.0) as u32;
@@ -652,7 +740,7 @@ impl VirtualButtonsRenderer {
             edit_size.min(self.screen_width.saturating_sub(edit_x)),
             edit_size.min(self.screen_height.saturating_sub(edit_y)),
         ));
-        
+
         // 暂停按钮边界框 (始终显示)
         let (px, py, pr) = self.pause_button();
         let pause_size = (pr * 2.0) as u32;
@@ -664,7 +752,7 @@ impl VirtualButtonsRenderer {
             pause_size.min(self.screen_width.saturating_sub(pause_x)),
             pause_size.min(self.screen_height.saturating_sub(pause_y)),
         ));
-        
+
         // 如果在编辑模式，添加重置按钮边界框
         if self.edit_mode {
             let (rx, ry, rr) = self.reset_button();
@@ -678,12 +766,12 @@ impl VirtualButtonsRenderer {
                 reset_size.min(self.screen_height.saturating_sub(reset_y)),
             ));
         }
-        
+
         rects
     }
-    
+
     // ========== 编辑模式位置更新 ==========
-    
+
     pub fn set_dpad_position(&mut self, x: f32, y: f32) {
         let w = self.screen_width as f32;
         let h = self.screen_height as f32;
@@ -691,25 +779,25 @@ impl VirtualButtonsRenderer {
         self.layout.dpad_y = ((y - self.dpad_size / 2.0) / h).clamp(0.0, 1.0 - self.dpad_size / h);
         self.needs_redraw = true;
     }
-    
+
     pub fn set_button_a_position(&mut self, x: f32, y: f32) {
         self.layout.button_a_x = (x / self.screen_width as f32).clamp(0.05, 0.95);
         self.layout.button_a_y = (y / self.screen_height as f32).clamp(0.05, 0.95);
         self.needs_redraw = true;
     }
-    
+
     pub fn set_button_b_position(&mut self, x: f32, y: f32) {
         self.layout.button_b_x = (x / self.screen_width as f32).clamp(0.05, 0.95);
         self.layout.button_b_y = (y / self.screen_height as f32).clamp(0.05, 0.95);
         self.needs_redraw = true;
     }
-    
+
     pub fn set_button_x_position(&mut self, x: f32, y: f32) {
         self.layout.button_x_x = (x / self.screen_width as f32).clamp(0.05, 0.95);
         self.layout.button_x_y = (y / self.screen_height as f32).clamp(0.05, 0.95);
         self.needs_redraw = true;
     }
-    
+
     pub fn set_button_y_position(&mut self, x: f32, y: f32) {
         self.layout.button_y_x = (x / self.screen_width as f32).clamp(0.05, 0.95);
         self.layout.button_y_y = (y / self.screen_height as f32).clamp(0.05, 0.95);
@@ -719,7 +807,9 @@ impl VirtualButtonsRenderer {
 
 #[cfg(feature = "touch-panel")]
 impl Default for VirtualButtonsRenderer {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 // ============================================================================
@@ -731,29 +821,65 @@ pub struct VirtualButtonsRenderer;
 
 #[cfg(not(feature = "touch-panel"))]
 impl VirtualButtonsRenderer {
-    pub fn new() -> Self { Self }
+    pub fn new() -> Self {
+        Self
+    }
     pub fn set_screen_size(&mut self, _: u32, _: u32) {}
-    pub fn screen_size(&self) -> (u32, u32) { (0, 0) }
+    pub fn screen_size(&self) -> (u32, u32) {
+        (0, 0)
+    }
     pub fn apply_layout(&mut self, _: &ButtonLayout) {}
-    pub fn get_layout(&self) -> ButtonLayout { ButtonLayout::default() }
+    pub fn get_layout(&self) -> ButtonLayout {
+        ButtonLayout::default()
+    }
     pub fn reset_layout(&mut self) {}
     pub fn set_edit_mode(&mut self, _: bool) {}
-    pub fn is_edit_mode(&self) -> bool { false }
+    pub fn is_edit_mode(&self) -> bool {
+        false
+    }
     pub fn mark_dirty(&mut self) {}
-    pub fn render(&mut self, _: &ButtonStates) -> Option<&[u8]> { None }
-    pub fn dpad_center(&self) -> (f32, f32) { (0.0, 0.0) }
-    pub fn dpad_size(&self) -> f32 { 0.0 }
-    pub fn button_a(&self) -> (f32, f32, f32) { (0.0, 0.0, 0.0) }
-    pub fn button_b(&self) -> (f32, f32, f32) { (0.0, 0.0, 0.0) }
-    pub fn button_x(&self) -> (f32, f32, f32) { (0.0, 0.0, 0.0) }
-    pub fn button_y(&self) -> (f32, f32, f32) { (0.0, 0.0, 0.0) }
-    pub fn edit_button(&self) -> (f32, f32, f32) { (0.0, 0.0, 0.0) }
-    pub fn reset_button(&self) -> (f32, f32, f32) { (0.0, 0.0, 0.0) }
-    pub fn pause_button(&self) -> (f32, f32, f32) { (0.0, 0.0, 0.0) }
-    pub fn is_on_edit_button(&self, _: f32, _: f32) -> bool { false }
-    pub fn is_on_reset_button(&self, _: f32, _: f32) -> bool { false }
-    pub fn is_on_pause_button(&self, _: f32, _: f32) -> bool { false }
-    pub fn get_blend_rects(&self) -> Vec<(u32, u32, u32, u32)> { Vec::new() }
+    pub fn render(&mut self, _: &ButtonStates) -> Option<&[u8]> {
+        None
+    }
+    pub fn dpad_center(&self) -> (f32, f32) {
+        (0.0, 0.0)
+    }
+    pub fn dpad_size(&self) -> f32 {
+        0.0
+    }
+    pub fn button_a(&self) -> (f32, f32, f32) {
+        (0.0, 0.0, 0.0)
+    }
+    pub fn button_b(&self) -> (f32, f32, f32) {
+        (0.0, 0.0, 0.0)
+    }
+    pub fn button_x(&self) -> (f32, f32, f32) {
+        (0.0, 0.0, 0.0)
+    }
+    pub fn button_y(&self) -> (f32, f32, f32) {
+        (0.0, 0.0, 0.0)
+    }
+    pub fn edit_button(&self) -> (f32, f32, f32) {
+        (0.0, 0.0, 0.0)
+    }
+    pub fn reset_button(&self) -> (f32, f32, f32) {
+        (0.0, 0.0, 0.0)
+    }
+    pub fn pause_button(&self) -> (f32, f32, f32) {
+        (0.0, 0.0, 0.0)
+    }
+    pub fn is_on_edit_button(&self, _: f32, _: f32) -> bool {
+        false
+    }
+    pub fn is_on_reset_button(&self, _: f32, _: f32) -> bool {
+        false
+    }
+    pub fn is_on_pause_button(&self, _: f32, _: f32) -> bool {
+        false
+    }
+    pub fn get_blend_rects(&self) -> Vec<(u32, u32, u32, u32)> {
+        Vec::new()
+    }
     pub fn set_dpad_position(&mut self, _: f32, _: f32) {}
     pub fn set_button_a_position(&mut self, _: f32, _: f32) {}
     pub fn set_button_b_position(&mut self, _: f32, _: f32) {}
@@ -763,7 +889,9 @@ impl VirtualButtonsRenderer {
 
 #[cfg(not(feature = "touch-panel"))]
 impl Default for VirtualButtonsRenderer {
-    fn default() -> Self { Self }
+    fn default() -> Self {
+        Self
+    }
 }
 
 // ============================================================================
@@ -802,10 +930,10 @@ pub struct TouchPanelInput {
     button_states: ButtonStates,
     pending_events: Vec<PlatformKeyEvent>,
     layout_changed: bool,
-    
+
     // 多点触摸支持
     pointers: std::collections::HashMap<usize, TouchPointer>,
-    
+
     // 编辑模式
     drag_target: DragTarget,
 }
@@ -821,42 +949,42 @@ impl TouchPanelInput {
             drag_target: DragTarget::None,
         }
     }
-    
+
     /// 设置屏幕尺寸
     pub fn set_screen_size(&mut self, width: f32, height: f32) {
         self.renderer.set_screen_size(width as u32, height as u32);
     }
-    
+
     /// 获取渲染器引用
     pub fn renderer(&self) -> &VirtualButtonsRenderer {
         &self.renderer
     }
-    
+
     pub fn renderer_mut(&mut self) -> &mut VirtualButtonsRenderer {
         &mut self.renderer
     }
-    
+
     /// 获取按钮状态
     pub fn button_states(&self) -> ButtonStates {
         self.button_states
     }
-    
+
     /// 应用布局
     pub fn apply_layout(&mut self, layout: &ButtonLayout) {
         self.renderer.apply_layout(layout);
     }
-    
+
     /// 获取布局
     pub fn get_layout(&self) -> ButtonLayout {
         self.renderer.get_layout()
     }
-    
+
     /// 重置布局
     pub fn reset_layout(&mut self) {
         self.renderer.reset_layout();
         self.layout_changed = true;
     }
-    
+
     /// 切换编辑模式
     pub fn toggle_edit_mode(&mut self) {
         let new_mode = !self.renderer.is_edit_mode();
@@ -865,19 +993,19 @@ impl TouchPanelInput {
             self.layout_changed = true;
         }
     }
-    
+
     /// 检查布局是否改变
     pub fn take_layout_changed(&mut self) -> bool {
         let changed = self.layout_changed;
         self.layout_changed = false;
         changed
     }
-    
+
     /// 获取待处理的键盘事件
     pub fn take_pending_events(&mut self) -> Vec<PlatformKeyEvent> {
         std::mem::take(&mut self.pending_events)
     }
-    
+
     /// 处理触摸事件 (屏幕坐标)
     pub fn handle_touch(&mut self, pointer_id: usize, x: f32, y: f32, action: TouchAction) {
         if self.renderer.is_edit_mode() {
@@ -886,7 +1014,7 @@ impl TouchPanelInput {
             self.handle_game_touch(pointer_id, x, y, action);
         }
     }
-    
+
     /// 游戏模式触摸处理
     fn handle_game_touch(&mut self, pointer_id: usize, x: f32, y: f32, action: TouchAction) {
         match action {
@@ -896,19 +1024,24 @@ impl TouchPanelInput {
                     self.toggle_edit_mode();
                     return;
                 }
-                
+
                 // 检查暂停按钮 - 发送 P 键按下事件
                 if self.renderer.is_on_pause_button(x, y) {
                     // 只发送按下事件，按钮状态保持一帧让游戏检测到
                     self.button_states.pause = true;
                     self.emit_key(PlatformKeyCode::KeyP, true);
-                    self.renderer.mark_dirty();  // 标记需要重绘
+                    self.renderer.mark_dirty(); // 标记需要重绘
                     return;
                 }
-                
+
                 // 检测触摸了哪个控件
                 if let Some(control) = self.detect_control(x, y) {
-                    self.pointers.insert(pointer_id, TouchPointer { control: Some(control) });
+                    self.pointers.insert(
+                        pointer_id,
+                        TouchPointer {
+                            control: Some(control),
+                        },
+                    );
                     self.update_button_state(control, true, x, y);
                 }
             }
@@ -926,7 +1059,7 @@ impl TouchPanelInput {
                     self.emit_key(PlatformKeyCode::KeyP, false);
                     self.renderer.mark_dirty();
                 }
-                
+
                 if let Some(pointer) = self.pointers.remove(&pointer_id) {
                     if let Some(control) = pointer.control {
                         self.release_control(control);
@@ -935,7 +1068,7 @@ impl TouchPanelInput {
             }
         }
     }
-    
+
     /// 编辑模式触摸处理
     fn handle_edit_touch(&mut self, _pointer_id: usize, x: f32, y: f32, action: TouchAction) {
         match action {
@@ -945,13 +1078,13 @@ impl TouchPanelInput {
                     self.toggle_edit_mode();
                     return;
                 }
-                
+
                 // 检查重置按钮
                 if self.renderer.is_on_reset_button(x, y) {
                     self.reset_layout();
                     return;
                 }
-                
+
                 // 检测拖拽目标
                 self.drag_target = self.detect_drag_target(x, y);
                 if self.drag_target != DragTarget::None {
@@ -971,7 +1104,7 @@ impl TouchPanelInput {
             }
         }
     }
-    
+
     /// 检测触摸的控件
     fn detect_control(&self, x: f32, y: f32) -> Option<TouchControl> {
         // 检测 D-Pad
@@ -980,24 +1113,32 @@ impl TouchPanelInput {
         if Self::in_circle(x, y, dpad_cx, dpad_cy, dpad_r * 1.2) {
             return Some(TouchControl::Dpad);
         }
-        
+
         // 检测按钮
         let touch_scale = 1.3;
         let (ax, ay, ar) = self.renderer.button_a();
-        if Self::in_circle(x, y, ax, ay, ar * touch_scale) { return Some(TouchControl::ButtonA); }
-        
+        if Self::in_circle(x, y, ax, ay, ar * touch_scale) {
+            return Some(TouchControl::ButtonA);
+        }
+
         let (bx, by, br) = self.renderer.button_b();
-        if Self::in_circle(x, y, bx, by, br * touch_scale) { return Some(TouchControl::ButtonB); }
-        
+        if Self::in_circle(x, y, bx, by, br * touch_scale) {
+            return Some(TouchControl::ButtonB);
+        }
+
         let (xx, xy, xr) = self.renderer.button_x();
-        if Self::in_circle(x, y, xx, xy, xr * touch_scale) { return Some(TouchControl::ButtonX); }
-        
+        if Self::in_circle(x, y, xx, xy, xr * touch_scale) {
+            return Some(TouchControl::ButtonX);
+        }
+
         let (yx, yy, yr) = self.renderer.button_y();
-        if Self::in_circle(x, y, yx, yy, yr * touch_scale) { return Some(TouchControl::ButtonY); }
-        
+        if Self::in_circle(x, y, yx, yy, yr * touch_scale) {
+            return Some(TouchControl::ButtonY);
+        }
+
         None
     }
-    
+
     /// 检测拖拽目标
     fn detect_drag_target(&self, x: f32, y: f32) -> DragTarget {
         let (dpad_cx, dpad_cy) = self.renderer.dpad_center();
@@ -1005,22 +1146,30 @@ impl TouchPanelInput {
         if Self::in_circle(x, y, dpad_cx, dpad_cy, dpad_r * 1.2) {
             return DragTarget::Dpad;
         }
-        
+
         let (ax, ay, ar) = self.renderer.button_a();
-        if Self::in_circle(x, y, ax, ay, ar * 1.5) { return DragTarget::ButtonA; }
-        
+        if Self::in_circle(x, y, ax, ay, ar * 1.5) {
+            return DragTarget::ButtonA;
+        }
+
         let (bx, by, br) = self.renderer.button_b();
-        if Self::in_circle(x, y, bx, by, br * 1.5) { return DragTarget::ButtonB; }
-        
+        if Self::in_circle(x, y, bx, by, br * 1.5) {
+            return DragTarget::ButtonB;
+        }
+
         let (xx, xy, xr) = self.renderer.button_x();
-        if Self::in_circle(x, y, xx, xy, xr * 1.5) { return DragTarget::ButtonX; }
-        
+        if Self::in_circle(x, y, xx, xy, xr * 1.5) {
+            return DragTarget::ButtonX;
+        }
+
         let (yx, yy, yr) = self.renderer.button_y();
-        if Self::in_circle(x, y, yx, yy, yr * 1.5) { return DragTarget::ButtonY; }
-        
+        if Self::in_circle(x, y, yx, yy, yr * 1.5) {
+            return DragTarget::ButtonY;
+        }
+
         DragTarget::None
     }
-    
+
     /// 移动拖拽目标
     fn move_drag_target(&mut self, x: f32, y: f32) {
         match self.drag_target {
@@ -1032,13 +1181,13 @@ impl TouchPanelInput {
             DragTarget::None => {}
         }
     }
-    
+
     fn in_circle(x: f32, y: f32, cx: f32, cy: f32, r: f32) -> bool {
         let dx = x - cx;
         let dy = y - cy;
         dx * dx + dy * dy <= r * r
     }
-    
+
     /// 更新按钮状态
     fn update_button_state(&mut self, control: TouchControl, pressed: bool, x: f32, y: f32) {
         match control {
@@ -1047,28 +1196,40 @@ impl TouchPanelInput {
                 let dx = x - cx;
                 let dy = y - cy;
                 let threshold = self.renderer.dpad_size() * 0.15;
-                
+
                 let new_left = dx < -threshold;
                 let new_right = dx > threshold;
                 let new_up = dy < -threshold;
                 let new_down = dy > threshold;
-                
+
                 // 内联更新方向键状态，避免借用冲突
                 if new_left != self.button_states.left {
                     self.button_states.left = new_left;
-                    self.pending_events.push(PlatformKeyEvent { key: PlatformKeyCode::Left, pressed: new_left });
+                    self.pending_events.push(PlatformKeyEvent {
+                        key: PlatformKeyCode::Left,
+                        pressed: new_left,
+                    });
                 }
                 if new_right != self.button_states.right {
                     self.button_states.right = new_right;
-                    self.pending_events.push(PlatformKeyEvent { key: PlatformKeyCode::Right, pressed: new_right });
+                    self.pending_events.push(PlatformKeyEvent {
+                        key: PlatformKeyCode::Right,
+                        pressed: new_right,
+                    });
                 }
                 if new_up != self.button_states.up {
                     self.button_states.up = new_up;
-                    self.pending_events.push(PlatformKeyEvent { key: PlatformKeyCode::Up, pressed: new_up });
+                    self.pending_events.push(PlatformKeyEvent {
+                        key: PlatformKeyCode::Up,
+                        pressed: new_up,
+                    });
                 }
                 if new_down != self.button_states.down {
                     self.button_states.down = new_down;
-                    self.pending_events.push(PlatformKeyEvent { key: PlatformKeyCode::Down, pressed: new_down });
+                    self.pending_events.push(PlatformKeyEvent {
+                        key: PlatformKeyCode::Down,
+                        pressed: new_down,
+                    });
                 }
             }
             TouchControl::ButtonA => {
@@ -1101,15 +1262,23 @@ impl TouchPanelInput {
             }
         }
     }
-    
+
     /// 释放控件
     fn release_control(&mut self, control: TouchControl) {
         match control {
             TouchControl::Dpad => {
-                if self.button_states.left { self.emit_key(PlatformKeyCode::Left, false); }
-                if self.button_states.right { self.emit_key(PlatformKeyCode::Right, false); }
-                if self.button_states.up { self.emit_key(PlatformKeyCode::Up, false); }
-                if self.button_states.down { self.emit_key(PlatformKeyCode::Down, false); }
+                if self.button_states.left {
+                    self.emit_key(PlatformKeyCode::Left, false);
+                }
+                if self.button_states.right {
+                    self.emit_key(PlatformKeyCode::Right, false);
+                }
+                if self.button_states.up {
+                    self.emit_key(PlatformKeyCode::Up, false);
+                }
+                if self.button_states.down {
+                    self.emit_key(PlatformKeyCode::Down, false);
+                }
                 self.button_states.left = false;
                 self.button_states.right = false;
                 self.button_states.up = false;
@@ -1145,12 +1314,14 @@ impl TouchPanelInput {
             }
         }
     }
-    
+
     fn emit_key(&mut self, key: PlatformKeyCode, pressed: bool) {
         self.pending_events.push(PlatformKeyEvent { key, pressed });
     }
 }
 
 impl Default for TouchPanelInput {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }

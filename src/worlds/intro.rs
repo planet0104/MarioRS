@@ -13,19 +13,18 @@ use crate::{
     music::MusicPlayer,
     play::Play,
     players::Players,
+    render_state::{MAX_PAGE, RenderState, SCREEN_WIDTH},
     renderer::{RenderContext, Renderer},
     sprites::SpriteDataManager,
     stars::Stars,
     status::Status,
     tmpobj::TmpObjManager,
     txt::{FontStyle, Txt},
-    render_state::{MAX_PAGE, SCREEN_WIDTH, RenderState},
 };
 
 // Intro阶段日志：默认禁用，需要调试时取消注释下面的println版本
 macro_rules! intro_dbg {
-    ($($t:tt)*) => { };
-    // ($($t:tt)*) => { println!($($t)*); };  // 启用调试日志
+    ($($t:tt)*) => {}; // ($($t:tt)*) => { println!($($t)*); };  // 启用调试日志
 }
 
 // ============================================================================
@@ -96,18 +95,18 @@ pub const BG_SIZE: usize = (MAX_PAGE as usize) + 1;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum IntroPhase {
-    NotStarted,         // 尚未开始
-    InitData,           // 初始化游戏数据
-    PlayIntroWorld,     // 播放Intro世界
-    InitBackground,     // 初始化背景
-    SetPalette,         // 设置调色板
-    DrawIntro,          // 绘制Intro图像
-    FadingUp,           // 淡入中（非阻塞）
-    MenuLoop,           // 菜单循环
-    FadingDownForDemo,  // Demo前淡出
-    PlayDemo,           // 播放Demo
-    FadingDownForExit,  // 退出前淡出
-    Finished,           // 完成
+    NotStarted,        // 尚未开始
+    InitData,          // 初始化游戏数据
+    PlayIntroWorld,    // 播放Intro世界
+    InitBackground,    // 初始化背景
+    SetPalette,        // 设置调色板
+    DrawIntro,         // 绘制Intro图像
+    FadingUp,          // 淡入中（非阻塞）
+    MenuLoop,          // 菜单循环
+    FadingDownForDemo, // Demo前淡出
+    PlayDemo,          // 播放Demo
+    FadingDownForExit, // 退出前淡出
+    Finished,          // 完成
 }
 
 pub struct Intro {
@@ -137,7 +136,7 @@ pub struct Intro {
     // 新增：状态机字段
     phase: IntroPhase,
     demo_runs: i32,
-    
+
     // 用于frame_update的缓存数据
     intro_map: Option<MapBuffer>,
     intro_opt: WorldOptions,
@@ -190,7 +189,7 @@ impl Intro {
             started: false,
         }
     }
-    
+
     /// 启动Intro（由mario.rs调用）
     pub fn start(&mut self) {
         self.phase = IntroPhase::NotStarted;
@@ -202,7 +201,7 @@ impl Intro {
         self.old_status = IntroStatus::None;
         self.selected = 1;
     }
-    
+
     /// 每帧更新（由mario.rs的统一事件循环调用）
     /// 使用 GameContext 封装大部分子系统引用，额外参数单独传递
     pub fn frame_update(
@@ -238,7 +237,7 @@ impl Intro {
             ctx.cur_player,
         )
     }
-    
+
     /// 内部实现：保持原有参数签名以最小化代码改动
     /// 注意：palette 现在统一使用  render_state.palette，不再作为独立参数
     #[allow(clippy::too_many_arguments)]
@@ -269,17 +268,17 @@ impl Intro {
         if !self.started {
             return IntroResult::Continue;
         }
-        
+
         // 轮询按键
         keyboard.poll_os_keys();
-        
+
         // 状态机
         match self.phase {
             IntroPhase::NotStarted => {
                 self.phase = IntroPhase::InitData;
                 IntroResult::Continue
             }
-            
+
             IntroPhase::InitData => {
                 intro_dbg!("[INTRO] 初始化游戏数据");
                 self.intro_done = false;
@@ -302,43 +301,56 @@ impl Intro {
                 buffers.data.mode[0] = 0;
                 buffers.data.mode[1] = 0;
                 buffers.data.turbo = false;
-                
+
                 // 准备地图数据
                 self.intro_map = Some(self.convert_map_from_bytes(INTRO_0_MAP));
                 self.intro_opt = INTRO_0_OPTIONS;
-                
+
                 self.phase = IntroPhase::PlayIntroWorld;
                 IntroResult::Continue
             }
-            
+
             IntroPhase::PlayIntroWorld => {
                 intro_dbg!("[INTRO] 初始化Intro世界");
-                intro_dbg!("[INTRO] palette[0]={:?}, lock={}",  render_state.palette.palette[0],  render_state.palette.lock_palette);
-                
+                intro_dbg!(
+                    "[INTRO] palette[0]={:?}, lock={}",
+                    render_state.palette.palette[0],
+                    render_state.palette.lock_palette
+                );
+
                 // 准备地图数据
                 let intro_map = self.intro_map.as_mut().unwrap();
                 let intro_opt = self.intro_opt.clone();
-                
+
                 // 设置VGA（类似play_world初始化）
                 render_state.set_y_offset(crate::render_state::YBASE);
                 render_state.set_y_start(0x12);
                 render_state.set_y_end(0x7D);
                 render_state.clear_palette();
-                intro_dbg!("[INTRO] after clear_palette: palette[0]={:?}",  render_state.palette.palette[0]);
+                intro_dbg!(
+                    "[INTRO] after clear_palette: palette[0]={:?}",
+                    render_state.palette.palette[0]
+                );
                 render_state.lock_pal();
-                intro_dbg!("[INTRO] after lock_pal: lock={}",  render_state.palette.lock_palette);
+                intro_dbg!(
+                    "[INTRO] after lock_pal: lock={}",
+                    render_state.palette.lock_palette
+                );
                 render_state.clear_vga_mem();
-                
+
                 // 初始化调色板
-                 render_state.palette_init(crate::mpal256::mpal256_palette());
-                intro_dbg!("[INTRO] after palette_init: palette[0xA0]={:?}, palette[15]={:?}", 
-                     render_state.palette.palette[0xA0],  render_state.palette.palette[15]);
-                
+                render_state.palette_init(crate::mpal256::mpal256_palette());
+                intro_dbg!(
+                    "[INTRO] after palette_init: palette[0xA0]={:?}, palette[15]={:?}",
+                    render_state.palette.palette[0xA0],
+                    render_state.palette.palette[15]
+                );
+
                 // 读取世界地图
                 let mut tmp_world = std::mem::take(&mut buffers.world_map);
                 buffers.read_world(intro_map, &mut tmp_world, &intro_opt);
                 buffers.world_map = tmp_world;
-                
+
                 // 初始化玩家位置
                 players.init_player(
                     intro_opt.init_x as i32,
@@ -349,13 +361,13 @@ impl Intro {
                 );
                 players.map_x = (intro_opt.init_x as i32) / W;
                 players.map_y = (intro_opt.init_y as i32) / H + 1;
-                
+
                 // 初始化视口
                 buffers.x_view = 0;
                 buffers.y_view = 0;
                 buffers.last_x_view = [0; MAX_PAGE as usize + 1];
                 render_state.set_view(buffers.x_view, buffers.y_view);
-                
+
                 // 初始化世界元素
                 let current_opt = buffers.options.clone();
                 figures.init_sky(current_opt.sky_type);
@@ -367,46 +379,49 @@ impl Intro {
                     &current_opt,
                 );
                 figures.init_pipes(current_opt.pipe_color, sprites);
-                
+
                 // 关键修复：清理上一关残留的敌人数据（如管道花朵等）
                 // 避免从游戏关卡ESC退出后，Intro界面显示残留敌人
                 enemies.clear_enemies();
-                
+
                 enemies.init_enemy_figures(figures, sprites);
                 backgr.init_backgr(current_opt.backgr_type, current_opt.clouds);
-                
+
                 if current_opt.stars != 0 {
                     stars.init_stars(buffers, &current_opt);
                 }
-                
+
                 figures.build_world(&mut buffers.world_map, &current_opt, sprites);
                 // 关键：BuildWorld 会重着色/转换草地等，运行时精灵存入figures
                 // GPU 图集必须同步更新，否则 Intro 地面/草/砖块颜色与 Oldsrc 不一致
                 *atlas = sprites.build_atlas(figures);
-                
+
                 // 设置天空调色板和草地调色板
                 {
-                    let mut pal = std::mem::take(&mut  render_state.palette);
+                    let mut pal = std::mem::take(&mut render_state.palette);
                     figures.set_sky_palette(&mut pal, &current_opt);
-                     render_state.palette = pal;
+                    render_state.palette = pal;
                 }
                 {
-                    let mut pal = std::mem::take(&mut  render_state.palette);
+                    let mut pal = std::mem::take(&mut render_state.palette);
                     backgr.draw_pal_backgr(&mut pal, render_state, Some(&current_opt));
-                     render_state.palette = pal;
+                    render_state.palette = pal;
                 }
-                 render_state.palette_init_grass(&current_opt);
-                
+                render_state.palette_init_grass(&current_opt);
+
                 // 关键修复：保存调色板颜色到source_palette，然后palette置黑
                 // 在整个初始化过程中保持palette全黑，防止帧间闪烁
-                 render_state.palette.source_palette =  render_state.palette.palette;
-                 render_state.palette.palette = [[0; 3]; 256];
-                intro_dbg!("[INTRO] PlayIntroWorld: palette置黑，source_palette[0xA0]={:?}",  render_state.palette.source_palette[0xA0]);
-                
+                render_state.palette.source_palette = render_state.palette.palette;
+                render_state.palette.palette = [[0; 3]; 256];
+                intro_dbg!(
+                    "[INTRO] PlayIntroWorld: palette置黑，source_palette[0xA0]={:?}",
+                    render_state.palette.source_palette[0xA0]
+                );
+
                 // 使用Renderer渲染初始帧（和play_world一致）
                 for page in 0..=MAX_PAGE {
                     render_state.page = page;
-                    
+
                     let mut ctx = RenderContext {
                         render_state,
                         buffers,
@@ -423,18 +438,18 @@ impl Intro {
                         status: status_mgr,
                         txt,
                     };
-                    
+
                     let mut renderer = Renderer::new();
-                    renderer.only_draw = true;  // Intro模式
+                    renderer.only_draw = true; // Intro模式
                     renderer.render_init_frame(&mut ctx, page);
                 }
-                
+
                 // palette保持全黑，不恢复
-                
+
                 self.phase = IntroPhase::InitBackground;
                 IntroResult::Continue
             }
-            
+
             IntroPhase::InitBackground => {
                 intro_dbg!("[INTRO] 初始化背景");
                 // 对齐 Oldsrc/Pascal：Intro 背景使用 Options_0.BackGrType，不应在这里强行改成 3
@@ -442,7 +457,7 @@ impl Intro {
                 self.phase = IntroPhase::SetPalette;
                 IntroResult::Continue
             }
-            
+
             IntroPhase::SetPalette => {
                 intro_dbg!("[INTRO] 设置Intro调色板到source_palette");
                 // 直接修改 source_palette，不修改 palette（保持全黑）
@@ -450,37 +465,45 @@ impl Intro {
                 // 颜色对齐 Oldsrc 实机观感：
                 // - 云：#E3E4F8 约等于 6bit [56,56,61]
                 // - 山：#86B1C2 约等于 6bit [33,44,48]
-                 render_state.palette.source_palette[0xA0] = [56, 56, 61];
-                 render_state.palette.source_palette[0xA1] = [33, 44, 48];
-                 render_state.palette.source_palette[0x18] = [10, 15, 25];
-                 render_state.palette.source_palette[0x8D] = [28, 38, 50];
-                 render_state.palette.source_palette[0x8F] = [40, 50, 63];
-                
+                render_state.palette.source_palette[0xA0] = [56, 56, 61];
+                render_state.palette.source_palette[0xA1] = [33, 44, 48];
+                render_state.palette.source_palette[0x18] = [10, 15, 25];
+                render_state.palette.source_palette[0x8D] = [28, 38, 50];
+                render_state.palette.source_palette[0x8F] = [40, 50, 63];
+
                 // blink 初始化也直接修改 source_palette
                 for _ in 0..50 {
                     // 简化的 blink 初始化，只更新 source_palette 中的动画颜色
                     // 瀑布颜色索引 7-11
-                     render_state.palette.source_palette[7] =  render_state.palette.source_palette[7];
-                     render_state.palette.source_palette[8] =  render_state.palette.source_palette[8];
-                     render_state.palette.source_palette[9] =  render_state.palette.source_palette[9];
-                     render_state.palette.source_palette[10] =  render_state.palette.source_palette[10];
-                     render_state.palette.source_palette[11] =  render_state.palette.source_palette[11];
+                    render_state.palette.source_palette[7] = render_state.palette.source_palette[7];
+                    render_state.palette.source_palette[8] = render_state.palette.source_palette[8];
+                    render_state.palette.source_palette[9] = render_state.palette.source_palette[9];
+                    render_state.palette.source_palette[10] =
+                        render_state.palette.source_palette[10];
+                    render_state.palette.source_palette[11] =
+                        render_state.palette.source_palette[11];
                 }
-                intro_dbg!("[INTRO] source_palette[0xA0]={:?}",  render_state.palette.source_palette[0xA0]);
-                
+                intro_dbg!(
+                    "[INTRO] source_palette[0xA0]={:?}",
+                    render_state.palette.source_palette[0xA0]
+                );
+
                 self.phase = IntroPhase::DrawIntro;
                 IntroResult::Continue
             }
-            
+
             IntroPhase::DrawIntro => {
                 intro_dbg!("[INTRO] 绘制Intro元素");
                 let intro_opt = self.intro_opt.clone();
-                
+
                 // palette 已经是全黑的（在 PlayIntroWorld 阶段置黑）
                 // source_palette 已经设置好了（包含所有颜色）
-                intro_dbg!("[INTRO] palette[0xA0]={:?}, source_palette[0xA0]={:?}", 
-                     render_state.palette.palette[0xA0],  render_state.palette.source_palette[0xA0]);
-                
+                intro_dbg!(
+                    "[INTRO] palette[0xA0]={:?}, source_palette[0xA0]={:?}",
+                    render_state.palette.palette[0xA0],
+                    render_state.palette.source_palette[0xA0]
+                );
+
                 for _i in 0..=MAX_PAGE {
                     intro_dbg!("[INTRO] drawing page {}", i);
                     self.draw_intro_screen(
@@ -502,31 +525,34 @@ impl Intro {
                     );
                     render_state.show_page();
                 }
-                
+
                 // 解锁调色板并开始渐显
                 // source_palette 已经在之前的阶段设置好了
                 render_state.unlock_pal();
                 // 手动设置渐显状态（palette 是黑的，source_palette 已设置）
-                 render_state.palette.fading_up = true;
-                 render_state.palette.fading_down = false;
-                 render_state.palette.fading_pos = 63;
-                 render_state.palette.fading_step = 1;
-                 render_state.palette.fading_done = false;
-                intro_dbg!("[INTRO] 开始渐显，fading_pos={}, source_palette[0xA0]={:?}", 
-                     render_state.palette.fading_pos,  render_state.palette.source_palette[0xA0]);
+                render_state.palette.fading_up = true;
+                render_state.palette.fading_down = false;
+                render_state.palette.fading_pos = 63;
+                render_state.palette.fading_step = 1;
+                render_state.palette.fading_done = false;
+                intro_dbg!(
+                    "[INTRO] 开始渐显，fading_pos={}, source_palette[0xA0]={:?}",
+                    render_state.palette.fading_pos,
+                    render_state.palette.source_palette[0xA0]
+                );
                 self.phase = IntroPhase::FadingUp;
                 IntroResult::Continue
             }
-            
+
             IntroPhase::FadingUp => {
-                 render_state.palette_fade_step();
-                if  render_state.palette.fading_done {
+                render_state.palette_fade_step();
+                if render_state.palette.fading_done {
                     intro_dbg!("[INTRO] 淡入完成，进入菜单");
                     render_state.reset_stack();
                     self.bg = [[0; 5]; MAX_PAGE as usize + 1];
                     self.menu = Default::default();
                     txt.set_font(0, FontStyle::BOLD | FontStyle::SHADOW);
-                    
+
                     if self.status != IntroStatus::Options {
                         self.old_status = IntroStatus::None;
                         self.last_status = IntroStatus::None;
@@ -539,37 +565,48 @@ impl Intro {
                 }
                 IntroResult::Continue
             }
-            
+
             IntroPhase::MenuLoop => {
                 let mut quit_game = false;
-                
+
                 // 更新菜单内容
                 if self.update || (self.status != self.old_status) {
                     self.update_menu_content(
-                        buffers, game_number, play, music, config, cur_player as usize,
+                        buffers,
+                        game_number,
+                        play,
+                        music,
+                        config,
+                        cur_player as usize,
                     );
                     self.old_status = self.status;
                     self.update = false;
                 }
-                
+
                 self.macro_key = '\0';
-                
+
                 // 处理键盘输入
                 if keyboard.kb_hit() {
                     if let Some(scan_code) = keyboard.get_current_scan_code() {
                         self.handle_keyboard_input(
-                            scan_code, buffers, game_number, &mut quit_game,
-                            play, music, config, cur_player as usize,
+                            scan_code,
+                            buffers,
+                            game_number,
+                            &mut quit_game,
+                            play,
+                            music,
+                            config,
+                            cur_player as usize,
                         );
                     }
                     keyboard.clear_key();
                 }
-                
+
                 if self.macro_key != '\0' {
                     self.counter = 0;
                     self.update = true;
                 }
-                
+
                 // 渲染菜单
                 let intro_opt = self.intro_opt.clone();
                 self.render_menu_frame(
@@ -589,37 +626,37 @@ impl Intro {
                     atlas,
                     &intro_opt,
                 );
-                
+
                 self.counter += 1;
-                
+
                 // 检查退出条件
                 if quit_game {
                     return IntroResult::Quit;
                 }
-                
+
                 if self.intro_done {
-                     render_state.palette.start_fade_down_steps(64);
+                    render_state.palette.start_fade_down_steps(64);
                     self.phase = IntroPhase::FadingDownForExit;
                 } else if self.counter >= WAIT_BEFORE_DEMO {
                     // Pascal: if not IntroDone then Demo;
                     // 超时后开始播放Demo
                     self.counter = 0;
-                     render_state.palette.start_fade_down_steps(64);
+                    render_state.palette.start_fade_down_steps(64);
                     self.phase = IntroPhase::FadingDownForDemo;
                 }
-                
+
                 IntroResult::Continue
             }
-            
+
             IntroPhase::FadingDownForDemo => {
-                 render_state.palette_fade_step();
-                if  render_state.palette.fading_done {
+                render_state.palette_fade_step();
+                if render_state.palette.fading_done {
                     // 淡出完成后进入Demo模式
                     self.phase = IntroPhase::PlayDemo;
                 }
                 IntroResult::Continue
             }
-            
+
             IntroPhase::PlayDemo => {
                 // Pascal Demo过程:
                 //   NewData;
@@ -628,7 +665,7 @@ impl Intro {
                 //   PlayMacro;
                 //   PlayWorld(' ', ' ', Level_6a..., plMario);
                 //   StopMacro;
-                
+
                 // 重置游戏数据
                 buffers.data.lives[0] = 3;
                 buffers.data.lives[1] = 3;
@@ -641,26 +678,26 @@ impl Intro {
                 buffers.data.mode[0] = 0;
                 buffers.data.mode[1] = 0;
                 buffers.data.turbo = false;
-                
+
                 // 开始播放Demo按键序列
                 keyboard.play_demo();
-                
+
                 // 标记Demo模式开始，返回StartDemo让mario.rs处理
                 self.demo_runs += 1;
                 self.phase = IntroPhase::NotStarted; // Demo结束后重置到初始状态
-                
+
                 // 返回StartDemo结果让游戏核心启动第6关Demo播放
                 IntroResult::StartDemo
             }
-            
+
             IntroPhase::FadingDownForExit => {
-                 render_state.palette_fade_step();
-                if  render_state.palette.fading_done {
+                render_state.palette_fade_step();
+                if render_state.palette.fading_done {
                     self.phase = IntroPhase::Finished;
                 }
                 IntroResult::Continue
             }
-            
+
             IntroPhase::Finished => {
                 // 设置游戏数据
                 if *game_number != -1 {
@@ -670,7 +707,7 @@ impl Intro {
                     }
                 }
                 buffers.data.num_players = self.next_num_players;
-                
+
                 // 完全清空VGA调色板，防止进入Play阶段时闪烁残留颜色
                 render_state.clear_palette();
                 self.started = false;
@@ -735,9 +772,9 @@ impl Intro {
     ) -> Vec<crate::gpu::sprite_batch::SpriteCommand> {
         use crate::gpu::sprite_batch::SpriteCommand;
         use crate::sprites::SpriteId;
-        
+
         let mut commands = Vec::new();
-        
+
         // 1) 绘制三个INTRO图像（带阴影效果）
         for i in (0..=1).rev() {
             for j in (0..=1).rev() {
@@ -747,13 +784,13 @@ impl Intro {
                     let cmd = SpriteCommand::new(38 + i + j, 29 + i + k, uv)
                         .with_palette(0, palette_index);
                     commands.push(cmd);
-                    
+
                     // INTRO_001
                     let uv = atlas.get(SpriteId::INTRO_001);
                     let cmd = SpriteCommand::new(159 + i + j, 29 + i + k, uv)
                         .with_palette(0, palette_index);
                     commands.push(cmd);
-                    
+
                     // INTRO_002
                     let uv = atlas.get(SpriteId::INTRO_002);
                     let cmd = SpriteCommand::new(198 + i + j, 29 + i + k, uv)
@@ -762,19 +799,18 @@ impl Intro {
                 }
             }
         }
-        
+
         // 2) 绘制边框砖块
         for i in 0..NH {
             for j in 0..NV {
                 if i == 0 || i == NH - 1 || j == 0 || j == NV - 1 {
                     let uv = atlas.get(SpriteId::BLOCK_000);
-                    let cmd = SpriteCommand::new(i * W, j * H, uv)
-                        .with_palette(0, palette_index);
+                    let cmd = SpriteCommand::new(i * W, j * H, uv).with_palette(0, palette_index);
                     commands.push(cmd);
                 }
             }
         }
-        
+
         commands
     }
 
@@ -960,7 +996,7 @@ impl Intro {
     ) {
         // 调试：记录所有按键
         intro_dbg!("[INTRO] handle_keyboard_input: scan_code={}", scan_code);
-        
+
         let _ = cur_player;
         match scan_code {
             1 | 75 => {
@@ -1136,7 +1172,8 @@ impl Intro {
             }
 
             // Oldsrc 最后 DrawPlayer，GPU 这里再绘制一次以保证层级一致
-            for p in players.collect_player_sprites_gpu(buffers, atlas, palette_index, enemies.star) {
+            for p in players.collect_player_sprites_gpu(buffers, atlas, palette_index, enemies.star)
+            {
                 batch.push_sprite(p);
             }
         }
@@ -1165,7 +1202,7 @@ impl Intro {
                 // 高频渲染不输出日志，避免刷屏
                 if (k + 1) as i32 == self.selected {
                     // 红色(用于选择指示符)
-                     render_state.palette_out(5, 63, 0, 0);
+                    render_state.palette_out(5, 63, 0, 0);
                     txt.write_text(render_state, i - 12, j, "\x10", 5);
                 }
 
@@ -1174,15 +1211,15 @@ impl Intro {
                     color = 14 + (self.counter & 1) as u8;
                 }
                 // 黄色(用于闪烁菜单项) 和 白色(用于普通菜单文字)
-                 render_state.palette_out(14, 63, 61, 31);
-                 render_state.palette_out(15, 63, 63, 63);
+                render_state.palette_out(14, 63, 61, 31);
+                render_state.palette_out(15, 63, 63, 63);
                 // 高频渲染不输出日志，避免刷屏
                 txt.write_text(render_state, i + 8, j, &self.menu[k], color);
             }
         }
 
         render_state.show_page();
-         render_state.palette_blink_wrapper(options);
+        render_state.palette_blink_wrapper(options);
         render_state.reset_stack();
 
         // 实际渲染到窗口由平台层（wgpu backend）负责

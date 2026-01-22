@@ -2,9 +2,9 @@
 // 包含 Pascal 中的静态数据和绘制逻辑
 
 use crate::buffers::{H, MAX_WORLD_SIZE, NH, NV, W, WorldOptions};
+use crate::gpu::sprite_batch::FillCommand;
 use crate::palettes::Palettes;
 use crate::render_state::RenderState;
-use crate::gpu::sprite_batch::FillCommand;
 
 // Include generated assets produced by build.rs
 include!(concat!(env!("OUT_DIR"), "/generated_assets.rs"));
@@ -198,7 +198,12 @@ impl BackGr {
 
     /// Rust严格模拟Pascal LargeBrickPalette 逻辑
     /// i: 当前帧或砖块索引
-    pub fn large_brick_palette(&self, i: i32, palette: &mut Palettes, render_state: &mut RenderState) {
+    pub fn large_brick_palette(
+        &self,
+        i: i32,
+        palette: &mut Palettes,
+        render_state: &mut RenderState,
+    ) {
         let i = i % 32;
         for j in 0..32 {
             if i == j || ((i + 1) % 32) == j {
@@ -322,7 +327,11 @@ impl BackGr {
     /// 说明：
     /// - 原版会用 get_pixel_world 做“天空掩码”避免覆盖前景
     /// - GPU 版无读回，这里只负责生成背景形状，渲染顺序保证它在前景之前
-    pub fn collect_put_backgr_fills(&self, x_view: i32, options: &WorldOptions) -> Vec<FillCommand> {
+    pub fn collect_put_backgr_fills(
+        &self,
+        x_view: i32,
+        options: &WorldOptions,
+    ) -> Vec<FillCommand> {
         let mut fills = Vec::new();
         if !(matches!(options.backgr_type, 1..=3 | 9..=11)) {
             return fills;
@@ -355,12 +364,25 @@ impl BackGr {
     }
 
     /// GPU模式：收集 DrawBackGrMap 的背景装饰（对齐 Oldsrc draw_backgr_map）
-    pub fn collect_backgr_map_fills(&self, y1: i32, y2: i32, shift: i32, c: u8) -> Vec<FillCommand> {
+    pub fn collect_backgr_map_fills(
+        &self,
+        y1: i32,
+        y2: i32,
+        shift: i32,
+        c: u8,
+    ) -> Vec<FillCommand> {
         self.collect_backgr_map_fills_from_map(&self.backgr_map, y1, y2, shift, c)
     }
 
     /// GPU模式：收集 DrawBackGrMap 的背景装饰（允许指定高度表）
-    pub fn collect_backgr_map_fills_from_map(&self, map: &[u8], y1: i32, y2: i32, shift: i32, c: u8) -> Vec<FillCommand> {
+    pub fn collect_backgr_map_fills_from_map(
+        &self,
+        map: &[u8],
+        y1: i32,
+        y2: i32,
+        shift: i32,
+        c: u8,
+    ) -> Vec<FillCommand> {
         let mut fills = Vec::new();
         let screen_w = crate::render_state::SCREEN_WIDTH as i32;
 
@@ -388,41 +410,47 @@ impl BackGr {
     /// 使用椭圆形填充矩形来模拟云朵形状
     pub fn collect_cloud_fills(&self, x_view: i32) -> Vec<FillCommand> {
         let mut fills = Vec::new();
-        
+
         if self.clouds == 0 {
             return fills;
         }
-        
+
         let max_clouds = MAX_CLOUDS as usize;
-        
+
         for i in 1..=max_clouds {
             if i >= self.cloud_map.len() || i + max_clouds >= self.cloud_map.len() {
                 continue;
             }
-            
+
             let cloud_start = &self.cloud_map[i];
             let cloud_end = &self.cloud_map[i + max_clouds];
-            
+
             let x1 = cloud_start[0] - x_view / CLOUD_SPEED;
             let x2 = cloud_end[0] - x_view / CLOUD_SPEED;
             let y = cloud_start[1];
             let cloud_width = (x2 - x1).max(0);
-            
+
             // 只渲染在可视范围内的云朵
             if x2 < 0 || x1 > NH * W {
                 continue;
             }
-            
+
             // 使用渐变色来模拟云朵的圆形效果
             // 云朵颜色使用背景色系 (0xE0-0xEF范围)
             let cloud_color = 0xE8u8; // 浅蓝色
-            
+
             // 简化版：使用单个矩形表示云朵
             if cloud_width > 0 && y < NV * H {
-                fills.push(FillCommand::new(x1, y, cloud_width, CLOUD_HEIGHT.min(NV * H - y), cloud_color));
+                fills.push(FillCommand::new(
+                    x1,
+                    y,
+                    cloud_width,
+                    CLOUD_HEIGHT.min(NV * H - y),
+                    cloud_color,
+                ));
             }
         }
-        
+
         fills
     }
 
@@ -437,7 +465,7 @@ impl BackGr {
     ) -> Vec<FillCommand> {
         let mut fills = Vec::new();
         let horizon = options.horizon.saturating_sub(4) as i32;
-        
+
         let mut cur_y = y;
         // 严格对齐 Oldsrc：根据起始 y 计算初始 dh 和 dl
         let mut dh: i32 = ((cur_y % 6 + 6) % 6) as i32;
@@ -451,10 +479,10 @@ impl BackGr {
             }
             v
         };
-        
+
         for _ in 0..h {
             fills.push(FillCommand::new(x, cur_y, w, 1, dl));
-            
+
             cur_y += 1;
             if cur_y >= horizon {
                 dl = 0xF0;
@@ -467,14 +495,18 @@ impl BackGr {
                 }
             }
         }
-        
+
         fills
     }
 
     /// GPU模式：收集背景渲染数据
-    pub fn collect_background_data(&self, _x_view: i32, options: &WorldOptions) -> Vec<FillCommand> {
+    pub fn collect_background_data(
+        &self,
+        _x_view: i32,
+        options: &WorldOptions,
+    ) -> Vec<FillCommand> {
         let mut fills = Vec::new();
-        
+
         // 根据背景类型生成填充命令
         match options.backgr_type {
             0 => {
@@ -494,12 +526,12 @@ impl BackGr {
             }
             _ => {}
         }
-        
+
         fills
     }
-    
+
     // ========== GPU直接渲染方法 ==========
-    
+
     /// GPU版smooth_fill - 直接向render_state.sprite_batch添加填充命令
     /// 严格对齐 Oldsrc BACKGR.PAS SmoothFill 的像素效果
     pub fn smooth_fill_gpu(
@@ -515,10 +547,10 @@ impl BackGr {
         // cur_y >= horizon 时使用 0xF0，否则从 0xEF 开始随行数递减并下限到 0xE0
         let horizon = options.horizon.saturating_sub(4) as i32;
         let mut cur_y = y as i32;
-        
+
         // 严格对齐 Oldsrc：根据起始 y 计算初始 dh
         let mut dh: i32 = ((cur_y % 6 + 6) % 6) as i32;
-        
+
         // 严格对齐 Oldsrc：根据起始 y 计算初始 dl
         let mut dl: u8 = if cur_y >= horizon {
             0xF0
@@ -530,10 +562,10 @@ impl BackGr {
             }
             v
         };
-        
+
         for _ in 0..h {
             render_state.fill_world_gpu(x as i32, cur_y, w as i32, 1, dl);
-            
+
             cur_y += 1;
             if cur_y >= horizon {
                 dl = 0xF0;
@@ -547,14 +579,14 @@ impl BackGr {
             }
         }
     }
-    
+
     /// GPU版draw_bricks - 平铺砖块纹理（使用填充颜色模拟）
     pub fn draw_bricks_gpu(&self, x: i32, y: i32, w: i32, h: i32, render_state: &mut RenderState) {
         // 简化版本：使用填充色模拟砖块纹理
         let brick_color = 0x48u8; // 砖块基础色
         render_state.fill_world_gpu(x, y, w, h, brick_color);
     }
-    
+
     /// GPU版large_bricks - 大砖块填充
     pub fn large_bricks_gpu(&self, x: i32, y: i32, w: i32, h: i32, render_state: &mut RenderState) {
         // 渐变砖块效果
@@ -563,14 +595,14 @@ impl BackGr {
             render_state.fill_world_gpu(x, y + dy, w, 1, color);
         }
     }
-    
+
     /// GPU版pillar - 柱子装饰（使用精灵）
     pub fn pillar_gpu(&self, x: i32, y: i32, _w: i32, _h: i32, render_state: &mut RenderState) {
         // 柱子使用填充色模拟
         let pillar_color = 0x30u8;
         render_state.fill_world_gpu(x, y, W, H, pillar_color);
     }
-    
+
     /// GPU版windows - 窗户填充
     pub fn windows_gpu(&self, x: i32, y: i32, w: i32, h: i32, render_state: &mut RenderState) {
         // 窗户背景

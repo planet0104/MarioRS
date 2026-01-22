@@ -3,12 +3,12 @@ use crate::figures::Figures;
 use crate::glitter::*;
 use crate::gpu::{RenderCommand, SpriteInstance};
 use crate::music::*;
+use crate::render_state::*;
 use crate::sprites::SpriteDataManager;
 use crate::tmpobj::TP_FIRE;
 use crate::tmpobj::TP_HIT;
 use crate::tmpobj::TmpObjManager;
 use crate::utils::*;
-use crate::render_state::*;
 
 // Constants
 pub const START_ENEMIES_AT: i32 = 2;
@@ -447,14 +447,14 @@ impl Enemies {
         atlas: &crate::sprites::SpriteAtlas,
     ) {
         use crate::sprites::SpriteId;
-        
+
         for &j in self.active_enemies.iter() {
             let j = j as usize;
             if j >= self.enemies.len() {
                 continue;
             }
             let enemy = &self.enemies[j];
-            
+
             // 检查是否在可视区域内
             if (enemy.x_pos as i32 + W < buffers.x_view)
                 || (enemy.x_pos > buffers.x_view + SCREEN_WIDTH as i32)
@@ -462,94 +462,165 @@ impl Enemies {
             {
                 continue;
             }
-            
+
             // 计算屏幕坐标
             let sx = (enemy.x_pos - buffers.x_view) as f32;
             let sy = (enemy.y_pos - buffers.y_view) as f32;
-            
+
             match enemy.tp {
                 TP_CHIBIBO => {
                     // 对齐 Oldsrc: TP_CHIBIBO 使用 FigList[1 + 3*sub_tp] 的单个图像，
                     // 并用 dir_counter 在左右镜像之间切换（作为走路动画效果）。
-                    let sprite_id = if enemy.sub_tp == 0 { SpriteId::CHIBIBO_000 } else { SpriteId::CHIBIBO_002 };
+                    let sprite_id = if enemy.sub_tp == 0 {
+                        SpriteId::CHIBIBO_000
+                    } else {
+                        SpriteId::CHIBIBO_002
+                    };
                     let flip_x = !(enemy.dir_counter % 32 < 16);
                     let inst = self.create_enemy_sprite(atlas, sprite_id, sx, sy, flip_x, false);
                     commands.push(RenderCommand::DrawSprite(inst));
                 }
                 TP_FLAT_CHIBIBO => {
                     // 被踩扁的栗子怪
-                    let sprite_id = if enemy.sub_tp == 0 { SpriteId::CHIBIBO_001 } else { SpriteId::CHIBIBO_003 };
+                    let sprite_id = if enemy.sub_tp == 0 {
+                        SpriteId::CHIBIBO_001
+                    } else {
+                        SpriteId::CHIBIBO_003
+                    };
                     let flip_x = !(enemy.dir_counter % 32 < 16);
                     let inst = self.create_enemy_sprite(atlas, sprite_id, sx, sy, flip_x, false);
                     commands.push(RenderCommand::DrawSprite(inst));
                 }
                 TP_DEAD_CHIBIBO => {
                     // 死亡栗子怪 (上下翻转)
-                    let inst = self.create_enemy_sprite(atlas, SpriteId::CHIBIBO_000, sx, sy, true, true);
+                    let inst =
+                        self.create_enemy_sprite(atlas, SpriteId::CHIBIBO_000, sx, sy, true, true);
                     commands.push(RenderCommand::DrawSprite(inst));
                 }
                 TP_RISING_CHAMP => {
                     if enemy.y_pos != (enemy.map_y * H) {
                         let visible_h = (H - (enemy.y_pos % H) - 1) as f32;
-                        let sprite_id = if enemy.sub_tp == 0 { SpriteId::CHAMP_000 } else { SpriteId::POISON_000 };
+                        let sprite_id = if enemy.sub_tp == 0 {
+                            SpriteId::CHAMP_000
+                        } else {
+                            SpriteId::POISON_000
+                        };
                         let inst = self.create_enemy_sprite(atlas, sprite_id, sx, sy, false, false);
-                        commands.push(RenderCommand::DrawSpritePart { sprite: inst, visible_height: visible_h });
+                        commands.push(RenderCommand::DrawSpritePart {
+                            sprite: inst,
+                            visible_height: visible_h,
+                        });
                     }
                 }
                 TP_CHAMP => {
-                    let sprite_id = if enemy.sub_tp == 0 { SpriteId::CHAMP_000 } else { SpriteId::POISON_000 };
+                    let sprite_id = if enemy.sub_tp == 0 {
+                        SpriteId::CHAMP_000
+                    } else {
+                        SpriteId::POISON_000
+                    };
                     let inst = self.create_enemy_sprite(atlas, sprite_id, sx, sy, false, false);
                     commands.push(RenderCommand::DrawSprite(inst));
                 }
                 TP_RISING_LIFE => {
                     if enemy.y_pos != (enemy.map_y * H) {
                         let visible_h = (H - (enemy.y_pos % H) - 1) as f32;
-                        let inst = self.create_enemy_sprite(atlas, SpriteId::LIFE_000, sx, sy, false, false);
-                        commands.push(RenderCommand::DrawSpritePart { sprite: inst, visible_height: visible_h });
+                        let inst = self.create_enemy_sprite(
+                            atlas,
+                            SpriteId::LIFE_000,
+                            sx,
+                            sy,
+                            false,
+                            false,
+                        );
+                        commands.push(RenderCommand::DrawSpritePart {
+                            sprite: inst,
+                            visible_height: visible_h,
+                        });
                     }
                 }
                 TP_LIFE => {
-                    let inst = self.create_enemy_sprite(atlas, SpriteId::LIFE_000, sx, sy, false, false);
+                    let inst =
+                        self.create_enemy_sprite(atlas, SpriteId::LIFE_000, sx, sy, false, false);
                     commands.push(RenderCommand::DrawSprite(inst));
                 }
                 TP_RISING_FLOWER => {
                     if enemy.y_pos != (enemy.map_y * H) {
                         let visible_h = (H - (enemy.y_pos % H) - 1) as f32;
-                        let inst = self.create_enemy_sprite(atlas, SpriteId::FLOWER_000, sx, sy, false, false);
-                        commands.push(RenderCommand::DrawSpritePart { sprite: inst, visible_height: visible_h });
+                        let inst = self.create_enemy_sprite(
+                            atlas,
+                            SpriteId::FLOWER_000,
+                            sx,
+                            sy,
+                            false,
+                            false,
+                        );
+                        commands.push(RenderCommand::DrawSpritePart {
+                            sprite: inst,
+                            visible_height: visible_h,
+                        });
                     }
                 }
                 TP_FLOWER => {
-                    let inst = self.create_enemy_sprite(atlas, SpriteId::FLOWER_000, sx, sy, false, false);
+                    let inst =
+                        self.create_enemy_sprite(atlas, SpriteId::FLOWER_000, sx, sy, false, false);
                     commands.push(RenderCommand::DrawSprite(inst));
                 }
                 TP_RISING_STAR => {
                     if enemy.y_pos != (enemy.map_y * H) {
                         let visible_h = (H - (enemy.y_pos % H) - 1) as f32;
-                        let inst = self.create_enemy_sprite(atlas, SpriteId::STAR_000, sx, sy, false, false);
-                        commands.push(RenderCommand::DrawSpritePart { sprite: inst, visible_height: visible_h });
+                        let inst = self.create_enemy_sprite(
+                            atlas,
+                            SpriteId::STAR_000,
+                            sx,
+                            sy,
+                            false,
+                            false,
+                        );
+                        commands.push(RenderCommand::DrawSpritePart {
+                            sprite: inst,
+                            visible_height: visible_h,
+                        });
                     }
                 }
                 TP_STAR => {
-                    let inst = self.create_enemy_sprite(atlas, SpriteId::STAR_000, sx, sy, false, false);
+                    let inst =
+                        self.create_enemy_sprite(atlas, SpriteId::STAR_000, sx, sy, false, false);
                     commands.push(RenderCommand::DrawSprite(inst));
                 }
                 TP_FIREBALL => {
-                    let sprite_id = if enemy.x_pos % 4 < 2 { SpriteId::FIRE_000 } else { SpriteId::FIRE_001 };
+                    let sprite_id = if enemy.x_pos % 4 < 2 {
+                        SpriteId::FIRE_000
+                    } else {
+                        SpriteId::FIRE_001
+                    };
                     let inst = self.create_enemy_sprite(atlas, sprite_id, sx, sy, false, false);
                     commands.push(RenderCommand::DrawSprite(inst));
                 }
                 TP_VERT_FISH => {
                     if (enemy.y_vel != 0) || (enemy.y_pos < NV * H - H) {
                         let flip_x = self.player_x1 > enemy.x_pos;
-                        let inst = self.create_enemy_sprite(atlas, SpriteId::FISH_001, sx, sy, flip_x, false);
+                        let inst = self.create_enemy_sprite(
+                            atlas,
+                            SpriteId::FISH_001,
+                            sx,
+                            sy,
+                            flip_x,
+                            false,
+                        );
                         commands.push(RenderCommand::DrawSprite(inst));
                     }
                 }
                 TP_DEAD_VERT_FISH => {
                     if (enemy.y_pos < NV * H - H) || (enemy.y_vel != 0) {
                         let flip_x = self.player_x1 <= enemy.x_pos;
-                        let inst = self.create_enemy_sprite(atlas, SpriteId::FISH_001, sx, sy, flip_x, true);
+                        let inst = self.create_enemy_sprite(
+                            atlas,
+                            SpriteId::FISH_001,
+                            sx,
+                            sy,
+                            flip_x,
+                            true,
+                        );
                         commands.push(RenderCommand::DrawSprite(inst));
                     }
                 }
@@ -569,30 +640,54 @@ impl Enemies {
                 }
                 TP_VERT_PLANT => {
                     let sprite_id = if self.time_counter % 32 < 16 {
-                        match enemy.sub_tp { 0 | 1 => SpriteId::PPLANT_002, _ => SpriteId::PPLANT_000 }
+                        match enemy.sub_tp {
+                            0 | 1 => SpriteId::PPLANT_002,
+                            _ => SpriteId::PPLANT_000,
+                        }
                     } else {
-                        match enemy.sub_tp { 0 | 1 => SpriteId::PPLANT_003, _ => SpriteId::PPLANT_001 }
+                        match enemy.sub_tp {
+                            0 | 1 => SpriteId::PPLANT_003,
+                            _ => SpriteId::PPLANT_001,
+                        }
                     };
                     let visible_h = (enemy.map_y * H) - enemy.y_pos - 1;
                     if visible_h >= 0 {
                         let inst = self.create_enemy_sprite(atlas, sprite_id, sx, sy, false, false);
-                        commands.push(RenderCommand::DrawSpritePart { sprite: inst, visible_height: visible_h as f32 });
+                        commands.push(RenderCommand::DrawSpritePart {
+                            sprite: inst,
+                            visible_height: visible_h as f32,
+                        });
                     }
                 }
                 TP_DEAD_VERT_PLANT => {
                     if self.enemies[j].status < 12 {
-                        let inst = self.create_enemy_sprite(atlas, SpriteId::HIT_000, sx, sy, false, false);
+                        let inst = self.create_enemy_sprite(
+                            atlas,
+                            SpriteId::HIT_000,
+                            sx,
+                            sy,
+                            false,
+                            false,
+                        );
                         commands.push(RenderCommand::DrawSprite(inst));
                     }
                 }
                 TP_RED => {
-                    let sprite_id = if enemy.dir_counter % 16 <= 8 { SpriteId::RED_000 } else { SpriteId::RED_001 };
+                    let sprite_id = if enemy.dir_counter % 16 <= 8 {
+                        SpriteId::RED_000
+                    } else {
+                        SpriteId::RED_001
+                    };
                     let flip_x = enemy.x_vel > 0;
                     let inst = self.create_enemy_sprite(atlas, sprite_id, sx, sy, flip_x, false);
                     commands.push(RenderCommand::DrawSprite(inst));
                 }
                 TP_DEAD_RED => {
-                    let sprite_id = if enemy.dir_counter % 16 <= 8 { SpriteId::RED_000 } else { SpriteId::RED_001 };
+                    let sprite_id = if enemy.dir_counter % 16 <= 8 {
+                        SpriteId::RED_000
+                    } else {
+                        SpriteId::RED_001
+                    };
                     let flip_x = enemy.x_vel > 0;
                     let inst = self.create_enemy_sprite(atlas, sprite_id, sx, sy, flip_x, true);
                     commands.push(RenderCommand::DrawSprite(inst));
@@ -606,37 +701,63 @@ impl Enemies {
                         (_, false) => SpriteId::RDKOOPA_001,
                     };
                     let flip_x = enemy.x_vel > 0;
-                    let inst = self.create_enemy_sprite(atlas, sprite_id, sx, sy - 10.0, flip_x, false);
+                    let inst =
+                        self.create_enemy_sprite(atlas, sprite_id, sx, sy - 10.0, flip_x, false);
                     commands.push(RenderCommand::DrawSprite(inst));
                 }
                 TP_WAKING_KOOPA | TP_RUNNING_KOOPA => {
                     // 对齐 Oldsrc: shell 跑动/抖动帧 = GRKP_000/001 + 左右镜像切换
-                    let base0 = if enemy.sub_tp == 0 { SpriteId::GRKP_000 } else { SpriteId::RDKP_000 };
-                    let base1 = if enemy.sub_tp == 0 { SpriteId::GRKP_001 } else { SpriteId::RDKP_001 };
-                    let sprite_id = if enemy.dir_counter % 16 <= 8 { base1 } else { base0 };
+                    let base0 = if enemy.sub_tp == 0 {
+                        SpriteId::GRKP_000
+                    } else {
+                        SpriteId::RDKP_000
+                    };
+                    let base1 = if enemy.sub_tp == 0 {
+                        SpriteId::GRKP_001
+                    } else {
+                        SpriteId::RDKP_001
+                    };
+                    let sprite_id = if enemy.dir_counter % 16 <= 8 {
+                        base1
+                    } else {
+                        base0
+                    };
                     let flip_x = !(enemy.dir_counter % 32 <= 16);
                     let inst = self.create_enemy_sprite(atlas, sprite_id, sx, sy, flip_x, false);
                     commands.push(RenderCommand::DrawSprite(inst));
                 }
                 TP_SLEEPING_KOOPA => {
                     // Oldsrc: enemy_pictures[8 + 2*sub_tp][0]（固定使用镜像帧）
-                    let sprite_id = if enemy.sub_tp == 0 { SpriteId::GRKP_000 } else { SpriteId::RDKP_000 };
+                    let sprite_id = if enemy.sub_tp == 0 {
+                        SpriteId::GRKP_000
+                    } else {
+                        SpriteId::RDKP_000
+                    };
                     let inst = self.create_enemy_sprite(atlas, sprite_id, sx, sy, true, false);
                     commands.push(RenderCommand::DrawSprite(inst));
                 }
                 TP_DEAD_KOOPA => {
                     // Oldsrc: up_side_down(enemy_pictures[8 + 2*sub_tp][(dir_counter%16<=8)])
-                    let sprite_id = if enemy.sub_tp == 0 { SpriteId::GRKP_000 } else { SpriteId::RDKP_000 };
+                    let sprite_id = if enemy.sub_tp == 0 {
+                        SpriteId::GRKP_000
+                    } else {
+                        SpriteId::RDKP_000
+                    };
                     let flip_x = !(enemy.dir_counter % 16 <= 8);
                     let inst = self.create_enemy_sprite(atlas, sprite_id, sx, sy, flip_x, true);
                     commands.push(RenderCommand::DrawSprite(inst));
                 }
                 TP_BLOCK_LIFT => {
-                    let inst = self.create_enemy_sprite(atlas, SpriteId::LIFT1_000, sx, sy, false, false);
+                    let inst =
+                        self.create_enemy_sprite(atlas, SpriteId::LIFT1_000, sx, sy, false, false);
                     commands.push(RenderCommand::DrawSprite(inst));
                 }
                 TP_DONUT => {
-                    let sprite_id = if enemy.status == 0 { SpriteId::DONUT_000 } else { SpriteId::DONUT_001 };
+                    let sprite_id = if enemy.status == 0 {
+                        SpriteId::DONUT_000
+                    } else {
+                        SpriteId::DONUT_001
+                    };
                     let inst = self.create_enemy_sprite(atlas, sprite_id, sx, sy, false, false);
                     commands.push(RenderCommand::DrawSprite(inst));
                 }
@@ -644,7 +765,7 @@ impl Enemies {
             }
         }
     }
-    
+
     /// 辅助方法：从图集创建精灵实例
     fn create_enemy_sprite(
         &self,
@@ -658,10 +779,16 @@ impl Enemies {
         let uv = atlas.get(sprite_id);
         let (u, v, u_size, v_size) = uv.normalized(atlas.size());
         SpriteInstance::new(
-            x, y,
-            uv.width as f32, uv.height as f32,
-            u, v, u_size, v_size
-        ).with_flip(flip_x, flip_y)
+            x,
+            y,
+            uv.width as f32,
+            uv.height as f32,
+            u,
+            v,
+            u_size,
+            v_size,
+        )
+        .with_flip(flip_x, flip_y)
     }
 
     fn check(
@@ -843,29 +970,59 @@ impl Enemies {
                         {
                             match ch {
                                 b'J' => {
-                                    tmp_obj_manager.break_block(
-                                        new_x,
-                                        l,
-                                        buffers,
-                                        music_player,
-                                    );
+                                    tmp_obj_manager.break_block(new_x, l, buffers, music_player);
                                 }
                                 b'?' => {
                                     let above_ch = buffers.world_get(new_x, l - 1);
 
                                     match above_ch as u8 {
                                         b' ' => {
-                                            tmp_obj_manager.hit_coin(new_x * W, l * H, true, glitter_sys, buffers, music_player);
+                                            tmp_obj_manager.hit_coin(
+                                                new_x * W,
+                                                l * H,
+                                                true,
+                                                glitter_sys,
+                                                buffers,
+                                                music_player,
+                                            );
                                         }
                                         0xE0 => {
-                                            if buffers.data.mode[buffers.player] == 0 { // mdSmall
-                                                self.new_enemy(TP_RISING_CHAMP, 0, new_x, l, 0, -1, 1, music_player);
+                                            if buffers.data.mode[buffers.player] == 0 {
+                                                // mdSmall
+                                                self.new_enemy(
+                                                    TP_RISING_CHAMP,
+                                                    0,
+                                                    new_x,
+                                                    l,
+                                                    0,
+                                                    -1,
+                                                    1,
+                                                    music_player,
+                                                );
                                             } else {
-                                                self.new_enemy(TP_RISING_FLOWER, 0, new_x, l, 0, -1, 1, music_player);
+                                                self.new_enemy(
+                                                    TP_RISING_FLOWER,
+                                                    0,
+                                                    new_x,
+                                                    l,
+                                                    0,
+                                                    -1,
+                                                    1,
+                                                    music_player,
+                                                );
                                             }
                                         }
                                         0xE1 => {
-                                            self.new_enemy(TP_RISING_LIFE, 0, new_x, l, 0, -1, 2, music_player);
+                                            self.new_enemy(
+                                                TP_RISING_LIFE,
+                                                0,
+                                                new_x,
+                                                l,
+                                                0,
+                                                -1,
+                                                2,
+                                                music_player,
+                                            );
                                         }
                                         _ => {}
                                     }
@@ -1303,7 +1460,14 @@ impl Enemies {
                             self.enemies[j].y_vel += 1;
                         }
                     } else {
-                        self.check(j, render_state, buffers, tmp_obj_manager, music_player, glitter_sys);
+                        self.check(
+                            j,
+                            render_state,
+                            buffers,
+                            tmp_obj_manager,
+                            music_player,
+                            glitter_sys,
+                        );
                     }
 
                     // Pascal: XPos := XPos + XVel; YPos := YPos + YVel

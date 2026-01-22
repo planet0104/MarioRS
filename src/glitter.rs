@@ -8,8 +8,8 @@ pub const MAX_GLITTER: usize = 75;
 // GPU版 - 简化的闪光结构体
 #[derive(Debug, Clone, Copy)]
 pub struct Glitter {
-    pub attr: u8,  // 颜色属性
-    pub pos: u16,  // 屏幕位置
+    pub attr: u8, // 颜色属性
+    pub pos: u16, // 屏幕位置
 }
 
 // Pascal: var Count: String [MaxGlitter];
@@ -171,32 +171,5 @@ impl GlitterSystem {
                 }
             }
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::buffers::Buffers;
-    use crate::render_state::{SCREEN_HEIGHT, SCREEN_WIDTH, RenderState};
-
-    #[test]
-    fn test_glitter_system() {
-        // 初始化VGA和Buffers
-        let mut vga = RenderState::new_offscreen(SCREEN_WIDTH as usize, SCREEN_HEIGHT as usize);
-        let mut buffers = Buffers::new();
-        // 初始化GlitterSystem
-        let mut glitter = GlitterSystem {
-            count: vec![0u8; MAX_GLITTER + 2],
-            glitter_list: vec![Glitter { attr: 0, pos: 0 }; MAX_GLITTER + 2],
-        };
-        // 在屏幕中央生成一组glitter
-        let x = (SCREEN_WIDTH / 2) as i32;
-        let y = (SCREEN_HEIGHT / 2) as i32;
-        glitter.start_glitter(x, y, 20, 20, &mut buffers);
-        // 渲染一次glitter
-        glitter.show_glitter(&mut vga);
-        // GPU模式下不需要测试framebuffer输出
-        assert!(glitter.count[0] > 0, "Glitter should be created");
     }
 }

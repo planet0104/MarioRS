@@ -1,7 +1,7 @@
 // level_2.rs - 关卡 2-1 (Level 2a)
 // 从 Pascal WORLDS.PAS 移植的地图数据
 
-use crate::buffers::{WorldOptions, H, W, NV, MAX_WORLD_SIZE};
+use crate::buffers::{H, W, WorldOptions};
 
 // ============================================================================
 // Level 2a 地图数据（主关卡）
@@ -265,7 +265,7 @@ impl Level2Options {
         WorldOptions {
             init_x: (2 * W + 10) as u16,
             init_y: (0 * H) as u16,
-            sky_type: 8,      // 地下天空
+            sky_type: 8, // 地下天空
             wall_type1: 102,
             wall_type2: 101,
             wall_type3: 0,
@@ -273,7 +273,7 @@ impl Level2Options {
             ground_color1: 0x48,
             ground_color2: 0,
             horizon: 136,
-            backgr_type: 4,   // 地下背景
+            backgr_type: 4, // 地下背景
             backgr_color1: 0x34,
             backgr_color2: 0x4C,
             stars: 0,
@@ -297,7 +297,7 @@ impl Level2Options {
         WorldOptions {
             init_x: (2 * W + 10) as u16,
             init_y: (0 * H) as u16,
-            sky_type: 6,      // 不同的天空
+            sky_type: 6, // 不同的天空
             wall_type1: 102,
             wall_type2: 101,
             wall_type3: 0,
@@ -305,7 +305,7 @@ impl Level2Options {
             ground_color1: 0x48,
             ground_color2: 0,
             horizon: 136,
-            backgr_type: 6,   // 不同的背景
+            backgr_type: 6, // 不同的背景
             backgr_color1: 0x65,
             backgr_color2: 0x1A,
             stars: 0,
@@ -340,39 +340,5 @@ impl Level2 {
     /// 创建新的关卡 2 实例
     pub fn new() -> Self {
         Self {}
-    }
-
-    // run 方法已删除 - 使用新的状态机驱动的 play.frame_update() 方法
-
-    /// 将 &[&[u8]] 地图数据转换为 [[char; NV]; MAX_WORLD_SIZE] 格式
-    ///
-    /// Pascal地图格式：
-    /// - 每个 db 字符串是一列（X方向）的数据
-    /// - 字符串中的每个字节是该列中Y方向的一个tile
-    ///
-    /// Rust格式：
-    /// - map[x][y] 访问格式
-    /// - X范围：1..地图列数+1（因为X+1偏移）
-    /// - Y范围：0..NV
-    ///
-    /// 注意：Y 翻转发生在 Buffers::read_world 内部（W^[X, NV-i]），这里必须保持"原始列数据"不翻转。
-    fn convert_map_data(map_bytes: &[&[u8]]) -> [[char; NV as usize]; MAX_WORLD_SIZE as usize + 1] {
-        let mut map = [['\0'; NV as usize]; MAX_WORLD_SIZE as usize + 1];
-
-        for (col, line) in map_bytes.iter().enumerate() {
-            let x = col + 1; // 关键：列偏移，严格对齐 Pascal 的 X+1 访问
-            if x > MAX_WORLD_SIZE as usize {
-                break;
-            }
-            for (y, &byte_val) in line.iter().enumerate() {
-                if y >= NV as usize {
-                    break;
-                }
-                // 保持 0..255 单字节值，与 Pascal/ISO-8859-1 一致（例如 0xE1/0xE7 等）
-                map[x][y] = byte_val as char;
-            }
-        }
-
-        map
     }
 }

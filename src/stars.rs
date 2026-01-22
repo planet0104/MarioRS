@@ -44,7 +44,8 @@ impl Stars {
         self.clear_stars(buffers);
         // RandSeed := 0;  // Rust的rand库不直接支持全局种子，忽略
         for i in 0..320 {
-            self.star_map[i] = ((random_i32(options.horizon as i32) as u16) * 320 + i as u16) as u16;
+            self.star_map[i] =
+                ((random_i32(options.horizon as i32) as u16) * 320 + i as u16) as u16;
         }
         if options.stars == 1 || options.stars == 2 {
             for i in 0..320 {
@@ -75,27 +76,27 @@ impl Stars {
         palette_index: u32,
     ) {
         use crate::utils::random_i32;
-        
+
         let x_view = buffers.x_view;
         let x_offset = (8 * x_view) / STAR_SPEED as i32;
-        
+
         // 更新闪烁计数器
         self.blink_counter = random_i32(320);
         let mut bx = self.blink_counter;
-        
+
         for i in 0..320 {
             let star_pos = self.star_map[i];
             if star_pos == 0 {
                 continue;
             }
-            
+
             let ax = star_pos as i32 + x_offset;
             if ax < 0 || ax >= 320 {
                 continue;
             }
-            
+
             let y = (star_pos as i32 / 320) as i32;
-            
+
             // 选择颜色（闪烁效果）
             let mut color = self.c1;
             bx -= 1;
@@ -103,7 +104,7 @@ impl Stars {
                 color = self.c2;
                 bx = self.blink_counter;
             }
-            
+
             // 使用1x1像素的填充矩形
             let fill = FillRect::new(ax as f32, y as f32, 1.0, 1.0, color, palette_index);
             commands.push(RenderCommand::FillRect(fill));

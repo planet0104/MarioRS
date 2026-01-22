@@ -75,20 +75,25 @@ impl Blocks {
         if !self.bumping || self.dy >= BUMP_HEIGHT {
             return;
         }
-        
+
         // 计算碰撞方块的当前位置
         let block_y = self.bump_y - BUMP_HEIGHT + self.dy.abs();
-        
+
         // 转换为屏幕坐标
         let sx = (self.bump_x - x_view) as f32;
         let sy = (block_y - y_view) as f32;
-        
+
         let uv = atlas.get(self.bump_sprite_id);
         let (u, v, u_size, v_size) = uv.normalized(atlas.size());
         let inst = SpriteInstance::new(
-            sx, sy,
-            uv.width as f32, uv.height as f32,
-            u, v, u_size, v_size
+            sx,
+            sy,
+            uv.width as f32,
+            uv.height as f32,
+            u,
+            v,
+            u_size,
+            v_size,
         );
         commands.push(RenderCommand::DrawSprite(inst));
     }

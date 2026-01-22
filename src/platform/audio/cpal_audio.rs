@@ -3,9 +3,9 @@
 //! 支持平台: macOS, Linux, Android, iOS
 //! 功能: 方波生成、序列播放、音量控制
 
-use std::sync::{Arc, Mutex};
-use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use super::super::AudioBackend;
+use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use std::sync::{Arc, Mutex};
 
 // ============================================================================
 // 内部类型
@@ -14,8 +14,13 @@ use super::super::AudioBackend;
 /// 音频命令：用于在主线程和音频线程之间通信
 #[derive(Clone)]
 enum AudioCommand {
-    Beep { frequency: f32, duration_samples: u64 },
-    Sequence { notes: Vec<(f32, u64)> },
+    Beep {
+        frequency: f32,
+        duration_samples: u64,
+    },
+    Sequence {
+        notes: Vec<(f32, u64)>,
+    },
     Stop,
 }
 
@@ -50,7 +55,10 @@ impl AudioState {
     fn process_commands(&mut self) {
         for cmd in self.commands.drain(..) {
             match cmd {
-                AudioCommand::Beep { frequency, duration_samples } => {
+                AudioCommand::Beep {
+                    frequency,
+                    duration_samples,
+                } => {
                     self.current_freq = frequency;
                     self.remaining_samples = duration_samples;
                     self.phase = 0.0;
@@ -152,12 +160,22 @@ impl CpalAudio {
         let state_clone = Arc::clone(&state);
 
         let stream = match config.sample_format() {
-            cpal::SampleFormat::F32 => Self::build_stream_f32(&device, config.into(), state_clone, channels),
-            cpal::SampleFormat::I16 => Self::build_stream_i16(&device, config.into(), state_clone, channels),
-            cpal::SampleFormat::U16 => Self::build_stream_u16(&device, config.into(), state_clone, channels),
+            cpal::SampleFormat::F32 => {
+                Self::build_stream_f32(&device, config.into(), state_clone, channels)
+            }
+            cpal::SampleFormat::I16 => {
+                Self::build_stream_i16(&device, config.into(), state_clone, channels)
+            }
+            cpal::SampleFormat::U16 => {
+                Self::build_stream_u16(&device, config.into(), state_clone, channels)
+            }
             _ => {
                 eprintln!("[Audio] 不支持的采样格式");
-                return Self { state, _stream: None, sample_rate };
+                return Self {
+                    state,
+                    _stream: None,
+                    sample_rate,
+                };
             }
         };
 
@@ -165,7 +183,11 @@ impl CpalAudio {
             Ok(s) => s,
             Err(e) => {
                 eprintln!("[Audio] 创建音频流失败: {}", e);
-                return Self { state, _stream: None, sample_rate };
+                return Self {
+                    state,
+                    _stream: None,
+                    sample_rate,
+                };
             }
         };
 
@@ -173,7 +195,11 @@ impl CpalAudio {
             eprintln!("[Audio] 启动音频流失败: {}", e);
         }
 
-        Self { state, _stream: Some(stream), sample_rate }
+        Self {
+            state,
+            _stream: Some(stream),
+            sample_rate,
+        }
     }
 
     fn fallback() -> Self {

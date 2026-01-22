@@ -1,5 +1,5 @@
-use crate::platform::{KeyCode, KeyEvent};
 use crate::persist as ps;
+use crate::platform::{KeyCode, KeyEvent};
 
 // Windows 使用 hashbrown 避免 BCryptGenRandom 依赖（兼容 Win7）
 #[cfg(target_os = "windows")]
@@ -92,12 +92,43 @@ enum KeyType {
     Escape,
     F1,
     // 字母键 A-Z
-    KeyA, KeyB, KeyC, KeyD, KeyE, KeyF, KeyG, KeyH, KeyI, KeyJ,
-    KeyK, KeyL, KeyM, KeyN, KeyO, KeyP, KeyQ, KeyR, KeyS, KeyT,
-    KeyU, KeyV, KeyW, KeyX, KeyY, KeyZ,
+    KeyA,
+    KeyB,
+    KeyC,
+    KeyD,
+    KeyE,
+    KeyF,
+    KeyG,
+    KeyH,
+    KeyI,
+    KeyJ,
+    KeyK,
+    KeyL,
+    KeyM,
+    KeyN,
+    KeyO,
+    KeyP,
+    KeyQ,
+    KeyR,
+    KeyS,
+    KeyT,
+    KeyU,
+    KeyV,
+    KeyW,
+    KeyX,
+    KeyY,
+    KeyZ,
     // 数字键 0-9
-    Digit0, Digit1, Digit2, Digit3, Digit4, Digit5,
-    Digit6, Digit7, Digit8, Digit9,
+    Digit0,
+    Digit1,
+    Digit2,
+    Digit3,
+    Digit4,
+    Digit5,
+    Digit6,
+    Digit7,
+    Digit8,
+    Digit9,
 }
 
 impl KeyType {
@@ -127,75 +158,66 @@ const MAX_SEQ_LEN: usize = 100;
 pub const DEMO_KEY_SEQUENCES: [[u16; 100]; 9] = [
     // Channel 0: Left
     [
-        508, 102, 1352, 12, 1018, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        508, 102, 1352, 12, 1018, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     ],
     // Channel 1: Right
     [
         62, 298, 258, 176, 206, 314, 36, 12, 290, 74, 18, 22, 18, 60, 240, 8, 100, 18, 102, 26,
-        184, 48, 42, 12, 44, 10, 314, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        184, 48, 42, 12, 44, 10, 314, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     ],
     // Channel 2: Up
     [
-        1496, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        1496, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     ],
     // Channel 3: Down
     [
-        1477, 1, 18, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        1477, 1, 18, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     ],
     // Channel 4: Alt
     [
-        93, 45, 10, 18, 186, 27, 130, 8, 24, 27, 58, 29, 174, 33, 45, 9, 27, 28, 17, 33,
-        85, 24, 25, 127, 214, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        93, 45, 10, 18, 186, 27, 130, 8, 24, 27, 58, 29, 174, 33, 45, 9, 27, 28, 17, 33, 85, 24,
+        25, 127, 214, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     ],
     // Channel 5: Ctrl
     [
-        56, 150, 122, 126, 38, 86, 7, 100, 120, 512, 179, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        56, 150, 122, 126, 38, 86, 7, 100, 120, 512, 179, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     ],
     // Channel 6: ShiftL
     [
-        1496, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        1496, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     ],
     // Channel 7: ShiftR
     [
-        724, 50, 592, 53, 77, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        724, 50, 592, 53, 77, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     ],
     // Channel 8: Space
     [
-        1496, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        1496, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     ],
 ];
 
@@ -268,7 +290,7 @@ impl MacroSystem {
 
     pub fn save_macro(&mut self) -> Result<(), std::io::Error> {
         use std::fs::File;
-        
+
         let mut file = File::create("macro.dat")?;
         // 写入 9 * 100 u16 values in little-endian order
         for seq in self.sequences.iter() {
@@ -283,7 +305,7 @@ impl MacroSystem {
 
     pub fn load_macro(&mut self) -> Result<(), std::io::Error> {
         use std::fs::File;
-        
+
         let mut file = File::open("macro.dat")?;
         for i in 0..MAX_KEYS {
             for j in 0..MAX_SEQ_LEN {
@@ -418,11 +440,19 @@ impl Keyboard {
         // 更新对应的按键状态
         match input.key {
             // 方向键
-            KeyCode::Left => { update_key(KeyType::Left); }
-            KeyCode::Right => { update_key(KeyType::Right); }
-            KeyCode::Up => { update_key(KeyType::Up); }
-            KeyCode::Down => { update_key(KeyType::Down); }
-            
+            KeyCode::Left => {
+                update_key(KeyType::Left);
+            }
+            KeyCode::Right => {
+                update_key(KeyType::Right);
+            }
+            KeyCode::Up => {
+                update_key(KeyType::Up);
+            }
+            KeyCode::Down => {
+                update_key(KeyType::Down);
+            }
+
             // 修饰键
             KeyCode::AltLeft | KeyCode::AltRight => {
                 let was_down = *self.key_states.get(&KeyType::Alt).unwrap_or(&false);
@@ -431,10 +461,16 @@ impl Keyboard {
                 }
                 self.key_states.insert(KeyType::Alt, pressed);
             }
-            KeyCode::ControlLeft | KeyCode::ControlRight => { update_key(KeyType::Ctrl); }
-            KeyCode::ShiftLeft => { update_key(KeyType::ShiftLeft); }
-            KeyCode::ShiftRight => { update_key(KeyType::ShiftRight); }
-            
+            KeyCode::ControlLeft | KeyCode::ControlRight => {
+                update_key(KeyType::Ctrl);
+            }
+            KeyCode::ShiftLeft => {
+                update_key(KeyType::ShiftLeft);
+            }
+            KeyCode::ShiftRight => {
+                update_key(KeyType::ShiftRight);
+            }
+
             // 功能键
             KeyCode::Space => {
                 let was_down = *self.key_states.get(&KeyType::Space).unwrap_or(&false);
@@ -443,56 +479,134 @@ impl Keyboard {
                 }
                 self.key_states.insert(KeyType::Space, pressed);
             }
-            KeyCode::Tab => { update_key(KeyType::Tab); }
-            KeyCode::Enter => { update_key(KeyType::Enter); }
-            KeyCode::Escape => { update_key(KeyType::Escape); }
+            KeyCode::Tab => {
+                update_key(KeyType::Tab);
+            }
+            KeyCode::Enter => {
+                update_key(KeyType::Enter);
+            }
+            KeyCode::Escape => {
+                update_key(KeyType::Escape);
+            }
             KeyCode::F1 => {
                 self.key_states.insert(KeyType::F1, pressed);
                 if pressed {
                     self.f1_pressed_once = true;
                 }
             }
-            
+
             // 字母键 A-Z
-            KeyCode::KeyA => { update_key(KeyType::KeyA); }
-            KeyCode::KeyB => { update_key(KeyType::KeyB); }
-            KeyCode::KeyC => { update_key(KeyType::KeyC); }
-            KeyCode::KeyD => { update_key(KeyType::KeyD); }
-            KeyCode::KeyE => { update_key(KeyType::KeyE); }
-            KeyCode::KeyF => { update_key(KeyType::KeyF); }
-            KeyCode::KeyG => { update_key(KeyType::KeyG); }
-            KeyCode::KeyH => { update_key(KeyType::KeyH); }
-            KeyCode::KeyI => { update_key(KeyType::KeyI); }
-            KeyCode::KeyJ => { update_key(KeyType::KeyJ); }
-            KeyCode::KeyK => { update_key(KeyType::KeyK); }
-            KeyCode::KeyL => { update_key(KeyType::KeyL); }
-            KeyCode::KeyM => { update_key(KeyType::KeyM); }
-            KeyCode::KeyN => { update_key(KeyType::KeyN); }
-            KeyCode::KeyO => { update_key(KeyType::KeyO); }
-            KeyCode::KeyP => { update_key(KeyType::KeyP); }
-            KeyCode::KeyQ => { update_key(KeyType::KeyQ); }
-            KeyCode::KeyR => { update_key(KeyType::KeyR); }
-            KeyCode::KeyS => { update_key(KeyType::KeyS); }
-            KeyCode::KeyT => { update_key(KeyType::KeyT); }
-            KeyCode::KeyU => { update_key(KeyType::KeyU); }
-            KeyCode::KeyV => { update_key(KeyType::KeyV); }
-            KeyCode::KeyW => { update_key(KeyType::KeyW); }
-            KeyCode::KeyX => { update_key(KeyType::KeyX); }
-            KeyCode::KeyY => { update_key(KeyType::KeyY); }
-            KeyCode::KeyZ => { update_key(KeyType::KeyZ); }
-            
+            KeyCode::KeyA => {
+                update_key(KeyType::KeyA);
+            }
+            KeyCode::KeyB => {
+                update_key(KeyType::KeyB);
+            }
+            KeyCode::KeyC => {
+                update_key(KeyType::KeyC);
+            }
+            KeyCode::KeyD => {
+                update_key(KeyType::KeyD);
+            }
+            KeyCode::KeyE => {
+                update_key(KeyType::KeyE);
+            }
+            KeyCode::KeyF => {
+                update_key(KeyType::KeyF);
+            }
+            KeyCode::KeyG => {
+                update_key(KeyType::KeyG);
+            }
+            KeyCode::KeyH => {
+                update_key(KeyType::KeyH);
+            }
+            KeyCode::KeyI => {
+                update_key(KeyType::KeyI);
+            }
+            KeyCode::KeyJ => {
+                update_key(KeyType::KeyJ);
+            }
+            KeyCode::KeyK => {
+                update_key(KeyType::KeyK);
+            }
+            KeyCode::KeyL => {
+                update_key(KeyType::KeyL);
+            }
+            KeyCode::KeyM => {
+                update_key(KeyType::KeyM);
+            }
+            KeyCode::KeyN => {
+                update_key(KeyType::KeyN);
+            }
+            KeyCode::KeyO => {
+                update_key(KeyType::KeyO);
+            }
+            KeyCode::KeyP => {
+                update_key(KeyType::KeyP);
+            }
+            KeyCode::KeyQ => {
+                update_key(KeyType::KeyQ);
+            }
+            KeyCode::KeyR => {
+                update_key(KeyType::KeyR);
+            }
+            KeyCode::KeyS => {
+                update_key(KeyType::KeyS);
+            }
+            KeyCode::KeyT => {
+                update_key(KeyType::KeyT);
+            }
+            KeyCode::KeyU => {
+                update_key(KeyType::KeyU);
+            }
+            KeyCode::KeyV => {
+                update_key(KeyType::KeyV);
+            }
+            KeyCode::KeyW => {
+                update_key(KeyType::KeyW);
+            }
+            KeyCode::KeyX => {
+                update_key(KeyType::KeyX);
+            }
+            KeyCode::KeyY => {
+                update_key(KeyType::KeyY);
+            }
+            KeyCode::KeyZ => {
+                update_key(KeyType::KeyZ);
+            }
+
             // 数字键 0-9
-            KeyCode::Digit0 => { update_key(KeyType::Digit0); }
-            KeyCode::Digit1 => { update_key(KeyType::Digit1); }
-            KeyCode::Digit2 => { update_key(KeyType::Digit2); }
-            KeyCode::Digit3 => { update_key(KeyType::Digit3); }
-            KeyCode::Digit4 => { update_key(KeyType::Digit4); }
-            KeyCode::Digit5 => { update_key(KeyType::Digit5); }
-            KeyCode::Digit6 => { update_key(KeyType::Digit6); }
-            KeyCode::Digit7 => { update_key(KeyType::Digit7); }
-            KeyCode::Digit8 => { update_key(KeyType::Digit8); }
-            KeyCode::Digit9 => { update_key(KeyType::Digit9); }
-            
+            KeyCode::Digit0 => {
+                update_key(KeyType::Digit0);
+            }
+            KeyCode::Digit1 => {
+                update_key(KeyType::Digit1);
+            }
+            KeyCode::Digit2 => {
+                update_key(KeyType::Digit2);
+            }
+            KeyCode::Digit3 => {
+                update_key(KeyType::Digit3);
+            }
+            KeyCode::Digit4 => {
+                update_key(KeyType::Digit4);
+            }
+            KeyCode::Digit5 => {
+                update_key(KeyType::Digit5);
+            }
+            KeyCode::Digit6 => {
+                update_key(KeyType::Digit6);
+            }
+            KeyCode::Digit7 => {
+                update_key(KeyType::Digit7);
+            }
+            KeyCode::Digit8 => {
+                update_key(KeyType::Digit8);
+            }
+            KeyCode::Digit9 => {
+                update_key(KeyType::Digit9);
+            }
+
             _ => {}
         }
     }
@@ -517,16 +631,16 @@ impl Keyboard {
     }
 
     /// 平台轮询：纯tao事件驱动模式
-    /// 
+    ///
     /// 说明：之前使用GetAsyncKeyState是为了解决Alt键触发系统菜单后方向键事件被吞掉的问题。
     /// 现在改为纯事件驱动，所有按键状态都由handle_keyboard_input更新。
-    /// 
+    ///
     /// 如果遇到Alt键问题，应在窗口创建时禁用Alt菜单行为，而不是绕过事件系统。
     /// 例如：在vga256.rs创建窗口时使用with_skip_taskbar等选项。
     pub fn poll_os_keys(&mut self) {
         // 纯事件驱动模式：所有按键状态已由handle_keyboard_input更新
         // 此函数保留为兼容性接口，不再调用Windows API
-        // 
+        //
         // 注意：如果在Windows上按Alt键后出现方向键失效问题，
         // 请检查窗口是否正确处理了WM_SYSCOMMAND消息
     }
@@ -541,7 +655,7 @@ impl Keyboard {
             1 => Some(KeyType::Escape),
             28 => Some(KeyType::Enter),
             57 => Some(KeyType::Space),
-            
+
             // 字母键 A-Z (扫描码)
             30 => Some(KeyType::KeyA),
             48 => Some(KeyType::KeyB),
@@ -569,7 +683,7 @@ impl Keyboard {
             45 => Some(KeyType::KeyX),
             21 => Some(KeyType::KeyY),
             44 => Some(KeyType::KeyZ),
-            
+
             // 数字键 0-9 (扫描码)
             11 => Some(KeyType::Digit0),
             2 => Some(KeyType::Digit1),
@@ -581,10 +695,10 @@ impl Keyboard {
             8 => Some(KeyType::Digit7),
             9 => Some(KeyType::Digit8),
             10 => Some(KeyType::Digit9),
-            
+
             _ => None,
         };
-        
+
         match key_type {
             Some(kt) => *self.key_states.get(&kt).unwrap_or(&false),
             None => false,

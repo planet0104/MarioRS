@@ -5,21 +5,19 @@
 //
 // 重要: 这个模块依赖 android-activity, 其他游戏模块通过 platform.rs 抽象访问
 
-use super::{
-    DisplayBackend, InputBackend,
-    KeyCode as PlatformKeyCode, KeyEvent as PlatformKeyEvent,
-    LogBackend, LogLevel, StorageBackend,
-    touch_panel::{TouchAction, TouchPanelInput, ButtonLayout, LAYOUT_SAVE_KEY},
-};
 use super::common::{
-    CommonTime, CommonRandom, FileStorage, FrameTimer, FpsCounter,
-    draw_fps_to_overlay_rgba,
+    CommonRandom, CommonTime, FileStorage, FpsCounter, FrameTimer, draw_fps_to_overlay_rgba,
+};
+use super::{
+    DisplayBackend, InputBackend, KeyCode as PlatformKeyCode, KeyEvent as PlatformKeyEvent,
+    LogBackend, LogLevel, StorageBackend,
+    touch_panel::{ButtonLayout, LAYOUT_SAVE_KEY, TouchAction, TouchPanelInput},
 };
 use crate::gpu::GpuRenderer;
 
 use std::collections::HashSet;
-use std::time::{Duration, Instant};
 use std::path::PathBuf;
+use std::time::{Duration, Instant};
 
 // ============================================================================
 // Android Activity 相关导入
@@ -35,7 +33,7 @@ use ndk::native_window::NativeWindow;
 // 常量定义
 // ============================================================================
 
-use crate::game_runner::{GAME_WIDTH, GAME_HEIGHT};
+use crate::game_runner::{GAME_HEIGHT, GAME_WIDTH};
 
 // ============================================================================
 // 类型别名 - 使用公共模块实现
@@ -79,7 +77,7 @@ impl AndroidInput {
     pub fn touch_panel(&self) -> &TouchPanelInput {
         &self.touch_panel
     }
-    
+
     pub fn touch_panel_mut(&mut self) -> &mut TouchPanelInput {
         &mut self.touch_panel
     }
@@ -96,8 +94,9 @@ impl AndroidInput {
             MotionAction::Cancel => TouchAction::Cancel,
             _ => return,
         };
-        
-        self.touch_panel.handle_touch(pointer_id, x, y, touch_action);
+
+        self.touch_panel
+            .handle_touch(pointer_id, x, y, touch_action);
     }
 
     pub fn handle_key(&mut self, keycode: Keycode, action: KeyAction) {
@@ -207,11 +206,24 @@ fn android_keycode_to_platform(keycode: Keycode) -> PlatformKeyCode {
 
 /// 检查是否是游戏控制键
 fn is_game_control_key(keycode: Keycode) -> bool {
-    matches!(keycode,
-        Keycode::DpadLeft | Keycode::DpadRight | Keycode::DpadUp | Keycode::DpadDown |
-        Keycode::W | Keycode::A | Keycode::S | Keycode::D |
-        Keycode::Space | Keycode::Enter | Keycode::ShiftLeft | Keycode::ShiftRight |
-        Keycode::CtrlLeft | Keycode::CtrlRight | Keycode::AltLeft | Keycode::AltRight
+    matches!(
+        keycode,
+        Keycode::DpadLeft
+            | Keycode::DpadRight
+            | Keycode::DpadUp
+            | Keycode::DpadDown
+            | Keycode::W
+            | Keycode::A
+            | Keycode::S
+            | Keycode::D
+            | Keycode::Space
+            | Keycode::Enter
+            | Keycode::ShiftLeft
+            | Keycode::ShiftRight
+            | Keycode::CtrlLeft
+            | Keycode::CtrlRight
+            | Keycode::AltLeft
+            | Keycode::AltRight
     )
 }
 
@@ -243,15 +255,15 @@ impl AndroidDisplay {
             gpu_renderer: None,
         }
     }
-    
+
     pub fn gpu_renderer(&self) -> Option<&GpuRenderer> {
         self.gpu_renderer.as_ref()
     }
-    
+
     pub fn gpu_renderer_mut(&mut self) -> Option<&mut GpuRenderer> {
         self.gpu_renderer.as_mut()
     }
-    
+
     pub fn set_native_window(&mut self, window: Option<NativeWindow>) {
         self.native_window = window.clone();
         if window.is_none() {
@@ -290,7 +302,9 @@ impl AndroidDisplay {
             }
         }
         impl HasDisplayHandle for AndroidHandle {
-            fn display_handle(&self) -> Result<wgpu::rwh::DisplayHandle<'_>, wgpu::rwh::HandleError> {
+            fn display_handle(
+                &self,
+            ) -> Result<wgpu::rwh::DisplayHandle<'_>, wgpu::rwh::HandleError> {
                 let raw = RawDisplayHandle::Android(AndroidDisplayHandle::empty());
                 Ok(unsafe { wgpu::rwh::DisplayHandle::borrow_raw(raw) })
             }
@@ -366,10 +380,11 @@ impl AndroidDisplay {
     }
 
     pub fn resize(&mut self, new_width: u32, new_height: u32) {
-        let (surface, device, config) = match (&self.wgpu_surface, &self.wgpu_device, &mut self.wgpu_config) {
-            (Some(s), Some(d), Some(c)) => (s, d, c),
-            _ => return,
-        };
+        let (surface, device, config) =
+            match (&self.wgpu_surface, &self.wgpu_device, &mut self.wgpu_config) {
+                (Some(s), Some(d), Some(c)) => (s, d, c),
+                _ => return,
+            };
         config.width = new_width.max(1);
         config.height = new_height.max(1);
         surface.configure(device, config);
@@ -389,7 +404,11 @@ impl DisplayBackend for AndroidDisplay {
     }
 
     fn present(&mut self) -> Result<(), String> {
-        let (surface, gpu_renderer, config) = match (&self.wgpu_surface, &mut self.gpu_renderer, &self.wgpu_config) {
+        let (surface, gpu_renderer, config) = match (
+            &self.wgpu_surface,
+            &mut self.gpu_renderer,
+            &self.wgpu_config,
+        ) {
             (Some(s), Some(g), Some(c)) => (s, g, c),
             _ => return Ok(()),
         };
@@ -398,7 +417,9 @@ impl DisplayBackend for AndroidDisplay {
             Ok(t) => t,
             Err(e) => return Err(e.to_string()),
         };
-        let view = output.texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let view = output
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
 
         gpu_renderer.update_scale(config.width, config.height);
         gpu_renderer.render_to_surface(&view);
@@ -475,10 +496,11 @@ pub type DesktopStorage = AndroidStorage;
 
 fn android_log_write(priority: i32, message: &str) {
     use std::ffi::CString;
-    
+
     let tag = CString::new("MarioRS").unwrap_or_else(|_| CString::new("Mario").unwrap());
-    let msg = CString::new(message.replace('\0', "")).unwrap_or_else(|_| CString::new("(invalid message)").unwrap());
-    
+    let msg = CString::new(message.replace('\0', ""))
+        .unwrap_or_else(|_| CString::new("(invalid message)").unwrap());
+
     unsafe {
         ndk_sys::__android_log_write(priority, tag.as_ptr(), msg.as_ptr());
     }
@@ -532,7 +554,7 @@ pub type DesktopAudio = AndroidAudio;
 // 全局便捷函数 - 使用公共模块 + Android 日志
 // ============================================================================
 
-pub use super::common::{random_i32, random_usize, random_u32, random_u8, random_f32, now_ms};
+pub use super::common::{now_ms, random_f32, random_i32, random_u8, random_u32, random_usize};
 
 use std::cell::RefCell;
 
@@ -572,7 +594,7 @@ pub fn android_main(app: AndroidApp) {
     let mut input = AndroidInput::new();
     let mut storage = AndroidStorage::with_app(&app);
     let mut game_state: Option<GameState> = None;
-    
+
     // 加载保存的触摸面板布局
     if let Some(data) = storage.load(LAYOUT_SAVE_KEY) {
         if let Some(layout) = ButtonLayout::from_bytes(&data) {
@@ -580,61 +602,69 @@ pub fn android_main(app: AndroidApp) {
             log_info("Touch panel layout loaded");
         }
     }
-    
+
     // 使用公共帧率控制器
     let mut frame_timer = FrameTimer::new(60.0);
     let mut fps_counter = FpsCounter::new();
     let mut running = true;
 
     while running {
-        app.poll_events(Some(Duration::ZERO), |event| {
-            match event {
-                PollEvent::Main(main_event) => {
-                    match main_event {
-                        MainEvent::InitWindow { .. } => {
-                            log_info("=== Native window initialized ===");
-                            if let Some(window) = app.native_window() {
-                                let win_width = window.width();
-                                let win_height = window.height();
-                                
-                                log_info(&format!("[Screen] NativeWindow size: {}x{}", win_width, win_height));
-                                log_info(&format!("[Screen] NativeWindow aspect ratio: {:.3}", win_width as f32 / win_height as f32));
-                                log_info(&format!("[Game] Game framebuffer size: {}x{}", GAME_WIDTH, GAME_HEIGHT));
-                                log_info(&format!("[Game] Game aspect ratio: {:.3}", GAME_WIDTH as f32 / GAME_HEIGHT as f32));
-                                
-                                input.set_screen_size(win_width as f32, win_height as f32);
-                                display.set_native_window(Some(window));
+        app.poll_events(Some(Duration::ZERO), |event| match event {
+            PollEvent::Main(main_event) => match main_event {
+                MainEvent::InitWindow { .. } => {
+                    log_info("=== Native window initialized ===");
+                    if let Some(window) = app.native_window() {
+                        let win_width = window.width();
+                        let win_height = window.height();
 
-                                if game_state.is_none() {
-                                    game_state = Some(GameState::new());
-                                    log_info("Game state initialized");
-                                }
-                            }
+                        log_info(&format!(
+                            "[Screen] NativeWindow size: {}x{}",
+                            win_width, win_height
+                        ));
+                        log_info(&format!(
+                            "[Screen] NativeWindow aspect ratio: {:.3}",
+                            win_width as f32 / win_height as f32
+                        ));
+                        log_info(&format!(
+                            "[Game] Game framebuffer size: {}x{}",
+                            GAME_WIDTH, GAME_HEIGHT
+                        ));
+                        log_info(&format!(
+                            "[Game] Game aspect ratio: {:.3}",
+                            GAME_WIDTH as f32 / GAME_HEIGHT as f32
+                        ));
+
+                        input.set_screen_size(win_width as f32, win_height as f32);
+                        display.set_native_window(Some(window));
+
+                        if game_state.is_none() {
+                            game_state = Some(GameState::new());
+                            log_info("Game state initialized");
                         }
-                        MainEvent::TerminateWindow { .. } => {
-                            log_info("Native window terminated");
-                            display.set_native_window(None);
-                        }
-                        MainEvent::WindowResized { .. } | MainEvent::ContentRectChanged { .. } => {
-                            if let Some(window) = app.native_window() {
-                                let width = window.width() as f32;
-                                let height = window.height() as f32;
-                                log_info(&format!("Window resized: {}x{}", width, height));
-                                input.set_screen_size(width, height);
-                                display.resize(window.width() as u32, window.height() as u32);
-                            }
-                        }
-                        MainEvent::Destroy => {
-                            log_info("App destroy requested");
-                            running = false;
-                        }
-                        _ => {}
                     }
                 }
-                PollEvent::Wake => {}
-                PollEvent::Timeout => {}
+                MainEvent::TerminateWindow { .. } => {
+                    log_info("Native window terminated");
+                    display.set_native_window(None);
+                }
+                MainEvent::WindowResized { .. } | MainEvent::ContentRectChanged { .. } => {
+                    if let Some(window) = app.native_window() {
+                        let width = window.width() as f32;
+                        let height = window.height() as f32;
+                        log_info(&format!("Window resized: {}x{}", width, height));
+                        input.set_screen_size(width, height);
+                        display.resize(window.width() as u32, window.height() as u32);
+                    }
+                }
+                MainEvent::Destroy => {
+                    log_info("App destroy requested");
+                    running = false;
+                }
                 _ => {}
-            }
+            },
+            PollEvent::Wake => {}
+            PollEvent::Timeout => {}
+            _ => {}
         });
 
         // 处理输入事件
@@ -652,23 +682,28 @@ pub fn android_main(app: AndroidApp) {
                         InputEvent::MotionEvent(motion_event) => {
                             let action = motion_event.action();
                             let pointer_count = motion_event.pointer_count();
-                            
+
                             let action_pointer_index = match action {
                                 MotionAction::PointerDown | MotionAction::PointerUp => {
                                     Some(motion_event.pointer_index())
                                 }
                                 _ => None,
                             };
-                            
+
                             for i in 0..pointer_count {
                                 let pointer = motion_event.pointer_at_index(i);
-                                
-                                let pointer_action = if let Some(action_idx) = action_pointer_index {
-                                    if i == action_idx { action } else { MotionAction::Move }
+
+                                let pointer_action = if let Some(action_idx) = action_pointer_index
+                                {
+                                    if i == action_idx {
+                                        action
+                                    } else {
+                                        MotionAction::Move
+                                    }
                                 } else {
                                     action
                                 };
-                                
+
                                 input.handle_touch(
                                     pointer.pointer_id() as usize,
                                     pointer.x(),
@@ -697,7 +732,7 @@ pub fn android_main(app: AndroidApp) {
         // 游戏帧更新
         if let Some(state) = &mut game_state {
             let frame_start = Instant::now();
-            
+
             for event in input.poll_events() {
                 state.handle_key_event(&event);
             }
@@ -713,7 +748,11 @@ pub fn android_main(app: AndroidApp) {
             if ow > 0 && oh > 0 {
                 let mut overlay_vec = if input.should_show_virtual_buttons() {
                     let button_states = input.touch_panel().button_states();
-                    match input.touch_panel_mut().renderer_mut().render(&button_states) {
+                    match input
+                        .touch_panel_mut()
+                        .renderer_mut()
+                        .render(&button_states)
+                    {
                         Some(s) => s.to_vec(),
                         None => vec![0u8; (ow * oh * 4) as usize],
                     }
@@ -721,7 +760,13 @@ pub fn android_main(app: AndroidApp) {
                     vec![0u8; (ow * oh * 4) as usize]
                 };
                 // 使用公共模块的 FPS 绘制函数
-                draw_fps_to_overlay_rgba(&mut overlay_vec, ow, oh, fps_counter.fps(), fps_counter.frame_time_ms());
+                draw_fps_to_overlay_rgba(
+                    &mut overlay_vec,
+                    ow,
+                    oh,
+                    fps_counter.fps(),
+                    fps_counter.frame_time_ms(),
+                );
                 overlay_vec_opt = Some(overlay_vec);
             }
 
@@ -736,11 +781,11 @@ pub fn android_main(app: AndroidApp) {
             }
 
             let _ = display.present();
-            
+
             // 使用公共模块的 FPS 计数器
             let frame_time_ms = frame_start.elapsed().as_secs_f32() * 1000.0;
             fps_counter.record_frame(frame_time_ms);
-            
+
             // 保存触摸面板布局
             if input.touch_panel_mut().take_layout_changed() {
                 let layout = input.touch_panel().get_layout();

@@ -34,8 +34,8 @@ pub struct Palettes {
     pub fading_down: bool,
     pub fading_pos: u8,
     pub fading_done: bool,
-    pub fading_target: u8,    // 渐变目标值（用于非阻塞渐变）
-    pub fading_step: u8,      // 每帧步进值（用于加速渐变）
+    pub fading_target: u8, // 渐变目标值（用于非阻塞渐变）
+    pub fading_step: u8,   // 每帧步进值（用于加速渐变）
     pub lock_palette: bool,
     pub modify_palette: bool,
     pub blink_counter: i32,
@@ -82,7 +82,7 @@ impl Palettes {
     /// 注意1 Pascal 的 VGA256.ReadPalette 名字是 ReadPalette 但实现为写入调色板
     /// 注意2 当无特效时调用 render_state.read_palette 相当于把 p 写入 RenderState
     /// 注意3 当有特效时走 refresh_palette 对齐 Pascal RefreshPalette 路径
-    pub fn read_palette(&mut self, render_state:&mut RenderState, p: &PalType) {
+    pub fn read_palette(&mut self, render_state: &mut RenderState, p: &PalType) {
         if self.palette_effect == PE_NO_EFFECT {
             render_state.read_palette(p);
         } else {
@@ -94,13 +94,13 @@ impl Palettes {
     /// 用新调色板数据替换当前调色板
     pub fn new_palette(&mut self, p: &PalType) {
         self.palette = *p;
-        self.source_palette = *p;  // 同时更新源调色板
+        self.source_palette = *p; // 同时更新源调色板
         self.fading_up = false;
         self.fading_down = false;
     }
 
     /// 清空调色板并读取
-    pub fn clear_palette(&mut self, render_state:&mut RenderState) {
+    pub fn clear_palette(&mut self, render_state: &mut RenderState) {
         let mut pal: PalType = [[0; 3]; 256]; // FillChar (Pal, SizeOf(Pal), #0)
         self.read_palette(render_state, &mut pal); // ReadPalette(Pal)
         self.fading_up = false; // FadingUp := FALSE
@@ -129,7 +129,7 @@ impl Palettes {
         self.palette = [[0; 3]; 256];
         self.fading_up = true;
         self.fading_down = false;
-        self.fading_pos = 63;  // 从最暗开始
+        self.fading_pos = 63; // 从最暗开始
         self.fading_target = 0;
         self.fading_step = if n > 0 { 64 / n } else { 1 };
         self.fading_done = false;
@@ -147,7 +147,7 @@ impl Palettes {
         self.source_palette = self.palette;
         self.fading_down = true;
         self.fading_up = false;
-        self.fading_pos = 0;  // 从当前亮度开始
+        self.fading_pos = 0; // 从当前亮度开始
         self.fading_target = 63;
         self.fading_step = if n > 0 { 64 / n } else { 1 };
         self.fading_done = false;
@@ -160,9 +160,9 @@ impl Palettes {
         if !self.fading_up && !self.fading_down {
             return None;
         }
-        
+
         let mut temp_pal: PalType = [[0; 3]; 256];
-        
+
         // 先用当前fading_pos计算调色板（与Pascal循环体内的顺序一致）
         // 当fading_pos >= 63时，保持全黑调色板
         if self.fading_pos < 63 {
@@ -178,7 +178,7 @@ impl Palettes {
             }
         }
         // 当fading_pos >= 63时，temp_pal保持全0（全黑）
-        
+
         // 然后更新fading_pos（准备下一帧）
         if self.fading_up {
             if self.fading_pos == 0 {
@@ -197,12 +197,12 @@ impl Palettes {
                 self.fading_pos = self.fading_pos.saturating_add(self.fading_step);
             }
         }
-        
+
         Some(temp_pal)
     }
-    
+
     /// 兼容旧接口（非阻塞渐变帧推进）
-    pub fn fade(&mut self, render_state:&mut RenderState) {
+    pub fn fade(&mut self, render_state: &mut RenderState) {
         if let Some(temp_pal) = self.fade_step() {
             self.read_palette(render_state, &temp_pal);
         }
@@ -215,7 +215,7 @@ impl Palettes {
 
     /// 执行淡入效果，N为步数
     /// 使用source_palette作为目标值（对应Pascal中不被修改的Palette全局变量）
-    pub fn fade_up(&mut self, n: u8, render_state:&mut RenderState) {
+    pub fn fade_up(&mut self, n: u8, render_state: &mut RenderState) {
         if self.palette_effect == PE_EGA_MODE {
             return;
         }
@@ -240,13 +240,13 @@ impl Palettes {
 
     /// 执行淡出效果，N为步数
     /// 使用source_palette作为源值（对应Pascal中不被修改的Palette全局变量）
-    pub fn fade_down(&mut self, n: u8, render_state:&mut RenderState) {
+    pub fn fade_down(&mut self, n: u8, render_state: &mut RenderState) {
         if self.palette_effect == PE_EGA_MODE {
             return;
         }
         // 保存当前调色板到source_palette，用于fade_up恢复
         self.source_palette = self.palette;
-        
+
         let mut temp_pal: PalType = [[0; 3]; 256];
         for k in 0..n {
             for i in 0..256 {
@@ -265,7 +265,7 @@ impl Palettes {
         self.palette = temp_pal;
     }
 
-    pub fn init_grass(&mut self, render_state:&mut RenderState, options: &WorldOptions) {
+    pub fn init_grass(&mut self, render_state: &mut RenderState, options: &WorldOptions) {
         // 设置草地相关调色板颜色
         self.palette[2][0] = options.c2r;
         self.palette[2][1] = options.c2g;
@@ -286,7 +286,7 @@ impl Palettes {
         self.palette[158] = self.palette[0xF0 - sky_index];
 
         self.out_palette(6, 60, 40, 35, render_state); // Champ
-        
+
         // 同步更新source_palette，确保渐显时使用正确的颜色
         self.source_palette = self.palette;
     }
@@ -445,7 +445,7 @@ impl Palettes {
     }
 
     /// 刷新调色板：将 P 的内容输出到 RenderState，期间不修改内存调色板
-    pub fn refresh_palette(&mut self, p: &PalType, render_state:&mut RenderState) {
+    pub fn refresh_palette(&mut self, p: &PalType, render_state: &mut RenderState) {
         self.modify_palette = false;
         for i in 0..256 {
             self.out_palette(i, p[i][0], p[i][1], p[i][2], render_state);
@@ -454,7 +454,14 @@ impl Palettes {
     }
 
     /// 设置并输出单个调色板颜色
-    pub fn out_palette(&mut self, color: usize, mut r: u8, mut g: u8, mut b: u8, render_state:&mut RenderState) {
+    pub fn out_palette(
+        &mut self,
+        color: usize,
+        mut r: u8,
+        mut g: u8,
+        mut b: u8,
+        render_state: &mut RenderState,
+    ) {
         // 修改内存调色板
         if self.modify_palette {
             self.palette[color][0] = r;
@@ -548,31 +555,31 @@ impl PrebakedPalettes {
     /// 创建预烘焙调色板
     pub fn new(base_palette: &Palettes) -> Self {
         let mut frames = Vec::with_capacity(64);
-        
+
         // 索引0: 正常调色板
         frames.push(base_palette.to_gpu_palette());
-        
+
         // 索引1-16: 淡入/淡出帧
         for level in 1..=16 {
             let fade_pos = ((16 - level) * 63) / 16;
             frames.push(Self::generate_fade_frame(base_palette, fade_pos as u8));
         }
-        
+
         // 索引17-32: 闪烁帧 (金币动画)
         for phase in 0..16 {
             frames.push(Self::generate_blink_frame(base_palette, phase));
         }
-        
+
         // 索引33-48: 瀑布动画帧
         for phase in 0..16 {
             frames.push(Self::generate_waterfall_frame(base_palette, phase));
         }
-        
+
         // 填充到64帧
         while frames.len() < 64 {
             frames.push(base_palette.to_gpu_palette());
         }
-        
+
         Self { frames }
     }
 
@@ -582,9 +589,21 @@ impl PrebakedPalettes {
         for i in 0..256 {
             let [r, g, b] = base.palette[i];
             // 应用淡入淡出
-            let r = if r as i16 - fade_pos as i16 > 0 { r - fade_pos } else { 0 };
-            let g = if g as i16 - fade_pos as i16 > 0 { g - fade_pos } else { 0 };
-            let b = if b as i16 - fade_pos as i16 > 0 { b - fade_pos } else { 0 };
+            let r = if r as i16 - fade_pos as i16 > 0 {
+                r - fade_pos
+            } else {
+                0
+            };
+            let g = if g as i16 - fade_pos as i16 > 0 {
+                g - fade_pos
+            } else {
+                0
+            };
+            let b = if b as i16 - fade_pos as i16 > 0 {
+                b - fade_pos
+            } else {
+                0
+            };
             // 转换为8bit
             result[i] = [
                 ((r as u16 * 255) / 63).min(255) as u8,
@@ -599,14 +618,14 @@ impl PrebakedPalettes {
     /// 生成金币闪烁帧
     fn generate_blink_frame(base: &Palettes, phase: u32) -> [[u8; 4]; 256] {
         let mut result = base.to_gpu_palette();
-        
+
         // 金币动画: 颜色12,13,14循环
         let coin_colors = [
-            [62, 56, 20],  // 状态0
-            [60, 56, 22],  // 状态1
-            [63, 63, 36],  // 状态2
+            [62, 56, 20], // 状态0
+            [60, 56, 22], // 状态1
+            [63, 63, 36], // 状态2
         ];
-        
+
         let offset = (phase / 5) % 3;
         for i in 0..3 {
             let src = (i + offset as usize) % 3;
@@ -618,14 +637,14 @@ impl PrebakedPalettes {
                 255,
             ];
         }
-        
+
         result
     }
 
     /// 生成瀑布动画帧
     fn generate_waterfall_frame(base: &Palettes, phase: u32) -> [[u8; 4]; 256] {
         let mut result = base.to_gpu_palette();
-        
+
         // 瀑布动画: 颜色7-11变化
         for idx in 0..5 {
             let j = ((phase + idx as u32) % 5) as i32;
@@ -641,7 +660,7 @@ impl PrebakedPalettes {
                 255,
             ];
         }
-        
+
         result
     }
 

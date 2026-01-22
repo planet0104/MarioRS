@@ -5,8 +5,8 @@
 //! - 其他平台: 使用 SystemTime
 
 use rand::Rng;
-use rand::rngs::SmallRng;
 use rand::SeedableRng;
+use rand::rngs::SmallRng;
 use std::cell::RefCell;
 
 use crate::platform::RandomBackend;
@@ -24,7 +24,11 @@ fn system_time_seed() -> u64 {
 }
 
 /// Windows 平台使用 RtlGenRandom 生成更高质量的种子
-#[cfg(all(target_os = "windows", feature = "gdi-backend", not(feature = "wgpu-backend")))]
+#[cfg(all(
+    target_os = "windows",
+    feature = "gdi-backend",
+    not(feature = "wgpu-backend")
+))]
 mod win32_seed {
     #[link(name = "Advapi32")]
     unsafe extern "system" {
@@ -45,11 +49,19 @@ mod win32_seed {
 
 /// 获取随机种子
 fn get_seed() -> u64 {
-    #[cfg(all(target_os = "windows", feature = "gdi-backend", not(feature = "wgpu-backend")))]
+    #[cfg(all(
+        target_os = "windows",
+        feature = "gdi-backend",
+        not(feature = "wgpu-backend")
+    ))]
     {
         win32_seed::get_seed()
     }
-    #[cfg(not(all(target_os = "windows", feature = "gdi-backend", not(feature = "wgpu-backend"))))]
+    #[cfg(not(all(
+        target_os = "windows",
+        feature = "gdi-backend",
+        not(feature = "wgpu-backend")
+    )))]
     {
         system_time_seed()
     }

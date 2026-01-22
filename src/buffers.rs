@@ -277,7 +277,7 @@ impl Buffers {
 
         Self {
             player: 0,
-            data: GameData::new(),  // 必须使用 new() 而非 default()，确保 num_players = 1
+            data: GameData::new(), // 必须使用 new() 而非 default()，确保 num_players = 1
             world_number: String::new(),
             level_score: 0,
             timer: 0,

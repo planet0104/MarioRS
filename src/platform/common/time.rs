@@ -2,8 +2,8 @@
 //!
 //! 使用 std::time::Instant 实现，适用于所有支持标准库的平台
 
-use std::time::Instant;
 use crate::platform::TimeBackend;
+use std::time::Instant;
 
 /// 公共时间后端实现
 pub struct CommonTime {

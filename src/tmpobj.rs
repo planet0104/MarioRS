@@ -29,15 +29,15 @@ pub const MAX_REMOVE: usize = 10; // 最大移除操作数量
 // 临时对象记录结构体 - GPU版本简化
 #[derive(Debug, Clone)]
 pub struct TempRec {
-    pub alive: bool,         // 对象是否存活
-    pub tp: i32,             // 对象类型
-    pub x_pos: i32,          // X坐标位置
-    pub y_pos: i32,          // Y坐标位置
-    pub h_size: i32,         // 水平尺寸
-    pub v_size: i32,         // 垂直尺寸
-    pub x_vel: i32,          // X轴速度
-    pub y_vel: i32,          // Y轴速度
-    pub delay_counter: i32,  // 延迟计数器
+    pub alive: bool,        // 对象是否存活
+    pub tp: i32,            // 对象类型
+    pub x_pos: i32,         // X坐标位置
+    pub y_pos: i32,         // Y坐标位置
+    pub h_size: i32,        // 水平尺寸
+    pub v_size: i32,        // 垂直尺寸
+    pub x_vel: i32,         // X轴速度
+    pub y_vel: i32,         // Y轴速度
+    pub delay_counter: i32, // 延迟计数器
 }
 
 impl Default for TempRec {
@@ -84,7 +84,7 @@ impl Default for RemoveRec {
 
 // 临时对象管理器结构体
 pub struct TmpObjManager {
-    pub temp_obj: Vec<TempRec>, // 临时对象数组
+    pub temp_obj: Vec<TempRec>,   // 临时对象数组
     pub rem_list: Vec<RemoveRec>, // 移除列表数组
 }
 
@@ -180,9 +180,9 @@ impl TmpObjManager {
             if !self.temp_obj[i].alive {
                 continue;
             }
-            
+
             let temp_obj = &self.temp_obj[i];
-            
+
             // 检查是否在可视区域内
             if temp_obj.x_pos + temp_obj.h_size < buffers.x_view
                 || temp_obj.x_pos > buffers.x_view + crate::render_state::SCREEN_WIDTH as i32
@@ -191,11 +191,11 @@ impl TmpObjManager {
             {
                 continue;
             }
-            
+
             // 计算屏幕坐标
             let sx = (temp_obj.x_pos - buffers.x_view) as f32;
             let sy = (temp_obj.y_pos - buffers.y_view) as f32;
-            
+
             // 根据对象类型选择精灵
             let sprite_id = match temp_obj.tp {
                 TP_BROKEN => SpriteId::PART_000,
@@ -205,13 +205,18 @@ impl TmpObjManager {
                 TP_NOTE => SpriteId::NOTE_000,
                 _ => continue,
             };
-            
+
             let uv = atlas.get(sprite_id);
             let (u, v, u_size, v_size) = uv.normalized(atlas.size());
             let inst = SpriteInstance::new(
-                sx, sy,
-                uv.width as f32, uv.height as f32,
-                u, v, u_size, v_size
+                sx,
+                sy,
+                uv.width as f32,
+                uv.height as f32,
+                u,
+                v,
+                u_size,
+                v_size,
             );
             commands.push(RenderCommand::DrawSprite(inst));
         }
@@ -290,7 +295,7 @@ impl TmpObjManager {
             rem_rec.rem_w = w;
             rem_rec.rem_h = h;
             rem_rec.new_image = new_img;
-            rem_rec.rem_count = 4;  // GPU模式：只需要几帧的延迟
+            rem_rec.rem_count = 4; // GPU模式：只需要几帧的延迟
             rem_rec.active = true;
         }
     }
@@ -319,11 +324,38 @@ impl TmpObjManager {
         // 左上片段
         self.new_temp_obj(TP_BROKEN, pixel_x, pixel_y, -2, -6, 12, h_half, buffers);
         // 右上片段
-        self.new_temp_obj(TP_BROKEN, pixel_x + w_half, pixel_y, 2, -6, 12, h_half, buffers);
+        self.new_temp_obj(
+            TP_BROKEN,
+            pixel_x + w_half,
+            pixel_y,
+            2,
+            -6,
+            12,
+            h_half,
+            buffers,
+        );
         // 左下片段
-        self.new_temp_obj(TP_BROKEN, pixel_x, pixel_y + h_half, -2, -4, 12, h_half, buffers);
+        self.new_temp_obj(
+            TP_BROKEN,
+            pixel_x,
+            pixel_y + h_half,
+            -2,
+            -4,
+            12,
+            h_half,
+            buffers,
+        );
         // 右下片段
-        self.new_temp_obj(TP_BROKEN, pixel_x + w_half, pixel_y + h_half, 2, -4, 12, h_half, buffers);
+        self.new_temp_obj(
+            TP_BROKEN,
+            pixel_x + w_half,
+            pixel_y + h_half,
+            2,
+            -4,
+            12,
+            h_half,
+            buffers,
+        );
 
         // 播放音效
         music_player.beep(110);
@@ -346,7 +378,14 @@ impl TmpObjManager {
         if throw_up {
             // 创建向上抛的金币动画
             self.new_temp_obj(
-                TP_COIN, x, y - H as i32, 0, COIN_SPEED, W as i32, H as i32, buffers,
+                TP_COIN,
+                x,
+                y - H as i32,
+                0,
+                COIN_SPEED,
+                W as i32,
+                H as i32,
+                buffers,
             );
         } else {
             // 直接移除金币

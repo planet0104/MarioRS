@@ -4,15 +4,11 @@
 
 use crate::backgr::BackGr;
 use crate::buffers::{Buffers, EX, EY1, ImageBuffer, NV, WorldBuffer, WorldOptions};
-use crate::palettes::Palettes;
-use crate::sprites::SpriteDataManager;
-use crate::render_state::RenderState;
 use crate::gpu::sprite_batch::{FillCommand, SpriteCommand};
-use crate::gpu::{RenderCommand, FillRect};
-
-/// 调试开关：是否打印特定tile位置的精灵文件名
-/// 设置为true时，会打印指定坐标的tile绘制信息
-const DEBUG_PRINT_TILE_SPRITES: bool = false;
+use crate::gpu::{FillRect, RenderCommand};
+use crate::palettes::Palettes;
+use crate::render_state::RenderState;
+use crate::sprites::SpriteDataManager;
 
 pub const N1: usize = 3;
 pub const N2: usize = 14;
@@ -21,39 +17,24 @@ pub struct Figures {
     pub fig_list: [[ImageBuffer; N2]; N1],
     pub bricks: [ImageBuffer; 4],
     pub sky: u8,
-    /// P1-2: 实例级 trace 标志（替代静态 AtomicBool）
-    pub trace_enabled: bool,
-    
+
     // 运行时动态着色精灵（参考Pascal设计，保持原始精灵不可变）
-    pub wood_rt: ImageBuffer,    // 运行时重着色的WOOD
-    pub xblock_rt: ImageBuffer,  // 运行时重着色的XBLOCK
-    pub block_rt: ImageBuffer,   // 运行时重着色的BLOCK
+    pub wood_rt: ImageBuffer,   // 运行时重着色的WOOD
+    pub xblock_rt: ImageBuffer, // 运行时重着色的XBLOCK
+    pub block_rt: ImageBuffer,  // 运行时重着色的BLOCK
 }
 
 impl Figures {
     pub fn new(fig_list: [[ImageBuffer; N2]; N1], bricks: [ImageBuffer; 4], sky: u8) -> Self {
-        let empty_sprite: ImageBuffer = [[0; crate::buffers::W as usize]; crate::buffers::H as usize];
+        let empty_sprite: ImageBuffer =
+            [[0; crate::buffers::W as usize]; crate::buffers::H as usize];
         Self {
             fig_list,
             bricks,
             sky,
-            trace_enabled: false, // P1-2: 默认关闭
             wood_rt: empty_sprite,
             xblock_rt: empty_sprite,
             block_rt: empty_sprite,
-        }
-    }
-
-    /// P1-2修复：设置精灵跟踪
-    pub fn set_trace_enabled(&mut self, enabled: bool) {
-        self.trace_enabled = enabled;
-    }
-
-    /// 内联 trace helper
-    #[inline]
-    fn trace_sprite(&self, x: i32, y: i32, name: &str) {
-        if self.trace_enabled {
-            println!("[DRAW_TILE] x={x} y={y} sprite={name}");
         }
     }
 
@@ -123,7 +104,7 @@ impl Figures {
         let mut changed_count = 0;
         let mut _sample_before = 0u8;
         let mut _sample_after = 0u8;
-        
+
         match dst {
             Some(dst_buf) => {
                 for y in 0..HH {
@@ -648,19 +629,24 @@ impl Figures {
 
             // SmoothFill（渐变背景）
             2 | 5 | 9 | 10 | 11 | 12 => {
-                backgr.smooth_fill_gpu(x as usize, y as usize, w as usize, h as usize, options, render_state);
+                backgr.smooth_fill_gpu(
+                    x as usize,
+                    y as usize,
+                    w as usize,
+                    h as usize,
+                    options,
+                    render_state,
+                );
             }
 
             // 地下室场景：画砖/柱子/窗/大砖
-            6 | 7 | 8 => {
-                match options.backgr_type {
-                    4 => backgr.draw_bricks_gpu(x, y, w, h, render_state),
-                    5 => backgr.large_bricks_gpu(x, y, w, h, render_state),
-                    6 => backgr.pillar_gpu(x, y, w, h, render_state),
-                    7 => backgr.windows_gpu(x, y, w, h, render_state),
-                    _ => {}
-                }
-            }
+            6 | 7 | 8 => match options.backgr_type {
+                4 => backgr.draw_bricks_gpu(x, y, w, h, render_state),
+                5 => backgr.large_bricks_gpu(x, y, w, h, render_state),
+                6 => backgr.pillar_gpu(x, y, w, h, render_state),
+                7 => backgr.windows_gpu(x, y, w, h, render_state),
+                _ => {}
+            },
 
             _ => {}
         }
@@ -682,7 +668,7 @@ impl Figures {
         // 关键：必须以 options.sky_type 为准，不能用 self.sky。
         // 否则在关卡切换或入管渐显时，可能出现“第一帧还按旧天空类型绘制”导致闪烁。
         let sky = options.sky_type;
-        
+
         if options.backgr_type == 0 {
             fills.push(FillCommand::new(x, y, w, h, 0xE0));
             return fills;
@@ -737,7 +723,7 @@ impl Figures {
             }
             _ => {}
         }
-        
+
         fills
     }
 
@@ -755,25 +741,29 @@ impl Figures {
     ) -> Vec<RenderCommand> {
         use crate::sprites::SpriteId;
         let mut commands: Vec<RenderCommand> = Vec::new();
-        
+
         // GPU渲染统一使用屏幕坐标
         let xpos = x * crate::buffers::W as i32 - buffers.x_view;
         let ypos = y * crate::buffers::H as i32 - buffers.y_view;
-        
+
         let get = |x: i32, y: i32| -> u8 {
             let xx = x + EX;
             let yy = y + EY1;
-            if xx < 0 || yy < 0 || (xx as usize) >= world_map.len() || (yy as usize) >= world_map[0].len() {
+            if xx < 0
+                || yy < 0
+                || (xx as usize) >= world_map.len()
+                || (yy as usize) >= world_map[0].len()
+            {
                 0
             } else {
                 world_map[xx as usize][yy as usize]
             }
         };
-        
+
         if x < 0 || y < 0 || y >= NV {
             return commands;
         }
-        
+
         let ch = get(x, y);
         if ch == b' ' {
             return commands;
@@ -782,7 +772,8 @@ impl Figures {
         // Oldsrc 特例：如果上方 tile 是 18，则先叠加 FigList[0][5]（不透明）
         // 对齐 Oldsrc FIGURES.redraw 中的特殊覆盖
         if get(x, y - 1) == 18 {
-            let (base_id, rotation, flip_x, flip_y) = Self::wall_variant_to_sprite(options.wall_type1, 5);
+            let (base_id, rotation, flip_x, flip_y) =
+                Self::wall_variant_to_sprite(options.wall_type1, 5);
             let uv = atlas.get(base_id);
             commands.push(RenderCommand::Sprite(
                 SpriteCommand::new(xpos, ypos, uv)
@@ -791,19 +782,19 @@ impl Figures {
                     .with_opaque(true),
             ));
         }
-        
+
         // 根据tile字符选择精灵
         let sprite_id: Option<SpriteId> = match ch {
             b'?' => Some(SpriteId::QUEST_000),
             b'@' => Some(SpriteId::QUEST_001),
             b'I' => Some(SpriteId::BLOCK_000),
-            b'J' => Some(SpriteId::BLOCK_001_RT),  // 使用运行时重着色版本
+            b'J' => Some(SpriteId::BLOCK_001_RT), // 使用运行时重着色版本
             b'K' => Some(SpriteId::NOTE_000),
-            b'X' => Some(SpriteId::XBLOCK_000_RT),  // 使用运行时重着色版本
+            b'X' => Some(SpriteId::XBLOCK_000_RT), // 使用运行时重着色版本
             b'W' => {
                 // 对齐 Oldsrc：WOOD使用DrawImage（透明绘制），索引0的像素不绘制
                 // 这样WOOD精灵边缘的透明像素会正确显示背景色
-                Some(SpriteId::WOOD_000_RT)  // 使用运行时重着色版本
+                Some(SpriteId::WOOD_000_RT) // 使用运行时重着色版本
             }
             b'0' => Some(SpriteId::PIPE_000),
             b'1' => Some(SpriteId::PIPE_001),
@@ -940,21 +931,27 @@ impl Figures {
                     match get(x, y - 1) {
                         b'#' => {
                             let uv = atlas.get(SpriteId::TREE_001);
-                            commands.push(RenderCommand::Sprite(SpriteCommand::new(xpos, ypos, uv).with_opaque(true)));
+                            commands.push(RenderCommand::Sprite(
+                                SpriteCommand::new(xpos, ypos, uv).with_opaque(true),
+                            ));
                             None
                         }
                         b'%' => {
                             let uv = atlas.get(SpriteId::TREE_000);
-                            commands.push(RenderCommand::Sprite(SpriteCommand::new(xpos, ypos, uv).with_opaque(true)));
+                            commands.push(RenderCommand::Sprite(
+                                SpriteCommand::new(xpos, ypos, uv).with_opaque(true),
+                            ));
                             let uv = atlas.get(SpriteId::TREE_003);
-                            commands.push(RenderCommand::Sprite(SpriteCommand::new(xpos, ypos, uv)));
+                            commands
+                                .push(RenderCommand::Sprite(SpriteCommand::new(xpos, ypos, uv)));
                             None
                         }
                         _ => {
                             // 对齐 Oldsrc：顶部树叶只绘制透明树叶层
                             // 注意：TREE_003 的圆角依赖透明像素，若先铺不透明底图会导致圆角变直角
                             let uv = atlas.get(SpriteId::TREE_003);
-                            commands.push(RenderCommand::Sprite(SpriteCommand::new(xpos, ypos, uv)));
+                            commands
+                                .push(RenderCommand::Sprite(SpriteCommand::new(xpos, ypos, uv)));
                             None
                         }
                     }
@@ -963,7 +960,9 @@ impl Figures {
                     // 对齐 Oldsrc：窗户是覆盖在地下砖墙上的透明图层。
                     // 这里不能用 WOOD_000 当底图，否则会出现你反馈的“窗户上方圆形部分露出木纹”。
                     let uv = atlas.get(SpriteId::PALBRICK_000);
-                    commands.push(RenderCommand::Sprite(SpriteCommand::new(xpos, ypos, uv).with_opaque(true)));
+                    commands.push(RenderCommand::Sprite(
+                        SpriteCommand::new(xpos, ypos, uv).with_opaque(true),
+                    ));
                     let uv = atlas.get(SpriteId::WINDOW_001);
                     commands.push(RenderCommand::Sprite(SpriteCommand::new(xpos, ypos, uv)));
                     None
@@ -971,7 +970,9 @@ impl Figures {
                 4 => {
                     // 对齐 Oldsrc：岩浆使用 PutImage 语义（索引0也要绘制），否则会出现“高度变小且不贴底”
                     let uv = atlas.get(SpriteId::LAVA_000);
-                    commands.push(RenderCommand::Sprite(SpriteCommand::new(xpos, ypos, uv).with_opaque(true)));
+                    commands.push(RenderCommand::Sprite(
+                        SpriteCommand::new(xpos, ypos, uv).with_opaque(true),
+                    ));
                     None
                 }
                 5 => {
@@ -999,21 +1000,27 @@ impl Figures {
                     match get(x, y - 1) {
                         b'%' => {
                             let uv = atlas.get(SpriteId::TREE_000);
-                            commands.push(RenderCommand::Sprite(SpriteCommand::new(xpos, ypos, uv).with_opaque(true)));
+                            commands.push(RenderCommand::Sprite(
+                                SpriteCommand::new(xpos, ypos, uv).with_opaque(true),
+                            ));
                             None
                         }
                         b'#' => {
                             let uv = atlas.get(SpriteId::TREE_001);
-                            commands.push(RenderCommand::Sprite(SpriteCommand::new(xpos, ypos, uv).with_opaque(true)));
+                            commands.push(RenderCommand::Sprite(
+                                SpriteCommand::new(xpos, ypos, uv).with_opaque(true),
+                            ));
                             let uv = atlas.get(SpriteId::TREE_002);
-                            commands.push(RenderCommand::Sprite(SpriteCommand::new(xpos, ypos, uv)));
+                            commands
+                                .push(RenderCommand::Sprite(SpriteCommand::new(xpos, ypos, uv)));
                             None
                         }
                         _ => {
                             // 对齐 Oldsrc：顶部树叶只绘制透明树叶层
                             // 注意：TREE_002 的圆角依赖透明像素，若先铺不透明底图会导致圆角变直角
                             let uv = atlas.get(SpriteId::TREE_002);
-                            commands.push(RenderCommand::Sprite(SpriteCommand::new(xpos, ypos, uv)));
+                            commands
+                                .push(RenderCommand::Sprite(SpriteCommand::new(xpos, ypos, uv)));
                             None
                         }
                     }
@@ -1021,7 +1028,9 @@ impl Figures {
                 3 => {
                     // 对齐 Oldsrc：窗户是覆盖在地下砖墙上的透明图层
                     let uv = atlas.get(SpriteId::PALBRICK_000);
-                    commands.push(RenderCommand::Sprite(SpriteCommand::new(xpos, ypos, uv).with_opaque(true)));
+                    commands.push(RenderCommand::Sprite(
+                        SpriteCommand::new(xpos, ypos, uv).with_opaque(true),
+                    ));
                     let uv = atlas.get(SpriteId::WINDOW_000);
                     commands.push(RenderCommand::Sprite(SpriteCommand::new(xpos, ypos, uv)));
                     None
@@ -1029,7 +1038,9 @@ impl Figures {
                 4 => {
                     // 对齐 Oldsrc：岩浆使用 PutImage 语义（索引0也要绘制）
                     let uv = atlas.get(SpriteId::LAVA_001);
-                    commands.push(RenderCommand::Sprite(SpriteCommand::new(xpos, ypos, uv).with_opaque(true)));
+                    commands.push(RenderCommand::Sprite(
+                        SpriteCommand::new(xpos, ypos, uv).with_opaque(true),
+                    ));
                     None
                 }
                 5 => {
@@ -1060,7 +1071,7 @@ impl Figures {
                     let l = get(x - 1, y) == b'A';
                     let r = get(x + 1, y) == b'A';
                     let stitch = (x + y) % 2 == 1;
-                    
+
                     if stitch && r {
                         Some(SpriteId::BRICK_RT_001)
                     } else if !stitch && l {
@@ -1080,7 +1091,9 @@ impl Figures {
                 } else {
                     // 上下颠倒绘制
                     let uv = atlas.get(SpriteId::PIN_000);
-                    commands.push(RenderCommand::Sprite(SpriteCommand::new(xpos, ypos, uv).with_flip(false, true)));
+                    commands.push(RenderCommand::Sprite(
+                        SpriteCommand::new(xpos, ypos, uv).with_flip(false, true),
+                    ));
                     None
                 }
             }
@@ -1139,25 +1152,25 @@ impl Figures {
             }
             _ => None,
         };
-        
+
         if let Some(id) = sprite_id {
             let uv = atlas.get(id);
             // 默认对齐 DrawImage 语义: 索引0透明
             // Oldsrc 的 PutImage/DrawImage 差异只在明确分支里使用 with_opaque(true) 处理
             commands.push(RenderCommand::Sprite(SpriteCommand::new(xpos, ypos, uv)));
         }
-        
+
         commands
     }
 
     /// 参考Pascal设计：直接使用fig_list中预处理的精灵
     /// fig_list[0][1..13]已经包含了所有变换（重着色、镜像、旋转）
     /// 因此GPU不需要再做变换，直接返回FIGLIST_xx精灵ID
-    /// 
+    ///
     /// 返回值: (精灵ID, 旋转角度, flip_x, flip_y)
     /// 由于变换已在CPU端完成，所有变换参数都是默认值（0, false, false）
     fn wall_variant_to_sprite(
-        _wall_type1: u8,  // 不再需要，fig_list已根据wall_type处理
+        _wall_type1: u8, // 不再需要，fig_list已根据wall_type处理
         idx: u8,
     ) -> (crate::sprites::SpriteId, u8, bool, bool) {
         use crate::sprites::SpriteId;
@@ -1177,7 +1190,7 @@ impl Figures {
             11 => (SpriteId::FIGLIST_11, 0, false, false),
             12 => (SpriteId::FIGLIST_12, 0, false, false),
             13 => (SpriteId::FIGLIST_13, 0, false, false),
-            _ => (SpriteId::FIGLIST_05, 0, false, false),  // 默认使用中间块
+            _ => (SpriteId::FIGLIST_05, 0, false, false), // 默认使用中间块
         }
     }
 
@@ -1195,16 +1208,15 @@ impl Figures {
         buffers: &Buffers,
     ) -> Vec<RenderCommand> {
         let mut commands = Vec::new();
-        
+
         for y in y_start..(y_start + height) {
             for x in x_start..(x_start + width) {
-                let tile_cmds = self.collect_tile_sprite_gpu(
-                    x, y, world_map, sprites, atlas, options, buffers
-                );
+                let tile_cmds =
+                    self.collect_tile_sprite_gpu(x, y, world_map, sprites, atlas, options, buffers);
                 commands.extend(tile_cmds);
             }
         }
-        
+
         commands
     }
 
@@ -1277,7 +1289,7 @@ impl Figures {
             }
             _ => return,
         }
-        let ignore_above = [0xE9];  // Pascal: IgnoreAbove = ['é']
+        let ignore_above = [0xE9]; // Pascal: IgnoreAbove = ['é']
         // A := 1 - Byte ((WorldMap^ [X, Y - 1] in (Ch - IgnoreAbove)) or (Y = 0));
         let a = 1
             - (((j > 0) && {
@@ -1395,7 +1407,8 @@ impl Figures {
         for i in 0..x_size {
             for j in 0..nv_usize {
                 match get(world_map, i, j) {
-                    0xCF => {  // Pascal: 'Ï' - 问号/宝箱标记
+                    0xCF => {
+                        // Pascal: 'Ï' - 问号/宝箱标记
                         if j >= 5 {
                             set(world_map, i, j - 5, b'?');
                         }
@@ -1404,13 +1417,15 @@ impl Figures {
                         }
                         set(world_map, i, j, b' ');
                     }
-                    0xD0 => {  // Pascal: 'Ð' - 金币标记
+                    0xD0 => {
+                        // Pascal: 'Ð' - 金币标记
                         if j >= 2 {
                             set(world_map, i, j - 2, b'*');
                         }
                         set(world_map, i, j, b' ');
                     }
-                    0xD1 => {  // Pascal: 'Ñ' - 向下复制
+                    0xD1 => {
+                        // Pascal: 'Ñ' - 向下复制
                         // Pascal:
                         //   k := j + 1;
                         //   for l := j downto -1 do
@@ -1438,7 +1453,8 @@ impl Figures {
                             }
                         }
                     }
-                    0xD2 => {  // Pascal: 'Ò' - 继承上方+设置底部254
+                    0xD2 => {
+                        // Pascal: 'Ò' - 继承上方+设置底部254
                         if j >= 1 {
                             let v = get(world_map, i, j - 1);
                             set(world_map, i, j, v);
@@ -1446,7 +1462,8 @@ impl Figures {
                         // Pascal: WorldMap^[i, NV] := #254
                         set(world_map, i, nv_usize, 254);
                     }
-                    0xD3 => {  // Pascal: 'Ó' - 继承上方+设置底部255
+                    0xD3 => {
+                        // Pascal: 'Ó' - 继承上方+设置底部255
                         if j >= 1 {
                             let v = get(world_map, i, j - 1);
                             set(world_map, i, j, v);
@@ -1476,8 +1493,8 @@ impl Figures {
                 // 这导致 LastCD 和 LastEF 永远不会更新
                 // 为了严格对齐 Pascal，这里复现这个 bug：
                 last_ab = ab;
-                last_ab = cd;  // Pascal: LastAB := CD (笔误)
-                last_ab = ef;  // Pascal: LastAB := EF (笔误)
+                last_ab = cd; // Pascal: LastAB := CD (笔误)
+                last_ab = ef; // Pascal: LastAB := EF (笔误)
             }
         } else {
             let mut bricks = self.bricks.clone();
@@ -1547,12 +1564,14 @@ impl Figures {
                     counts[*px as usize] += 1;
                 }
             }
-            counts.iter().enumerate()
+            counts
+                .iter()
+                .enumerate()
                 .filter(|&(_, c)| *c > 0)
                 .map(|(i, c)| (i as u8, *c))
                 .collect()
         }
-        
+
         self.convert_grass(
             &mut sprites.GRASS1_000,
             &sprites.GRASS1_001,
@@ -1595,25 +1614,25 @@ impl Figures {
         // ===== Pascal风格重构：动态着色精灵存入Figures的运行时字段 =====
         // 参考Pascal设计：原始精灵保持不可变，重着色结果存入运行时字段
         // 这样每次build_world都从原始数据开始，无需_ORIG副本
-        
+
         // 使用临时变量来避免借用冲突
         // 复制原始精灵，然后重着色，最后存入运行时字段
         let mut block_tmp = sprites.BLOCK_001.clone();
         Self::recolor_static(&mut block_tmp, None, options.brick_color);
         self.block_rt = block_tmp;
-        
+
         let mut wood_tmp = sprites.WOOD_000.clone();
         Self::recolor_static(&mut wood_tmp, None, options.wood_color);
         self.wood_rt = wood_tmp;
-        
+
         let mut xblock_tmp = sprites.XBLOCK_000.clone();
         Self::recolor_static(&mut xblock_tmp, None, options.xblock_color);
         self.xblock_rt = xblock_tmp;
-        
+
         // 注意：wall_type1相关的重着色已在init_wall中处理到fig_list
         // GPU渲染直接使用FIGLIST_xx精灵，无需修改原始GREEN精灵
     }
-    
+
     /// 静态版本的recolor，避免借用冲突
     fn recolor_static<const WW: usize, const HH: usize>(
         src: &mut [[u8; WW]; HH],

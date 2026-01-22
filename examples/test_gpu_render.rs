@@ -8,18 +8,18 @@
 //! 注意：这个测试程序不依赖pixels库，直接使用winit和wgpu。
 
 use std::sync::Arc;
+use wgpu::Backends;
 use winit::{
     application::ApplicationHandler,
+    dpi::LogicalSize,
     event::WindowEvent,
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
     window::{Window, WindowId},
-    dpi::LogicalSize,
 };
-use wgpu::Backends;
 
 // 引入游戏模块
-use mario::gpu::{GpuRenderer, SpriteInstance, FillRect, GAME_WIDTH, GAME_HEIGHT, ATLAS_SIZE};
-use mario::sprites::{SpriteDataManager, SpriteId, PALETTE};
+use mario::gpu::{ATLAS_SIZE, FillRect, GAME_HEIGHT, GAME_WIDTH, GpuRenderer, SpriteInstance};
+use mario::sprites::{PALETTE, SpriteDataManager, SpriteId};
 
 const WINDOW_WIDTH: u32 = 640;
 const WINDOW_HEIGHT: u32 = 480;
@@ -56,14 +56,18 @@ impl TestApp {
         });
 
         // 创建surface
-        let surface = instance.create_surface(window.clone()).expect("创建surface失败");
+        let surface = instance
+            .create_surface(window.clone())
+            .expect("创建surface失败");
 
         // 请求适配器
-        let adapter = futures::executor::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::HighPerformance,
-            compatible_surface: Some(&surface),
-            force_fallback_adapter: false,
-        })).expect("找不到合适的GPU适配器");
+        let adapter =
+            futures::executor::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::HighPerformance,
+                compatible_surface: Some(&surface),
+                force_fallback_adapter: false,
+            }))
+            .expect("找不到合适的GPU适配器");
 
         println!("使用GPU适配器: {:?}", adapter.get_info());
 
@@ -76,7 +80,8 @@ impl TestApp {
                 memory_hints: wgpu::MemoryHints::Performance,
             },
             None,
-        )).expect("请求设备失败");
+        ))
+        .expect("请求设备失败");
 
         let device = Arc::new(device);
         let queue = Arc::new(queue);
@@ -148,7 +153,9 @@ impl TestApp {
                 return;
             }
         };
-        let view = output.texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let view = output
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
 
         // 更新缩放参数
         gpu_renderer.update_scale(config.width, config.height);
@@ -157,21 +164,30 @@ impl TestApp {
         gpu_renderer.begin_frame();
 
         // 1. 添加天空背景填充 (蓝色，调色板索引 35)
-        gpu_renderer.draw_fill(FillRect::new(0.0, 0.0, GAME_WIDTH as f32, GAME_HEIGHT as f32, 35, 0));
+        gpu_renderer.draw_fill(FillRect::new(
+            0.0,
+            0.0,
+            GAME_WIDTH as f32,
+            GAME_HEIGHT as f32,
+            35,
+            0,
+        ));
 
         // 2. 添加地面填充 (棕色，调色板索引 7)
         gpu_renderer.draw_fill(FillRect::new(0.0, 150.0, GAME_WIDTH as f32, 32.0, 7, 0));
 
         // 3. 添加一些测试精灵
         let atlas = sprites.build_atlas();
-        
+
         // 砖块精灵 (BROWN)
         let brick_uv = atlas.get(SpriteId::BROWN_000);
         let brick_sprite = SpriteInstance::new(
-            50.0, 120.0,                           // 位置
-            20.0, 14.0,                            // 尺寸
-            brick_uv.x as f32 / ATLAS_SIZE as f32, // UV x
-            brick_uv.y as f32 / ATLAS_SIZE as f32, // UV y
+            50.0,
+            120.0, // 位置
+            20.0,
+            14.0,                                       // 尺寸
+            brick_uv.x as f32 / ATLAS_SIZE as f32,      // UV x
+            brick_uv.y as f32 / ATLAS_SIZE as f32,      // UV y
             brick_uv.width as f32 / ATLAS_SIZE as f32,  // UV width
             brick_uv.height as f32 / ATLAS_SIZE as f32, // UV height
         );
@@ -181,8 +197,10 @@ impl TestApp {
         for i in 0..5 {
             let x = 50.0 + i as f32 * 20.0;
             let sprite = SpriteInstance::new(
-                x, 120.0,
-                20.0, 14.0,
+                x,
+                120.0,
+                20.0,
+                14.0,
                 brick_uv.x as f32 / ATLAS_SIZE as f32,
                 brick_uv.y as f32 / ATLAS_SIZE as f32,
                 brick_uv.width as f32 / ATLAS_SIZE as f32,
@@ -194,8 +212,10 @@ impl TestApp {
         // 问号砖块
         let quest_uv = atlas.get(SpriteId::QUEST_000);
         let quest_sprite = SpriteInstance::new(
-            160.0, 80.0,
-            20.0, 14.0,
+            160.0,
+            80.0,
+            20.0,
+            14.0,
             quest_uv.x as f32 / ATLAS_SIZE as f32,
             quest_uv.y as f32 / ATLAS_SIZE as f32,
             quest_uv.width as f32 / ATLAS_SIZE as f32,
@@ -207,11 +227,17 @@ impl TestApp {
         // 注意: 这需要SpriteId中有对应的定义
         // 使用帧计数来动画
         let mario_frame = (self.frame_count / 10) % 2;
-        let mario_id = if mario_frame == 0 { SpriteId::SWMAR_000 } else { SpriteId::SWMAR_001 };
+        let mario_id = if mario_frame == 0 {
+            SpriteId::SWMAR_000
+        } else {
+            SpriteId::SWMAR_001
+        };
         let mario_uv = atlas.get(mario_id);
         let mario_sprite = SpriteInstance::new(
-            100.0, 136.0 - mario_uv.height as f32, // 站在地面上
-            mario_uv.width as f32, mario_uv.height as f32,
+            100.0,
+            136.0 - mario_uv.height as f32, // 站在地面上
+            mario_uv.width as f32,
+            mario_uv.height as f32,
             mario_uv.x as f32 / ATLAS_SIZE as f32,
             mario_uv.y as f32 / ATLAS_SIZE as f32,
             mario_uv.width as f32 / ATLAS_SIZE as f32,
@@ -221,11 +247,17 @@ impl TestApp {
 
         // 敌人 (Chibibo/栗子敌人)
         let enemy_frame = (self.frame_count / 15) % 2;
-        let enemy_id = if enemy_frame == 0 { SpriteId::CHIBIBO_000 } else { SpriteId::CHIBIBO_001 };
+        let enemy_id = if enemy_frame == 0 {
+            SpriteId::CHIBIBO_000
+        } else {
+            SpriteId::CHIBIBO_001
+        };
         let enemy_uv = atlas.get(enemy_id);
         let enemy_sprite = SpriteInstance::new(
-            200.0, 136.0 - enemy_uv.height as f32,
-            enemy_uv.width as f32, enemy_uv.height as f32,
+            200.0,
+            136.0 - enemy_uv.height as f32,
+            enemy_uv.width as f32,
+            enemy_uv.height as f32,
             enemy_uv.x as f32 / ATLAS_SIZE as f32,
             enemy_uv.y as f32 / ATLAS_SIZE as f32,
             enemy_uv.width as f32 / ATLAS_SIZE as f32,
@@ -236,8 +268,10 @@ impl TestApp {
         // 金币
         let coin_uv = atlas.get(SpriteId::COIN_000);
         let coin_sprite = SpriteInstance::new(
-            160.0, 50.0,
-            coin_uv.width as f32, coin_uv.height as f32,
+            160.0,
+            50.0,
+            coin_uv.width as f32,
+            coin_uv.height as f32,
             coin_uv.x as f32 / ATLAS_SIZE as f32,
             coin_uv.y as f32 / ATLAS_SIZE as f32,
             coin_uv.width as f32 / ATLAS_SIZE as f32,
@@ -271,21 +305,30 @@ impl ApplicationHandler for TestApp {
                 .with_inner_size(LogicalSize::new(WINDOW_WIDTH, WINDOW_HEIGHT))
                 .with_resizable(true);
 
-            let window = Arc::new(event_loop.create_window(window_attributes).expect("创建窗口失败"));
-            
+            let window = Arc::new(
+                event_loop
+                    .create_window(window_attributes)
+                    .expect("创建窗口失败"),
+            );
+
             self.init_wgpu(window);
         }
     }
 
-    fn window_event(&mut self, event_loop: &ActiveEventLoop, _window_id: WindowId, event: WindowEvent) {
+    fn window_event(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        _window_id: WindowId,
+        event: WindowEvent,
+    ) {
         match event {
             WindowEvent::CloseRequested => {
                 println!("关闭窗口");
                 event_loop.exit();
             }
             WindowEvent::Resized(new_size) => {
-                if let (Some(surface), Some(device), Some(config)) = 
-                    (&self.surface, &self.device, &mut self.config) 
+                if let (Some(surface), Some(device), Some(config)) =
+                    (&self.surface, &self.device, &mut self.config)
                 {
                     config.width = new_size.width.max(1);
                     config.height = new_size.height.max(1);

@@ -1,7 +1,10 @@
 // Mario RS - Rust重制版马里奥游戏
 
 // Windows Release 模式：隐藏控制台窗口，使用纯窗口模式
-#![cfg_attr(all(target_os = "windows", not(debug_assertions)), windows_subsystem = "windows")]
+#![cfg_attr(
+    all(target_os = "windows", not(debug_assertions)),
+    windows_subsystem = "windows"
+)]
 
 // 架构说明：
 // - main.rs: 程序入口，只调用平台层
@@ -18,7 +21,7 @@
 
 fn main() {
     let result = run_platform();
-    
+
     if let Err(e) = result {
         eprintln!("游戏错误: {}", e);
     }
@@ -32,7 +35,11 @@ fn run_platform() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 /// Windows GDI 后端（仅在未启用 wgpu-backend 时使用）
-#[cfg(all(target_os = "windows", feature = "gdi-backend", not(feature = "wgpu-backend")))]
+#[cfg(all(
+    target_os = "windows",
+    feature = "gdi-backend",
+    not(feature = "wgpu-backend")
+))]
 fn run_platform() -> Result<(), Box<dyn std::error::Error>> {
     mario::platform::run_game()
 }

@@ -16,8 +16,8 @@
 // ============================================================================
 
 pub mod audio;
-pub mod touch_panel;
 pub mod common;
+pub mod touch_panel;
 
 #[cfg(all(target_os = "windows", feature = "gdi-backend"))]
 mod windows;
@@ -203,13 +203,44 @@ pub enum KeyCode {
     Backspace,
 
     // 字母键
-    KeyA, KeyB, KeyC, KeyD, KeyE, KeyF, KeyG, KeyH, KeyI, KeyJ,
-    KeyK, KeyL, KeyM, KeyN, KeyO, KeyP, KeyQ, KeyR, KeyS, KeyT,
-    KeyU, KeyV, KeyW, KeyX, KeyY, KeyZ,
+    KeyA,
+    KeyB,
+    KeyC,
+    KeyD,
+    KeyE,
+    KeyF,
+    KeyG,
+    KeyH,
+    KeyI,
+    KeyJ,
+    KeyK,
+    KeyL,
+    KeyM,
+    KeyN,
+    KeyO,
+    KeyP,
+    KeyQ,
+    KeyR,
+    KeyS,
+    KeyT,
+    KeyU,
+    KeyV,
+    KeyW,
+    KeyX,
+    KeyY,
+    KeyZ,
 
     // 数字键
-    Digit0, Digit1, Digit2, Digit3, Digit4,
-    Digit5, Digit6, Digit7, Digit8, Digit9,
+    Digit0,
+    Digit1,
+    Digit2,
+    Digit3,
+    Digit4,
+    Digit5,
+    Digit6,
+    Digit7,
+    Digit8,
+    Digit9,
 
     // 其他
     Unknown,
@@ -288,40 +319,38 @@ pub enum GamePhase {
 // 触摸面板公共模块导出
 // ============================================================================
 
-pub use touch_panel::{TouchAction, ButtonStates, VirtualButtonsRenderer, TouchPanelInput};
+pub use touch_panel::{ButtonStates, TouchAction, TouchPanelInput, VirtualButtonsRenderer};
 
 // ============================================================================
 // 平台实现导出 - 根据 feature 和目标平台选择
 // ============================================================================
 
 // Windows GDI 后端（仅 Windows + gdi-backend 且未启用 wgpu-backend）
-#[cfg(all(target_os = "windows", feature = "gdi-backend", not(feature = "wgpu-backend")))]
+#[cfg(all(
+    target_os = "windows",
+    feature = "gdi-backend",
+    not(feature = "wgpu-backend")
+))]
 pub use self::windows::{
-    random_i32, random_usize, random_u32, random_u8, random_f32,
-    now_ms,
-    log_debug, log_info, log_warn, log_error,
-    DesktopStorage, DesktopAudio, DesktopDisplay, DesktopInput, DesktopTime, DesktopRandom, DesktopLog,
-    run_game,
+    DesktopAudio, DesktopDisplay, DesktopInput, DesktopLog, DesktopRandom, DesktopStorage,
+    DesktopTime, log_debug, log_error, log_info, log_warn, now_ms, random_f32, random_i32,
+    random_u8, random_u32, random_usize, run_game,
 };
 
 // wgpu 后端（跨平台桌面，wgpu-backend 优先）
 #[cfg(feature = "wgpu-backend")]
 pub use self::desktop::{
-    random_i32, random_usize, random_u32, random_u8, random_f32,
-    now_ms,
-    log_debug, log_info, log_warn, log_error,
-    DesktopStorage, DesktopAudio, DesktopDisplay, DesktopInput, DesktopTime, DesktopRandom, DesktopLog,
-    run_game,
+    DesktopAudio, DesktopDisplay, DesktopInput, DesktopLog, DesktopRandom, DesktopStorage,
+    DesktopTime, log_debug, log_error, log_info, log_warn, now_ms, random_f32, random_i32,
+    random_u8, random_u32, random_usize, run_game,
 };
 
 // Android 后端
 #[cfg(target_os = "android")]
 pub use self::android::{
-    random_i32, random_usize, random_u32, random_u8, random_f32,
-    now_ms,
-    log_debug, log_info, log_warn, log_error,
-    DesktopStorage, DesktopAudio, DesktopDisplay, DesktopInput, DesktopTime, DesktopRandom, DesktopLog,
-    run_game, android_main,
+    DesktopAudio, DesktopDisplay, DesktopInput, DesktopLog, DesktopRandom, DesktopStorage,
+    DesktopTime, android_main, log_debug, log_error, log_info, log_warn, now_ms, random_f32,
+    random_i32, random_u8, random_u32, random_usize, run_game,
 };
 
 // Web 平台（未来扩展）

@@ -4,8 +4,8 @@
 // 说明：历史版本此文件为自动生成的"硬编码数组"形式。
 // 当前版本改为：编译期嵌入 assets/sprites 目录，再在 Rust 中解析 Pascal db 数据并做 Mode X 去平面化。
 
-use crate::buffers::{ImageBuffer, ImageBuffer12x7, ImageBuffer20x24, ImageBuffer24x20};
 use crate::backgr::get_generated_asset;
+use crate::buffers::{ImageBuffer, ImageBuffer12x7, ImageBuffer20x24, ImageBuffer24x20};
 
 /// 调色板静态数组，索引0-159，每个元素为RGBA值
 pub static PALETTE: [(u8, u8, u8, u8); 160] = [
@@ -266,34 +266,6 @@ impl SpriteLoader {
         (base, frame_u16)
     }
 
-    fn parse_pascal_asm_db(src: &str) -> Vec<u8> {
-        fn parse_byte(tok: &str) -> Option<u8> {
-            let t = tok.trim().trim_end_matches(',');
-            if t.is_empty() {
-                return None;
-            }
-            if let Some(hex) = t.strip_prefix('$') {
-                u8::from_str_radix(hex, 16).ok()
-            } else {
-                t.parse::<u8>().ok()
-            }
-        }
-
-        let mut out: Vec<u8> = Vec::new();
-        for line in src.lines() {
-            let l = line.trim_start();
-            if !l.starts_with("db") && !l.starts_with("DB") {
-                continue;
-            }
-            for raw in l[2..].split(|c: char| c == ' ' || c == '\t' || c == ',') {
-                if let Some(b) = parse_byte(raw) {
-                    out.push(b);
-                }
-            }
-        }
-        out
-    }
-
     fn load_raw_sprite_bytes(&self, base: &str, frame: u16) -> Vec<u8> {
         // 优先使用 .$00 这类 Pascal include 文件
         let ext_inc = format!("${:02}", frame);
@@ -324,8 +296,7 @@ impl SpriteLoader {
         // No runtime fallback: generated assets must contain the files.
         panic!(
             "sprite file not found (must be generated): {} or {}",
-            inc_name,
-            bin_name
+            inc_name, bin_name
         );
     }
 
@@ -346,7 +317,7 @@ impl SpriteLoader {
         //
         // 格式：[plane0: all_rows] [plane1: all_rows] [plane2: all_rows] [plane3: all_rows]
         // 每个平面有 (w/4) * h 字节
-        
+
         assert!(
             w % 4 == 0,
             "ModeX requires width divisible by 4: {} w={}",
@@ -358,7 +329,7 @@ impl SpriteLoader {
         let bytes_per_line = w / 4;
         let plane_size = bytes_per_line * h;
         let mut out = vec![0u8; w * h];
-        
+
         for y in 0..h {
             for x in 0..w {
                 let plane = x & 3;
@@ -367,19 +338,19 @@ impl SpriteLoader {
                 out[y * w + x] = bytes[src_idx];
             }
         }
-        
+
         out
     }
 
     fn pixels<const WW: usize, const HH: usize>(&self, field_name: &str) -> Vec<u8> {
         let (base, frame) = Self::parse_field_name(field_name);
         let bytes = self.load_raw_sprite_bytes(base, frame);
-        
+
         // 所有精灵使用标准的 ModeX 平面优先格式（包括 WOOD）
         // Pascal 的 DrawImage 实现确认了这一点
         self.modex_deplane(field_name, &bytes, WW, HH)
     }
-    
+
     fn buf<const WW: usize, const HH: usize>(&self, field_name: &str) -> [[u8; WW]; HH] {
         let pixels = self.pixels::<WW, HH>(field_name);
         let mut out = [[0u8; WW]; HH];
@@ -802,111 +773,219 @@ impl SpriteDataManager {
 // GPU 纹理图集构建
 // ============================================================================
 
-use crate::gpu::texture_atlas::{TextureAtlas, SpriteUV};
+use crate::gpu::texture_atlas::{SpriteUV, TextureAtlas};
 
 // 精灵ID枚举 - 用于快速查找图集中的精灵
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[repr(u16)]
 pub enum SpriteId {
     // 地形精灵
-    BROWN_000, BROWN_001, BROWN_002, BROWN_003, BROWN_004,
-    PIPE_000, PIPE_001, PIPE_002, PIPE_003,
-    GREEN_000, GREEN_001, GREEN_002, GREEN_003, GREEN_004,
-    SAND_000, SAND_001, SAND_002, SAND_003, SAND_004,
-    GRASS_000, GRASS_001, GRASS_002, GRASS_003, GRASS_004,
-    DES_000, DES_001, DES_002, DES_003, DES_004,
-    BRICK0_000, BRICK0_001, BRICK0_002,
-    BRICK1_000, BRICK1_001, BRICK1_002,
-    BRICK2_000, BRICK2_001, BRICK2_002,
-    GRASS1_000, GRASS1_001, GRASS1_002,
-    GRASS2_000, GRASS2_001, GRASS2_002,
-    GRASS3_000, GRASS3_001, GRASS3_002,
-    PALM0_000, PALM0_001, PALM0_002,
-    PALM1_000, PALM1_001, PALM1_002,
-    PALM2_000, PALM2_001, PALM2_002,
-    PALM3_000, PALM3_001, PALM3_002,
-    
+    BROWN_000,
+    BROWN_001,
+    BROWN_002,
+    BROWN_003,
+    BROWN_004,
+    PIPE_000,
+    PIPE_001,
+    PIPE_002,
+    PIPE_003,
+    GREEN_000,
+    GREEN_001,
+    GREEN_002,
+    GREEN_003,
+    GREEN_004,
+    SAND_000,
+    SAND_001,
+    SAND_002,
+    SAND_003,
+    SAND_004,
+    GRASS_000,
+    GRASS_001,
+    GRASS_002,
+    GRASS_003,
+    GRASS_004,
+    DES_000,
+    DES_001,
+    DES_002,
+    DES_003,
+    DES_004,
+    BRICK0_000,
+    BRICK0_001,
+    BRICK0_002,
+    BRICK1_000,
+    BRICK1_001,
+    BRICK1_002,
+    BRICK2_000,
+    BRICK2_001,
+    BRICK2_002,
+    GRASS1_000,
+    GRASS1_001,
+    GRASS1_002,
+    GRASS2_000,
+    GRASS2_001,
+    GRASS2_002,
+    GRASS3_000,
+    GRASS3_001,
+    GRASS3_002,
+    PALM0_000,
+    PALM0_001,
+    PALM0_002,
+    PALM1_000,
+    PALM1_001,
+    PALM1_002,
+    PALM2_000,
+    PALM2_001,
+    PALM2_002,
+    PALM3_000,
+    PALM3_001,
+    PALM3_002,
+
     // 方块精灵
-    WOOD_000, XBLOCK_000,
-    BLOCK_000, BLOCK_001,
+    WOOD_000,
+    XBLOCK_000,
+    BLOCK_000,
+    BLOCK_001,
     COIN_000,
-    EXIT_000, EXIT_001,
+    EXIT_000,
+    EXIT_001,
     WPALM_000,
-    FENCE_000, FENCE_001,
-    SMTREE_000, SMTREE_001,
-    TREE_000, TREE_001, TREE_002, TREE_003,
-    WINDOW_000, WINDOW_001,
-    LAVA_000, LAVA_001,
+    FENCE_000,
+    FENCE_001,
+    SMTREE_000,
+    SMTREE_001,
+    TREE_000,
+    TREE_001,
+    TREE_002,
+    TREE_003,
+    WINDOW_000,
+    WINDOW_001,
+    LAVA_000,
+    LAVA_001,
     // 注意: Pascal 原版没有使用 LAVA2_000
-    LAVA2_001, LAVA2_002, LAVA2_003, LAVA2_004, LAVA2_005,
-    FALL_000, FALL_001,
-    NOTE_000, PIN_000,
-    QUEST_000, QUEST_001,
+    LAVA2_001,
+    LAVA2_002,
+    LAVA2_003,
+    LAVA2_004,
+    LAVA2_005,
+    FALL_000,
+    FALL_001,
+    NOTE_000,
+    PIN_000,
+    QUEST_000,
+    QUEST_001,
     PALBRICK_000,
-    
+
     // 道具精灵
-    CHAMP_000, POISON_000, LIFE_000, FLOWER_000, STAR_000,
-    
+    CHAMP_000,
+    POISON_000,
+    LIFE_000,
+    FLOWER_000,
+    STAR_000,
+
     // 火球/粒子
-    FIRE_000, FIRE_001, PART_000,
-    F_000, F_001, F_002, F_003,
-    
+    FIRE_000,
+    FIRE_001,
+    PART_000,
+    F_000,
+    F_001,
+    F_002,
+    F_003,
+
     // 敌人精灵
-    GRKOOPA_000, GRKOOPA_001,
-    RDKOOPA_000, RDKOOPA_001,
-    GRKP_000, GRKP_001,
-    RDKP_000, RDKP_001,
-    CHIBIBO_000, CHIBIBO_001, CHIBIBO_002, CHIBIBO_003,
+    GRKOOPA_000,
+    GRKOOPA_001,
+    RDKOOPA_000,
+    RDKOOPA_001,
+    GRKP_000,
+    GRKP_001,
+    RDKP_000,
+    RDKP_001,
+    CHIBIBO_000,
+    CHIBIBO_001,
+    CHIBIBO_002,
+    CHIBIBO_003,
     FISH_001,
-    PPLANT_000, PPLANT_001, PPLANT_002, PPLANT_003,
-    
+    PPLANT_000,
+    PPLANT_001,
+    PPLANT_002,
+    PPLANT_003,
+
     // 平台/其他
     LIFT1_000,
-    DONUT_000, DONUT_001,
+    DONUT_000,
+    DONUT_001,
     HIT_000,
-    WHHIT_000, WHFIRE_000,
-    RED_000, RED_001,
-    
+    WHHIT_000,
+    WHFIRE_000,
+    RED_000,
+    RED_001,
+
     // 玩家精灵 (Mario)
-    SWMAR_000, SWMAR_001,
-    SJMAR_000, SJMAR_001,
-    LWMAR_000, LWMAR_001,
-    LJMAR_000, LJMAR_001,
-    FWMAR_000, FWMAR_001,
-    FJMAR_000, FJMAR_001,
-    FFMAR_000,  // Fire-Firing Mario: 开火射击时的混合精灵(上半身手臂伸出+下半身站立)
-    
+    SWMAR_000,
+    SWMAR_001,
+    SJMAR_000,
+    SJMAR_001,
+    LWMAR_000,
+    LWMAR_001,
+    LJMAR_000,
+    LJMAR_001,
+    FWMAR_000,
+    FWMAR_001,
+    FJMAR_000,
+    FJMAR_001,
+    FFMAR_000, // Fire-Firing Mario: 开火射击时的混合精灵(上半身手臂伸出+下半身站立)
+
     // 玩家精灵 (Luigi)
-    LWLUI_000, LWLUI_001,
-    LJLUI_000, LJLUI_001,
-    SWLUI_000, SWLUI_001,
-    SJLUI_000, SJLUI_001,
-    FWLUI_000, FWLUI_001,
-    FJLUI_000, FJLUI_001,
-    FFLUI_000,  // Fire-Firing Luigi: 开火射击时的混合精灵(上半身手臂伸出+下半身站立)
-    
+    LWLUI_000,
+    LWLUI_001,
+    LJLUI_000,
+    LJLUI_001,
+    SWLUI_000,
+    SWLUI_001,
+    SJLUI_000,
+    SJLUI_001,
+    FWLUI_000,
+    FWLUI_001,
+    FJLUI_000,
+    FJLUI_001,
+    FFLUI_000, // Fire-Firing Luigi: 开火射击时的混合精灵(上半身手臂伸出+下半身站立)
+
     // 背景精灵
-    PALPILL_000, PALPILL_001, PALPILL_002,
-    
+    PALPILL_000,
+    PALPILL_001,
+    PALPILL_002,
+
     // Intro 大图
-    INTRO_000, INTRO_001, INTRO_002,
-    
+    INTRO_000,
+    INTRO_001,
+    INTRO_002,
+
     // FigList墙体精灵（运行时由init_wall填充，包含重着色和变换）
     // 对应Pascal的FigList[1, 1..13]
-    FIGLIST_01, FIGLIST_02, FIGLIST_03, FIGLIST_04, FIGLIST_05,
-    FIGLIST_06, FIGLIST_07, FIGLIST_08, FIGLIST_09, FIGLIST_10,
-    FIGLIST_11, FIGLIST_12, FIGLIST_13,
-    
+    FIGLIST_01,
+    FIGLIST_02,
+    FIGLIST_03,
+    FIGLIST_04,
+    FIGLIST_05,
+    FIGLIST_06,
+    FIGLIST_07,
+    FIGLIST_08,
+    FIGLIST_09,
+    FIGLIST_10,
+    FIGLIST_11,
+    FIGLIST_12,
+    FIGLIST_13,
+
     // 动态着色精灵（运行时填充，避免修改原始精灵）
-    WOOD_000_RT,    // 运行时重着色的WOOD
-    XBLOCK_000_RT,  // 运行时重着色的XBLOCK
-    BLOCK_001_RT,   // 运行时重着色的BLOCK
-    
+    WOOD_000_RT,   // 运行时重着色的WOOD
+    XBLOCK_000_RT, // 运行时重着色的XBLOCK
+    BLOCK_001_RT,  // 运行时重着色的BLOCK
+
     // 运行时砖块精灵（对齐 Oldsrc：BuildWorld 会把 BRICKx 重着色到 Figures.bricks[0..2]）
     BRICK_RT_000,
     BRICK_RT_001,
     BRICK_RT_002,
-    
+
     // 总数标记
     COUNT,
 }
@@ -922,44 +1001,45 @@ impl SpriteAtlas {
     pub fn get(&self, id: SpriteId) -> SpriteUV {
         self.uvs[id as usize]
     }
-    
+
     // 获取图集数据
     pub fn data(&self) -> &[u8] {
         self.atlas.data()
     }
-    
+
     // 获取图集尺寸
     pub fn size(&self) -> u32 {
         self.atlas.size
     }
-    
+
     /// 更新 FIGLIST 精灵（用于 init_walls 之后同步 GPU 纹理）
     /// 当关卡切换导致 wall_type 变化时，需要调用此方法更新 GPU 纹理
     pub fn update_figlist(&mut self, figures: &crate::figures::Figures) {
         for idx in 1..=13 {
             let pixels: Vec<u8> = figures.fig_list[0][idx].iter().flatten().copied().collect();
-            self.atlas.update_sprite(&format!("FIGLIST_{:02}", idx), &pixels);
+            self.atlas
+                .update_sprite(&format!("FIGLIST_{:02}", idx), &pixels);
         }
     }
-    
+
     /// 更新运行时动态精灵（WOOD_RT, XBLOCK_RT, BLOCK_RT）
     pub fn update_runtime_sprites(&mut self, figures: &crate::figures::Figures) {
         let wood_rt_pixels: Vec<u8> = figures.wood_rt.iter().flatten().copied().collect();
         self.atlas.update_sprite("WOOD_000_RT", &wood_rt_pixels);
-        
+
         let xblock_rt_pixels: Vec<u8> = figures.xblock_rt.iter().flatten().copied().collect();
         self.atlas.update_sprite("XBLOCK_000_RT", &xblock_rt_pixels);
-        
+
         let block_rt_pixels: Vec<u8> = figures.block_rt.iter().flatten().copied().collect();
         self.atlas.update_sprite("BLOCK_001_RT", &block_rt_pixels);
     }
-    
+
     /// 标记图集需要重新上传到 GPU（返回 true 表示有更新）
     pub fn needs_gpu_update(&self) -> bool {
         // 简化实现：每次更新后都需要重新上传
         true
     }
-    
+
     /// 获取敌人Chibibo精灵UV (frame: 0=正常, 1=扁平, sub_tp: 子类型)
     pub fn get_chibibo(&self, frame: usize, sub_tp: i32) -> SpriteUV {
         // Chibibo有两帧动画
@@ -970,7 +1050,7 @@ impl SpriteAtlas {
             _ => self.get(SpriteId::CHIBIBO_003),
         }
     }
-    
+
     /// 获取Koopa精灵UV (color: 0=绿, 1=红; frame: 0/1动画帧)
     pub fn get_koopa(&self, color: usize, frame: usize) -> SpriteUV {
         match (color, frame % 2) {
@@ -981,7 +1061,7 @@ impl SpriteAtlas {
             _ => self.get(SpriteId::GRKOOPA_000),
         }
     }
-    
+
     /// 获取Koopa龟壳精灵UV
     pub fn get_koopa_shell(&self, color: usize, frame: usize) -> SpriteUV {
         match (color, frame % 2) {
@@ -992,7 +1072,7 @@ impl SpriteAtlas {
             _ => self.get(SpriteId::GRKP_000),
         }
     }
-    
+
     /// 获取食人花精灵UV
     pub fn get_plant(&self, frame: usize) -> SpriteUV {
         match frame % 4 {
@@ -1002,7 +1082,7 @@ impl SpriteAtlas {
             _ => self.get(SpriteId::PPLANT_003),
         }
     }
-    
+
     /// 获取火球精灵UV
     pub fn get_fireball(&self, frame: usize) -> SpriteUV {
         match frame % 2 {
@@ -1010,7 +1090,7 @@ impl SpriteAtlas {
             _ => self.get(SpriteId::FIRE_001),
         }
     }
-    
+
     /// 获取玩家精灵UV
     /// player: 0=Mario, 1=Luigi
     /// state: 0=small walk, 1=small jump, 2=large walk, 3=large jump, 4=fire walk, 5=fire jump
@@ -1055,20 +1135,21 @@ impl SpriteDataManager {
     // figures: 包含fig_list（运行时墙体精灵）和动态着色精灵
     pub fn build_atlas(&self, figures: &crate::figures::Figures) -> SpriteAtlas {
         use crate::gpu::ATLAS_SIZE;
-        
+
         let mut atlas = TextureAtlas::new(ATLAS_SIZE);
         let mut uvs = Vec::with_capacity(SpriteId::COUNT as usize);
-        
+
         // 辅助宏：添加精灵到图集
         macro_rules! add_sprite {
             ($field:ident, $w:expr, $h:expr) => {{
                 let pixels: Vec<u8> = self.$field.iter().flatten().copied().collect();
-                let uv = atlas.add_sprite(stringify!($field), $w, $h, &pixels)
+                let uv = atlas
+                    .add_sprite(stringify!($field), $w, $h, &pixels)
                     .expect(concat!("Failed to add sprite: ", stringify!($field)));
                 uvs.push(uv);
             }};
         }
-        
+
         // 地形精灵 (20x14)
         add_sprite!(BROWN_000, 20, 14);
         add_sprite!(BROWN_001, 20, 14);
@@ -1129,7 +1210,7 @@ impl SpriteDataManager {
         add_sprite!(PALM3_000, 20, 14);
         add_sprite!(PALM3_001, 20, 14);
         add_sprite!(PALM3_002, 20, 14);
-        
+
         // 方块精灵 (20x14)
         add_sprite!(WOOD_000, 20, 14);
         add_sprite!(XBLOCK_000, 20, 14);
@@ -1164,66 +1245,66 @@ impl SpriteDataManager {
         add_sprite!(QUEST_000, 20, 14);
         add_sprite!(QUEST_001, 20, 14);
         add_sprite!(PALBRICK_000, 20, 14);
-        
+
         // 道具精灵 (20x14)
         add_sprite!(CHAMP_000, 20, 14);
         add_sprite!(POISON_000, 20, 14);
         add_sprite!(LIFE_000, 20, 14);
         add_sprite!(FLOWER_000, 20, 14);
         add_sprite!(STAR_000, 20, 14);
-        
+
         // 火球/粒子 (12x7)
         add_sprite!(FIRE_000, 12, 7);
         add_sprite!(FIRE_001, 12, 7);
         add_sprite!(PART_000, 12, 7);
-        
+
         // 火焰效果 (20x14)
         add_sprite!(F_000, 20, 14);
         add_sprite!(F_001, 20, 14);
         add_sprite!(F_002, 20, 14);
         add_sprite!(F_003, 20, 14);
-        
+
         // 敌人精灵 (20x24)
         add_sprite!(GRKOOPA_000, 20, 24);
         add_sprite!(GRKOOPA_001, 20, 24);
         add_sprite!(RDKOOPA_000, 20, 24);
         add_sprite!(RDKOOPA_001, 20, 24);
-        
+
         // 龟壳 (20x14)
         add_sprite!(GRKP_000, 20, 14);
         add_sprite!(GRKP_001, 20, 14);
         add_sprite!(RDKP_000, 20, 14);
         add_sprite!(RDKP_001, 20, 14);
-        
+
         // 栗子怪 (20x14)
         add_sprite!(CHIBIBO_000, 20, 14);
         add_sprite!(CHIBIBO_001, 20, 14);
         add_sprite!(CHIBIBO_002, 20, 14);
         add_sprite!(CHIBIBO_003, 20, 14);
-        
+
         // 鱼 (20x14)
         add_sprite!(FISH_001, 20, 14);
-        
+
         // 食人花 (24x20)
         add_sprite!(PPLANT_000, 24, 20);
         add_sprite!(PPLANT_001, 24, 20);
         add_sprite!(PPLANT_002, 24, 20);
         add_sprite!(PPLANT_003, 24, 20);
-        
+
         // 平台/其他 (20x14)
         add_sprite!(LIFT1_000, 20, 14);
         add_sprite!(DONUT_000, 20, 14);
         add_sprite!(DONUT_001, 20, 14);
-        
+
         // 碰撞效果 (24x20)
         add_sprite!(HIT_000, 24, 20);
-        
+
         // 其他 (20x14)
         add_sprite!(WHHIT_000, 20, 14);
         add_sprite!(WHFIRE_000, 20, 14);
         add_sprite!(RED_000, 20, 14);
         add_sprite!(RED_001, 20, 14);
-        
+
         // 玩家精灵 - Mario (20x28)
         add_sprite!(SWMAR_000, 20, 28);
         add_sprite!(SWMAR_001, 20, 28);
@@ -1237,7 +1318,7 @@ impl SpriteDataManager {
         add_sprite!(FWMAR_001, 20, 28);
         add_sprite!(FJMAR_000, 20, 28);
         add_sprite!(FJMAR_001, 20, 28);
-        
+
         // FFMAR_000: 开火射击混合精灵 (Mario)
         // 对齐 Oldsrc draw_player 416-434行:
         //   上半身(FWMAR_001[0..20])绘制到y+1位置（向下偏移1像素）
@@ -1258,10 +1339,13 @@ impl SpriteDataManager {
             for row in 21..28 {
                 ffmar_pixels.extend_from_slice(&self.FWMAR_000[row]);
             }
-            uvs.push(atlas.add_sprite("FFMAR_000", 20, 28, &ffmar_pixels)
-                .expect("Failed to add sprite: FFMAR_000"));
+            uvs.push(
+                atlas
+                    .add_sprite("FFMAR_000", 20, 28, &ffmar_pixels)
+                    .expect("Failed to add sprite: FFMAR_000"),
+            );
         }
-        
+
         // 玩家精灵 - Luigi (20x28)
         add_sprite!(LWLUI_000, 20, 28);
         add_sprite!(LWLUI_001, 20, 28);
@@ -1275,7 +1359,7 @@ impl SpriteDataManager {
         add_sprite!(FWLUI_001, 20, 28);
         add_sprite!(FJLUI_000, 20, 28);
         add_sprite!(FJLUI_001, 20, 28);
-        
+
         // FFLUI_000: 开火射击混合精灵 (Luigi)
         // 对齐 Oldsrc draw_player（同Mario的偏移逻辑）
         {
@@ -1290,53 +1374,105 @@ impl SpriteDataManager {
             for row in 21..28 {
                 fflui_pixels.extend_from_slice(&self.FWLUI_000[row]);
             }
-            uvs.push(atlas.add_sprite("FFLUI_000", 20, 28, &fflui_pixels)
-                .expect("Failed to add sprite: FFLUI_000"));
+            uvs.push(
+                atlas
+                    .add_sprite("FFLUI_000", 20, 28, &fflui_pixels)
+                    .expect("Failed to add sprite: FFLUI_000"),
+            );
         }
-        
+
         // 背景精灵 (20x14)
         let palpill_pixels_0: Vec<u8> = self.PALPILL_000.pixels.iter().flatten().copied().collect();
-        uvs.push(atlas.add_sprite("PALPILL_000", 20, 14, &palpill_pixels_0).unwrap());
+        uvs.push(
+            atlas
+                .add_sprite("PALPILL_000", 20, 14, &palpill_pixels_0)
+                .unwrap(),
+        );
         let palpill_pixels_1: Vec<u8> = self.PALPILL_001.pixels.iter().flatten().copied().collect();
-        uvs.push(atlas.add_sprite("PALPILL_001", 20, 14, &palpill_pixels_1).unwrap());
+        uvs.push(
+            atlas
+                .add_sprite("PALPILL_001", 20, 14, &palpill_pixels_1)
+                .unwrap(),
+        );
         let palpill_pixels_2: Vec<u8> = self.PALPILL_002.pixels.iter().flatten().copied().collect();
-        uvs.push(atlas.add_sprite("PALPILL_002", 20, 14, &palpill_pixels_2).unwrap());
-        
+        uvs.push(
+            atlas
+                .add_sprite("PALPILL_002", 20, 14, &palpill_pixels_2)
+                .unwrap(),
+        );
+
         // Intro大图 (各种尺寸)
         let intro_pixels_0: Vec<u8> = self.INTRO_000.pixels.iter().flatten().copied().collect();
-        uvs.push(atlas.add_sprite("INTRO_000", 108, 28, &intro_pixels_0).unwrap());
+        uvs.push(
+            atlas
+                .add_sprite("INTRO_000", 108, 28, &intro_pixels_0)
+                .unwrap(),
+        );
         let intro_pixels_1: Vec<u8> = self.INTRO_001.pixels.iter().flatten().copied().collect();
-        uvs.push(atlas.add_sprite("INTRO_001", 24, 28, &intro_pixels_1).unwrap());
+        uvs.push(
+            atlas
+                .add_sprite("INTRO_001", 24, 28, &intro_pixels_1)
+                .unwrap(),
+        );
         let intro_pixels_2: Vec<u8> = self.INTRO_002.pixels.iter().flatten().copied().collect();
-        uvs.push(atlas.add_sprite("INTRO_002", 84, 28, &intro_pixels_2).unwrap());
-        
+        uvs.push(
+            atlas
+                .add_sprite("INTRO_002", 84, 28, &intro_pixels_2)
+                .unwrap(),
+        );
+
         // FigList墙体精灵（运行时由init_wall填充，参考Pascal设计）
         // fig_list[0][1..13]包含重着色和变换后的墙体精灵
         for idx in 1..=13 {
             let pixels: Vec<u8> = figures.fig_list[0][idx].iter().flatten().copied().collect();
-            let uv = atlas.add_sprite(&format!("FIGLIST_{:02}", idx), 20, 14, &pixels)
+            let uv = atlas
+                .add_sprite(&format!("FIGLIST_{:02}", idx), 20, 14, &pixels)
                 .expect(&format!("Failed to add FIGLIST_{:02}", idx));
             uvs.push(uv);
         }
-        
+
         // 运行时动态着色精灵（参考Pascal设计，保持原始精灵不可变）
         let wood_rt_pixels: Vec<u8> = figures.wood_rt.iter().flatten().copied().collect();
-        uvs.push(atlas.add_sprite("WOOD_000_RT", 20, 14, &wood_rt_pixels).unwrap());
-        
+        uvs.push(
+            atlas
+                .add_sprite("WOOD_000_RT", 20, 14, &wood_rt_pixels)
+                .unwrap(),
+        );
+
         let xblock_rt_pixels: Vec<u8> = figures.xblock_rt.iter().flatten().copied().collect();
-        uvs.push(atlas.add_sprite("XBLOCK_000_RT", 20, 14, &xblock_rt_pixels).unwrap());
-        
+        uvs.push(
+            atlas
+                .add_sprite("XBLOCK_000_RT", 20, 14, &xblock_rt_pixels)
+                .unwrap(),
+        );
+
         let block_rt_pixels: Vec<u8> = figures.block_rt.iter().flatten().copied().collect();
-        uvs.push(atlas.add_sprite("BLOCK_001_RT", 20, 14, &block_rt_pixels).unwrap());
-        
+        uvs.push(
+            atlas
+                .add_sprite("BLOCK_001_RT", 20, 14, &block_rt_pixels)
+                .unwrap(),
+        );
+
         // 运行时砖块精灵：对齐 Oldsrc 的 b'A' 渲染路径（使用 Figures.bricks 而不是原始 BRICKx 精灵）
         let brick0_rt_pixels: Vec<u8> = figures.bricks[0].iter().flatten().copied().collect();
-        uvs.push(atlas.add_sprite("BRICK_RT_000", 20, 14, &brick0_rt_pixels).unwrap());
+        uvs.push(
+            atlas
+                .add_sprite("BRICK_RT_000", 20, 14, &brick0_rt_pixels)
+                .unwrap(),
+        );
         let brick1_rt_pixels: Vec<u8> = figures.bricks[1].iter().flatten().copied().collect();
-        uvs.push(atlas.add_sprite("BRICK_RT_001", 20, 14, &brick1_rt_pixels).unwrap());
+        uvs.push(
+            atlas
+                .add_sprite("BRICK_RT_001", 20, 14, &brick1_rt_pixels)
+                .unwrap(),
+        );
         let brick2_rt_pixels: Vec<u8> = figures.bricks[2].iter().flatten().copied().collect();
-        uvs.push(atlas.add_sprite("BRICK_RT_002", 20, 14, &brick2_rt_pixels).unwrap());
-        
+        uvs.push(
+            atlas
+                .add_sprite("BRICK_RT_002", 20, 14, &brick2_rt_pixels)
+                .unwrap(),
+        );
+
         SpriteAtlas { atlas, uvs }
     }
 }

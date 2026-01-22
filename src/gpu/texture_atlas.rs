@@ -101,7 +101,13 @@ impl TextureAtlas {
     }
 
     // 添加精灵到图集
-    pub fn add_sprite(&mut self, name: &str, width: u32, height: u32, pixels: &[u8]) -> Option<SpriteUV> {
+    pub fn add_sprite(
+        &mut self,
+        name: &str,
+        width: u32,
+        height: u32,
+        pixels: &[u8],
+    ) -> Option<SpriteUV> {
         // 分配空间
         let (x, y) = self.packer.allocate(width, height)?;
 
@@ -113,7 +119,12 @@ impl TextureAtlas {
                 .copy_from_slice(&pixels[src_start..src_start + width as usize]);
         }
 
-        let uv = SpriteUV { x, y, width, height };
+        let uv = SpriteUV {
+            x,
+            y,
+            width,
+            height,
+        };
         self.sprites.insert(name.to_string(), uv);
         Some(uv)
     }
@@ -141,12 +152,12 @@ impl TextureAtlas {
             let height = uv.height;
             let x = uv.x;
             let y = uv.y;
-            
+
             // 检查像素数据长度是否正确
             if pixels.len() != (width * height) as usize {
                 return false;
             }
-            
+
             // 复制像素数据到图集对应位置
             for row in 0..height {
                 let src_start = (row * width) as usize;

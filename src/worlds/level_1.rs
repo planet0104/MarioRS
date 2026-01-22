@@ -57,12 +57,6 @@
 
 use crate::buffers::{H, MapBuffer, W, WorldOptions};
 
-// 关卡日志（已禁用）
-#[allow(unused_macros)]
-macro_rules! level_dbg {
-    ($($t:tt)*) => { };
-}
-
 // ============================================================================
 // 地图数据常量
 // ============================================================================
@@ -269,7 +263,7 @@ pub const LEVEL_1A_MAP: &[&[u8]] = &[
 /// 关卡 1B（地下隐藏房间）地图数据
 ///
 /// 从 Pascal `Level_1b` 精确移植，确保下水管后的金币房间布局一致。
-/// 
+///
 /// **重要：** 本关卡中 `0x57` ('W') 渲染为 WOOD.000.png（木质纹理墙壁），
 /// 颜色由 `OPTIONS_1B.wood_color = 0x48` 控制。
 pub const LEVEL_1B_MAP: &[&[u8]] = &[
@@ -414,40 +408,6 @@ impl Level1A {
     pub fn new() -> Self {
         Self {}
     }
-
-    // run 方法已删除 - 使用新的状态机驱动的 play.frame_update() 方法
-    // 地图数据和配置仍可通过 LEVEL_1A_MAP, OPTIONS_1A 等常量访问
-
-    /// 辅助函数：将字节数组地图转换为 MapBuffer
-    ///
-    /// Pascal 的地图是 array[0..179, 0..12] of Char (单字节字符)
-    /// Rust 需要转换为 [[char; NV]; MAX_WORLD_SIZE] 的二维数组
-    fn convert_map_from_bytes(map_bytes: &[&[u8]]) -> MapBuffer {
-        use crate::buffers::{MAX_WORLD_SIZE, NV};
-
-        // Pascal ReadWorld 逻辑使用 M^[X+1, i] 读取地图：
-        // 1. MapBuffer 的第 0 列是占位列，真实数据从列 1 开始
-        // 2. 通过检查 M^[X+1,1] = #0 作为地图结束标记，因此未提供的列必须为 #0（不是空格）
-        //
-        // 注意：Y 翻转发生在 Buffers::read_world 内部（W^[X, NV-i]），这里必须保持“原始列数据”不翻转。
-        let mut map = [['\0'; NV as usize]; MAX_WORLD_SIZE as usize + 1];
-
-        for (col, line) in map_bytes.iter().enumerate() {
-            let x = col + 1; // 关键：列偏移，严格对齐 Pascal 的 X+1 访问
-            if x > MAX_WORLD_SIZE as usize {
-                break;
-            }
-            for (y, &byte_val) in line.iter().enumerate() {
-                if y >= NV as usize {
-                    break;
-                }
-                // 保持 0..255 单字节值，与 Pascal/ISO-8859-1 一致（例如 0xF7/0xFE 等）
-                map[x][y] = byte_val as char;
-            }
-        }
-
-        map
-    }
 }
 
 // ============================================================================
@@ -522,9 +482,16 @@ impl Level1AStats {
     #[allow(dead_code)]
     pub fn print_stats(&self) {
         // 调试输出已禁用
-        let _ = (self.total_columns, self.total_rows, self.brick_count,
-                 self.question_block_count, self.enemy_count, self.coin_count,
-                 self.collectible_count, self.pipe_entrance_count);
+        let _ = (
+            self.total_columns,
+            self.total_rows,
+            self.brick_count,
+            self.question_block_count,
+            self.enemy_count,
+            self.coin_count,
+            self.collectible_count,
+            self.pipe_entrance_count,
+        );
     }
 }
 

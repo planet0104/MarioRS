@@ -3,8 +3,8 @@
 // 使用单次draw call渲染整个可见区域的地形tile
 // 支持滚动视口和tile动画
 
-use super::{GAME_WIDTH, GAME_HEIGHT};
-use crate::buffers::{NH, NV, W, H};
+use super::{GAME_HEIGHT, GAME_WIDTH};
+use crate::buffers::{H, NH, NV, W};
 
 /// Tile数据 - 存储可见区域的tile信息
 #[repr(C)]
@@ -56,9 +56,9 @@ impl TilemapData {
         // 可见区域：NH+2 x NV tiles (额外2列用于滚动过渡)
         let visible_width = (NH as usize) + 2;
         let visible_height = NV as usize;
-        
+
         let tiles = vec![vec![TileData::default(); visible_width]; visible_height];
-        
+
         Self {
             tiles,
             visible_width,
@@ -66,7 +66,7 @@ impl TilemapData {
             dirty: true,
         }
     }
-    
+
     /// 设置tile数据
     pub fn set_tile(&mut self, x: usize, y: usize, uv_offset: [f32; 2], uv_size: [f32; 2]) {
         if x < self.visible_width && y < self.visible_height {
@@ -74,7 +74,7 @@ impl TilemapData {
             self.dirty = true;
         }
     }
-    
+
     /// 清空所有tile
     pub fn clear(&mut self) {
         for row in &mut self.tiles {
@@ -84,7 +84,7 @@ impl TilemapData {
         }
         self.dirty = true;
     }
-    
+
     /// 获取tile数据的扁平化数组
     pub fn as_flat_data(&self) -> Vec<TileData> {
         let mut data = Vec::with_capacity(self.visible_width * self.visible_height);
@@ -93,21 +93,21 @@ impl TilemapData {
         }
         data
     }
-    
+
     /// 标记为干净（数据已上传）
     pub fn mark_clean(&mut self) {
         self.dirty = false;
     }
-    
+
     /// 检查是否需要更新
     pub fn is_dirty(&self) -> bool {
         self.dirty
     }
-    
+
     pub fn visible_width(&self) -> usize {
         self.visible_width
     }
-    
+
     pub fn visible_height(&self) -> usize {
         self.visible_height
     }
@@ -244,7 +244,7 @@ impl TilemapRenderer {
             label: Some("Tilemap Shader"),
             source: wgpu::ShaderSource::Wgsl(TILEMAP_SHADER.into()),
         });
-        
+
         // 绑定组布局
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("Tilemap Bind Group Layout"),
@@ -302,14 +302,14 @@ impl TilemapRenderer {
                 },
             ],
         });
-        
+
         // 管线布局
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Tilemap Pipeline Layout"),
             bind_group_layouts: &[&bind_group_layout],
             immediate_size: 0,
         });
-        
+
         // 渲染管线
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("Tilemap Pipeline"),
@@ -339,7 +339,7 @@ impl TilemapRenderer {
             multiview_mask: None,
             cache: None,
         });
-        
+
         // 初始uniform
         let uniform = TilemapUniform {
             view_offset: [0.0, 0.0],
@@ -347,7 +347,7 @@ impl TilemapRenderer {
             tile_size: [W as f32, H as f32],
             map_size: [(NH as usize + 2) as f32, NV as f32],
         };
-        
+
         // Uniform缓冲区
         let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Tilemap Uniform Buffer"),
@@ -355,7 +355,7 @@ impl TilemapRenderer {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        
+
         // Tile数据存储缓冲区
         let buffer_capacity = (NH as usize + 2) * NV as usize;
         let tile_data_buffer = device.create_buffer(&wgpu::BufferDescriptor {
@@ -364,7 +364,7 @@ impl TilemapRenderer {
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        
+
         // 绑定组
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Tilemap Bind Group"),
@@ -392,7 +392,7 @@ impl TilemapRenderer {
                 },
             ],
         });
-        
+
         Self {
             pipeline,
             uniform_buffer,
@@ -403,19 +403,19 @@ impl TilemapRenderer {
             buffer_capacity,
         }
     }
-    
+
     /// 更新视口偏移
     pub fn update_view(&mut self, queue: &wgpu::Queue, x_view: i32, y_view: i32) {
         self.uniform.view_offset = [x_view as f32, y_view as f32];
         queue.write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(&self.uniform));
     }
-    
+
     /// 上传tile数据
     pub fn upload_tile_data(&self, queue: &wgpu::Queue, data: &TilemapData) {
         let flat_data = data.as_flat_data();
         queue.write_buffer(&self.tile_data_buffer, 0, bytemuck::cast_slice(&flat_data));
     }
-    
+
     /// 渲染tilemap
     pub fn render<'a>(&'a self, render_pass: &mut wgpu::RenderPass<'a>) {
         render_pass.set_pipeline(&self.pipeline);

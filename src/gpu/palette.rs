@@ -39,7 +39,7 @@ impl PaletteGenerator {
     pub fn generate_fade(&self, fade_level: u32) -> [[u8; 4]; 256] {
         let mut result = [[0u8; 4]; 256];
         let factor = fade_level as f32 / 16.0;
-        
+
         for i in 0..256 {
             let [r, g, b, a] = self.base_palette[i];
             result[i] = [
@@ -55,11 +55,11 @@ impl PaletteGenerator {
     // 生成闪烁帧 (blink_phase: 0-15)
     pub fn generate_blink(&self, blink_phase: u32) -> [[u8; 4]; 256] {
         let mut result = self.base_palette;
-        
+
         // 闪烁效果: 特定颜色范围循环
         // 根据原版游戏的调色板动画逻辑
         let phase = blink_phase % 8;
-        
+
         // 金币/问号块闪烁 (索引范围待确定)
         for i in 0..8 {
             let src_idx = 80 + ((i + phase as usize) % 8);
@@ -68,32 +68,32 @@ impl PaletteGenerator {
                 result[dst_idx] = self.base_palette[src_idx];
             }
         }
-        
+
         result
     }
 
     // 生成所有预烘焙调色板帧
     pub fn generate_all_frames(&self) -> Vec<[[u8; 4]; 256]> {
         let mut frames = Vec::with_capacity(64);
-        
+
         // 索引0: 正常调色板
         frames.push(self.base_palette);
-        
+
         // 索引1-16: 淡入/淡出帧
         for level in 1..=16 {
             frames.push(self.generate_fade(level));
         }
-        
+
         // 索引17-32: 闪烁帧
         for phase in 0..16 {
             frames.push(self.generate_blink(phase));
         }
-        
+
         // 填充到64帧
         while frames.len() < 64 {
             frames.push(self.base_palette);
         }
-        
+
         frames
     }
 }

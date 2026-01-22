@@ -2,8 +2,8 @@
 //!
 //! 提供按键状态跟踪和事件缓冲的基础实现
 
-use std::collections::HashSet;
 use crate::platform::{KeyCode, KeyEvent};
+use std::collections::HashSet;
 
 /// 公共输入状态管理器
 ///

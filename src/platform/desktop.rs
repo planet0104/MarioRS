@@ -5,12 +5,11 @@
 //
 // 重要:只有这个模块依赖 winit,其他游戏模块通过 platform.rs 抽象访问
 
+use super::common::{CommonRandom, CommonTime, FileStorage, FrameTimer};
 use super::{
-    DisplayBackend, InputBackend,
-    KeyCode as PlatformKeyCode, KeyEvent as PlatformKeyEvent,
+    DisplayBackend, InputBackend, KeyCode as PlatformKeyCode, KeyEvent as PlatformKeyEvent,
     LogBackend, LogLevel,
 };
-use super::common::{CommonTime, CommonRandom, FileStorage, FrameTimer};
 use crate::gpu::GpuRenderer;
 
 use std::sync::Arc;
@@ -41,12 +40,12 @@ pub type DesktopStorage = FileStorage;
 /// 从assets文件夹加载窗口图标
 fn create_window_icon() -> Option<Icon> {
     const ICON_DATA: &[u8] = include_bytes!("../../assets/mario_icon_preview.png");
-    
+
     let img = image::load_from_memory(ICON_DATA).ok()?;
     let rgba_img = img.to_rgba8();
     let (width, height) = rgba_img.dimensions();
     let rgba_data = rgba_img.into_raw();
-    
+
     Icon::from_rgba(rgba_data, width, height).ok()
 }
 
@@ -78,59 +77,62 @@ impl DesktopDisplay {
             gpu_renderer: None,
         }
     }
-    
+
     pub fn gpu_renderer(&self) -> Option<&GpuRenderer> {
         self.gpu_renderer.as_ref()
     }
-    
+
     pub fn gpu_renderer_mut(&mut self) -> Option<&mut GpuRenderer> {
         self.gpu_renderer.as_mut()
     }
 
     /// 使用 ActiveEventLoop 创建窗口
-    pub fn create_window(&mut self, event_loop: &ActiveEventLoop) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn create_window(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         use winit::dpi::LogicalSize;
-        
+
         let size = LogicalSize::new(self.width as f64, self.height as f64);
         let icon = create_window_icon();
-        
+
         let window_attributes = Window::default_attributes()
             .with_title("Mario")
             .with_inner_size(size)
             .with_min_inner_size(size)
             .with_window_icon(icon)
             .with_visible(false);
-        
+
         let window = Arc::new(event_loop.create_window(window_attributes)?);
         let window_size = window.inner_size();
-        
+
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
             backends: Backends::VULKAN | Backends::GL,
             ..Default::default()
         });
-        
+
         let surface = instance.create_surface(window.clone())?;
-        
-        let adapter = futures::executor::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::HighPerformance,
-            compatible_surface: Some(&surface),
-            force_fallback_adapter: false,
-        }))?;
-        
-        let (device, queue) = futures::executor::block_on(adapter.request_device(
-            &wgpu::DeviceDescriptor {
+
+        let adapter =
+            futures::executor::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::HighPerformance,
+                compatible_surface: Some(&surface),
+                force_fallback_adapter: false,
+            }))?;
+
+        let (device, queue) =
+            futures::executor::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
                 label: Some("mario_device"),
                 required_features: wgpu::Features::empty(),
                 required_limits: wgpu::Limits::downlevel_webgl2_defaults(),
                 memory_hints: wgpu::MemoryHints::Performance,
                 experimental_features: wgpu::ExperimentalFeatures::disabled(),
                 trace: wgpu::Trace::Off,
-            },
-        ))?;
-        
+            }))?;
+
         let device = Arc::new(device);
         let queue = Arc::new(queue);
-        
+
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format: wgpu::TextureFormat::Bgra8UnormSrgb,
@@ -142,9 +144,9 @@ impl DesktopDisplay {
             desired_maximum_frame_latency: 2,
         };
         surface.configure(&device, &config);
-        
+
         let gpu_renderer = GpuRenderer::new(device.clone(), queue.clone(), config.format);
-        
+
         self.window = Some(window);
         self.wgpu_surface = Some(surface);
         self.wgpu_device = Some(device);
@@ -153,7 +155,7 @@ impl DesktopDisplay {
         self.gpu_renderer = Some(gpu_renderer);
         Ok(())
     }
-    
+
     pub fn show_window(&mut self) {
         if let Some(window) = &self.window {
             window.set_visible(true);
@@ -164,10 +166,14 @@ impl DesktopDisplay {
     pub fn has_window(&self) -> bool {
         self.window.is_some()
     }
-    
-    pub fn resize(&mut self, new_width: u32, new_height: u32) -> Result<(), Box<dyn std::error::Error>> {
-        if let (Some(surface), Some(device), Some(config)) = 
-            (&self.wgpu_surface, &self.wgpu_device, &mut self.wgpu_config) 
+
+    pub fn resize(
+        &mut self,
+        new_width: u32,
+        new_height: u32,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        if let (Some(surface), Some(device), Some(config)) =
+            (&self.wgpu_surface, &self.wgpu_device, &mut self.wgpu_config)
         {
             config.width = new_width.max(1);
             config.height = new_height.max(1);
@@ -187,8 +193,8 @@ impl DisplayBackend for DesktopDisplay {
     }
 
     fn present(&mut self) -> Result<(), String> {
-        if let (Some(surface), Some(gpu_renderer), Some(config)) = 
-            (&self.wgpu_surface, &self.gpu_renderer, &self.wgpu_config) 
+        if let (Some(surface), Some(gpu_renderer), Some(config)) =
+            (&self.wgpu_surface, &self.gpu_renderer, &self.wgpu_config)
         {
             let output = match surface.get_current_texture() {
                 Ok(t) => t,
@@ -197,11 +203,13 @@ impl DisplayBackend for DesktopDisplay {
                     return Err(e.to_string());
                 }
             };
-            let view = output.texture.create_view(&wgpu::TextureViewDescriptor::default());
-            
+            let view = output
+                .texture
+                .create_view(&wgpu::TextureViewDescriptor::default());
+
             gpu_renderer.update_scale(config.width, config.height);
             gpu_renderer.render_to_surface(&view);
-            
+
             output.present();
             Ok(())
         } else {
@@ -276,7 +284,7 @@ impl DesktopInput {
     pub fn handle_winit_key_event(&mut self, event: &KeyEvent) {
         let pressed = event.state == ElementState::Pressed;
         let key = winit_keycode_to_platform(&event.physical_key);
-        
+
         if pressed {
             self.key_states.insert(key);
         } else {
@@ -379,7 +387,7 @@ fn winit_keycode_to_platform(physical_key: &PhysicalKey) -> PlatformKeyCode {
 // 全局便捷函数 - 使用公共模块实现
 // ============================================================================
 
-pub use super::common::{random_i32, random_usize, random_u32, random_u8, random_f32, now_ms};
+pub use super::common::{now_ms, random_f32, random_i32, random_u8, random_u32, random_usize};
 
 thread_local! {
     static LOG: DesktopLog = DesktopLog::new();
@@ -405,7 +413,7 @@ pub fn log_error(msg: &str) {
 // 游戏应用程序 - 封装事件循环
 // ============================================================================
 
-use crate::game_runner::{GameState, print_startup_info, GAME_WIDTH, GAME_HEIGHT};
+use crate::game_runner::{GAME_HEIGHT, GAME_WIDTH, GameState, print_startup_info};
 use crate::platform::FrameResult;
 
 /// 游戏应用程序状态
@@ -431,10 +439,10 @@ impl GameApp {
             is_fullscreen: false,
         }
     }
-    
+
     fn toggle_fullscreen(&mut self) {
         use winit::window::Fullscreen;
-        
+
         if let Some(window) = &self.display.window {
             if self.is_fullscreen {
                 window.set_fullscreen(None);
@@ -462,17 +470,22 @@ impl ApplicationHandler for GameApp {
             eprintln!("[DEBUG] resumed: 创建GameState");
             let game_state = GameState::new();
             eprintln!("[DEBUG] resumed: GameState创建完成");
-            
+
             self.game_state = Some(game_state);
-            
+
             self.display.show_window();
             eprintln!("[DEBUG] resumed: 窗口已显示");
-            
+
             print_startup_info();
         }
     }
 
-    fn window_event(&mut self, event_loop: &ActiveEventLoop, _window_id: WindowId, event: WindowEvent) {
+    fn window_event(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        _window_id: WindowId,
+        event: WindowEvent,
+    ) {
         match event {
             WindowEvent::CloseRequested => {
                 if let Some(state) = &mut self.game_state {
@@ -491,20 +504,22 @@ impl ApplicationHandler for GameApp {
                     }
                 }
             }
-            WindowEvent::KeyboardInput { event: key_event, .. } => {
+            WindowEvent::KeyboardInput {
+                event: key_event, ..
+            } => {
                 let platform_key = winit_keycode_to_platform(&key_event.physical_key);
                 let is_pressed = key_event.state == ElementState::Pressed;
-                
+
                 if is_pressed && platform_key == PlatformKeyCode::F11 {
                     self.toggle_fullscreen();
                     return;
                 }
-                
+
                 if is_pressed && platform_key == PlatformKeyCode::Escape && self.is_fullscreen {
                     self.toggle_fullscreen();
                     return;
                 }
-                
+
                 if let Some(state) = &mut self.game_state {
                     let platform_event = crate::platform::KeyEvent {
                         key: platform_key,
@@ -534,7 +549,7 @@ impl ApplicationHandler for GameApp {
                     if let Some(gpu_renderer) = self.display.gpu_renderer_mut() {
                         state.submit_to_gpu(gpu_renderer);
                     }
-                    
+
                     let _ = self.display.present();
 
                     if result == FrameResult::Exit {
@@ -558,15 +573,15 @@ impl ApplicationHandler for GameApp {
 /// 运行游戏(平台入口函数)
 pub fn run_game() -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("[DEBUG] run_game: 开始");
-    
+
     #[cfg(feature = "logging")]
     {
-        use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
-        
+        use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
+
         let filter = EnvFilter::try_from_default_env()
             .unwrap_or_else(|_| EnvFilter::new("info"))
             .add_directive("wgpu_hal::vulkan=error".parse().unwrap());
-        
+
         tracing_subscriber::registry()
             .with(filter)
             .with(tracing_subscriber::fmt::layer())

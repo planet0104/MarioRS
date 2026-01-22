@@ -7,7 +7,8 @@ use crate::{
     blocks::Blocks,
     buffers::{
         Buffers, CAN_HOLD_YOU, CAN_STAND_ON, DIR_LEFT, DIR_RIGHT, DM_DEAD, DM_DOWN_INTO_PIPE,
-        DM_DOWN_OUT_OF_PIPE, DM_NO_DEMO, DM_UP_INTO_PIPE, DM_UP_OUT_OF_PIPE, EY1, H, HIDDEN, MD_FIRE, MD_LARGE, MD_SMALL, NH, NV, PL_LUIGI, PL_MARIO, PictureBufferFill, W,
+        DM_DOWN_OUT_OF_PIPE, DM_NO_DEMO, DM_UP_INTO_PIPE, DM_UP_OUT_OF_PIPE, EY1, H, HIDDEN,
+        MD_FIRE, MD_LARGE, MD_SMALL, NH, NV, PL_LUIGI, PL_MARIO, PictureBufferFill, W,
         WorldOptions,
     },
     enemies::{
@@ -15,12 +16,12 @@ use crate::{
     },
     figures::Figures,
     glitter::GlitterSystem,
-    music::MusicPlayer,
-    sprites::SpriteDataManager,
-    tmpobj::{TP_NOTE, TmpObjManager},
-    render_state::{MAX_PAGE, RenderState},
     gpu::sprite_batch::SpriteCommand,
     gpu::texture_atlas::SpriteUV,
+    music::MusicPlayer,
+    render_state::{MAX_PAGE, RenderState},
+    sprites::SpriteDataManager,
+    tmpobj::{TP_NOTE, TmpObjManager},
 };
 
 // 常量定义
@@ -38,10 +39,6 @@ pub const BLINK_TIME: i32 = 125;
 pub const STAR_TIME: i32 = 750;
 pub const GROW_TIME: i32 = 24;
 pub const MAX_SPEED: i32 = 2;
-
-// 类型常量
-const PLANE_H: usize = 2 * H as usize;
-const W_DIV4: usize = W as usize / 4;
 
 #[derive(Clone, Default)]
 pub struct ScreenRec {
@@ -366,10 +363,18 @@ impl Players {
     ) {
         // Demo模式由draw_demo处理
         if buffers.demo != DM_NO_DEMO {
-            self.draw_demo(buffers, figures, render_state, options, backgr, sprites, atlas);
+            self.draw_demo(
+                buffers,
+                figures,
+                render_state,
+                options,
+                backgr,
+                sprites,
+                atlas,
+            );
             return;
         }
-        
+
         // 闪烁时隔帧不渲染
         if self.blinking && (self.blink_counter % 2 != 0) {
             return;
@@ -379,7 +384,7 @@ impl Players {
         let sprite_id = self.get_player_sprite_id_enum(buffers);
         let flip_x = self.direction == DIR_LEFT;
         let uv = atlas.get(sprite_id);
-        
+
         // 计算调色板偏移（变身/无敌星闪烁效果）
         let palette_offset = if enemies.star || self.growing {
             // 对齐 Oldsrc: color = (((GrowCounter + StarCounter) and 1) shl 4) - Ord(((...) and $0F) < 8)
@@ -388,14 +393,14 @@ impl Players {
         } else {
             0
         };
-        
+
         // 开火动画特殊处�?
         let player = buffers.player;
         let mode = buffers.data.mode[player] as usize;
         if mode == MD_FIRE && self.key_space && self.fire_counter < 7 {
             self.fire_counter += 1;
         }
-        
+
         // 添加精灵到GPU渲染队列
         // 对齐 Oldsrc: star/growing 时只画 recolor 版本，不能叠加画两次
         if palette_offset != 0 {
@@ -403,13 +408,13 @@ impl Players {
         } else {
             render_state.draw_sprite_flipped_world_gpu(self.x, self.y, uv, flip_x, false);
         }
-        
+
         self.old_x = self.x;
         self.old_y = self.y;
     }
 
     /// 擦除玩家（GPU模式下为空操作，每帧完整重绘�?
-    pub fn erase_player(&mut self, _render_state:RenderState) {
+    pub fn erase_player(&mut self, _render_state: RenderState) {
         // GPU模式下不需要擦除，每帧完整重绘
     }
 
@@ -430,8 +435,7 @@ impl Players {
         let _mode = buffers.data.mode[player] as usize;
         let flip_x = self.direction == 0; // DIR_LEFT = 0
 
-        let mut cmd = SpriteCommand::new(self.x, self.y, sprite_uv)
-            .with_flip(flip_x, false);
+        let mut cmd = SpriteCommand::new(self.x, self.y, sprite_uv).with_flip(flip_x, false);
 
         // 变身/无敌星闪烁效�?
         if self.growing || self.star_counter > 0 {
@@ -446,18 +450,22 @@ impl Players {
     /// 对齐 Oldsrc: 开火射击时(mode=MD_FIRE, key_space=true, fire_counter<7)使用混合精灵
     pub fn get_player_sprite_id_enum(&self, buffers: &Buffers) -> crate::sprites::SpriteId {
         use crate::sprites::SpriteId;
-        
+
         let player = buffers.player;
         let mode = buffers.data.mode[player] as usize;
         let is_mario = player == 0;
         let is_jumping = self.walking_mode != 0;
-        
+
         // 开火射击状态：使用混合精灵(上半身手臂伸出+下半身站立)
         // 对齐 Oldsrc draw_player 416-434行的逻辑
         if mode == MD_FIRE && self.key_space && self.fire_counter < 7 {
-            return if is_mario { SpriteId::FFMAR_000 } else { SpriteId::FFLUI_000 };
+            return if is_mario {
+                SpriteId::FFMAR_000
+            } else {
+                SpriteId::FFLUI_000
+            };
         }
-        
+
         match (mode, is_jumping, is_mario) {
             (0, false, true) => SpriteId::SWMAR_000,  // Small Walk Mario
             (0, true, true) => SpriteId::SJMAR_000,   // Small Jump Mario
@@ -474,7 +482,7 @@ impl Players {
             _ => SpriteId::SWMAR_000,
         }
     }
-    
+
     /// GPU模式：完整收集玩家精灵（使用SpriteAtlas自动获取UV�?
     pub fn collect_player_sprites_gpu(
         &self,
@@ -571,7 +579,13 @@ impl Players {
                     // 对齐 Oldsrc: draw_part_imagebuffer(0, draw_height) 绘制第0行到第draw_height行
                     // 实际绘制行数 = draw_height + 1，所以可见高度应为 2*H - demo_y
                     let visible_height = (2 * H - self.demo_y) as f32;
-                    push_partial(&mut commands, sx, sy + self.demo_y, uv, visible_height.min(uv.height as f32));
+                    push_partial(
+                        &mut commands,
+                        sx,
+                        sy + self.demo_y,
+                        uv,
+                        visible_height.min(uv.height as f32),
+                    );
                 }
                 DM_UP_INTO_PIPE | DM_DOWN_OUT_OF_PIPE => {
                     // 从管道出来动画：玩家逐渐出现
@@ -613,39 +627,43 @@ impl Players {
         if self.blinking && (self.blink_counter % 2 != 0) {
             return commands;
         }
-        
+
         let sprite_id = self.get_player_sprite_id_enum(buffers);
         let uv = atlas.get(sprite_id);
         // 精灵资源默认是朝左的，朝右时需要水平翻转
         let flip_x = self.direction == DIR_RIGHT;
-        
+
         // GPU渲染统一使用屏幕坐标
         let sx = self.x - buffers.x_view;
         let sy = self.y - buffers.y_view;
         let mut cmd = SpriteCommand::new(sx, sy, uv)
             .with_flip(flip_x, false)
             .with_palette(0, palette_index);
-        
+
         // 变身/无敌星闪烁效果
         if self.growing || star_active {
             let t = self.grow_counter + self.star_counter;
             let color_offset = (((t & 1) << 4) as i32) - (((t & 0xF) < 8) as i32);
             cmd = cmd.with_palette(color_offset, palette_index);
         }
-        
+
         // 开火动画：使用预生成的混合精灵FFMAR_000/FFLUI_000，对齐Oldsrc效果。
         // 混合精灵由FWMAR_001上半身+FWMAR_000下半身合成，实现"手臂伸出发射火球"姿势。
-        
+
         commands.push(cmd);
         commands
     }
-    
+
     /// GPU模式：获取当前玩家精灵ID (字符串版本，用于调试)
     pub fn get_player_sprite_id(&self, buffers: &Buffers) -> &'static str {
         let player = buffers.player;
         let mode = buffers.data.mode[player] as usize;
-        
-        let _prefix = if player == PL_MARIO as usize { "MAR" } else { "LUI" };
+
+        let _prefix = if player == PL_MARIO as usize {
+            "MAR"
+        } else {
+            "LUI"
+        };
         let mode_char = match mode {
             0 => 'S', // MD_SMALL
             1 => 'L', // MD_LARGE
@@ -654,7 +672,7 @@ impl Players {
         };
         let action = if self.walking_mode == 0 { 'W' } else { 'J' };
         let _frame = if self.direction == 0 { "000" } else { "001" };
-        
+
         // 返回精灵名称
         let is_mario = player == 0;
         match (mode_char, action, is_mario) {
@@ -721,7 +739,7 @@ impl Players {
                         // Y坐标在start_demo时已经调整过，动画结束后保持该位�?
                         let threshold = -small; // 对于大Mario�?，小Mario�?9
                         if self.demo_y > threshold {
-                            self.demo_y -= 1;  // Pascal: Dec(DemoY)
+                            self.demo_y -= 1; // Pascal: Dec(DemoY)
                             buffers.demo = DM_NO_DEMO;
                             // �?不要恢复Y坐标！Pascal没有这个操作
                         }
@@ -797,23 +815,23 @@ impl Players {
         if self.x_vel != 0 || self.y_vel != 0 || self.y % H != 0 {
             return;
         }
-        
+
         let mo = self.x % W;
         if mo < 4 || mo > W - 4 {
             return;
         }
-        
+
         // Pascal: AtCh1 in $E0..$E7 AND AtCh2 in $E0..$EF
         // 其中 AtCh2($E8..$EF) 用于跨世界特殊出口编码（例如$E9/$EA/$EB�?
         let below1_ok = self.below1 == b'0';
         let below2_ok = self.below2 == b'1';
         let at_ch1_ok = (0xE0..=0xE7).contains(&self.at_ch1);
         let at_ch2_ok = (0xE0..=0xEF).contains(&self.at_ch2);
-        
+
         if !below1_ok || !below2_ok || !at_ch1_ok || !at_ch2_ok {
             return;
         }
-        
+
         self.pipe_code[0] = self.at_ch1 as u8;
         self.pipe_code[1] = self.at_ch2 as u8;
         self.start_demo(DM_DOWN_INTO_PIPE, buffers, music_player);
@@ -1259,7 +1277,11 @@ impl Players {
 
                             // 只有mo==0时才bump+播放音效
                             if mo == 0 {
-                                blocks.bump_block(new_x2 * W, new_y * H, crate::sprites::SpriteId::QUEST_000);
+                                blocks.bump_block(
+                                    new_x2 * W,
+                                    new_y * H,
+                                    crate::sprites::SpriteId::QUEST_000,
+                                );
 
                                 // 瀵归�?Pascal锛歅C Speaker 鍚庣画闊虫晥浼氱粓姝㈠綋�?Beep�?
                                 // 如果顶出金币或道具，这里跳过 110Hz，直接交给后续音�?
@@ -1691,7 +1713,7 @@ impl Players {
         self.y += self.y_vel;
 
         let old_x_view = buffers.x_view;
-        
+
         // Pascal 原版滚动逻辑：所有场景（包括地下室）都正常滚�?
         buffers.x_view = buffers.x_view - if self.key_left_shift { 1 } else { 0 }
             + if self.key_right_shift { 1 } else { 0 };

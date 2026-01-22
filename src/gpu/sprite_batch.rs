@@ -1,7 +1,7 @@
 // 精灵批处理 - 收集渲染指令用于GPU批量渲染
 
-use super::{SpriteInstance, FillRect, ATLAS_SIZE};
 use super::texture_atlas::SpriteUV;
+use super::{ATLAS_SIZE, FillRect, SpriteInstance};
 
 // 精灵绘制命令
 #[derive(Clone, Debug)]
@@ -44,7 +44,7 @@ impl SpriteCommand {
         self.flip_y = flip_y;
         self
     }
-    
+
     /// 设置上下颠倒（等同于flip_y=true）
     pub fn with_upside_down(mut self) -> Self {
         self.flip_y = true;
@@ -85,20 +85,20 @@ impl SpriteCommand {
         .with_opaque(self.opaque)
         .with_rotation(self.rotation)
     }
-    
+
     /// 转换为部分可见的GPU实例（用于升起动画）
     /// visible_height: 可见的高度（像素）
     pub fn to_partial_instance(&self, visible_height: f32) -> SpriteInstance {
         let (uv_x, uv_y, uv_w, uv_h) = self.uv.normalized(ATLAS_SIZE);
         let full_height = self.uv.height as f32;
-        
+
         // 只显示底部的visible_height像素
         // 调整Y位置和UV
         let clip_ratio = visible_height / full_height;
         let clipped_uv_h = uv_h * clip_ratio;
         let clipped_uv_y = uv_y + uv_h - clipped_uv_h; // 从底部开始
         let clipped_y = self.y + full_height - visible_height;
-        
+
         SpriteInstance::new(
             self.x,
             clipped_y,
@@ -202,7 +202,7 @@ impl SpriteBatch {
     pub fn push_instance(&mut self, inst: SpriteInstance) {
         self.instances.push(inst);
     }
-    
+
     /// 添加部分可见精灵（用于升起动画）
     pub fn push_sprite_partial(&mut self, cmd: SpriteCommand, visible_height: f32) {
         let mut cmd = cmd;
@@ -241,27 +241,27 @@ impl SpriteBatch {
         }
         self.ui_fills.push(cmd);
     }
-    
+
     /// 直接添加简单精灵（便捷方法）
     pub fn add_sprite(&mut self, x: i32, y: i32, uv: SpriteUV) {
         self.push_sprite(SpriteCommand::new(x, y, uv));
     }
-    
+
     /// 添加翻转的精灵
     pub fn add_sprite_flipped(&mut self, x: i32, y: i32, uv: SpriteUV, flip_x: bool, flip_y: bool) {
         self.push_sprite(SpriteCommand::new(x, y, uv).with_flip(flip_x, flip_y));
     }
-    
+
     /// 添加上下颠倒的精灵
     pub fn add_sprite_upside_down(&mut self, x: i32, y: i32, uv: SpriteUV) {
         self.push_sprite(SpriteCommand::new(x, y, uv).with_upside_down());
     }
-    
+
     /// 添加带调色板偏移的精灵
     pub fn add_sprite_recolored(&mut self, x: i32, y: i32, uv: SpriteUV, palette_offset: i32) {
         self.push_sprite(SpriteCommand::new(x, y, uv).with_palette(palette_offset, 0));
     }
-    
+
     /// 添加填充矩形（便捷方法）
     pub fn add_fill(&mut self, x: i32, y: i32, w: i32, h: i32, color_index: u8) {
         self.push_fill(FillCommand::new(x, y, w, h, color_index));

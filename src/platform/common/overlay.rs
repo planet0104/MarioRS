@@ -94,7 +94,9 @@ pub fn draw_fps_to_overlay_rgba(
         let bitmap = glyph.bitmap();
 
         // 绘制阴影
-        draw_glyph(overlay, x_pos, y_pos, glyph_w, glyph_h, bitmap, shadow, 1, 1);
+        draw_glyph(
+            overlay, x_pos, y_pos, glyph_w, glyph_h, bitmap, shadow, 1, 1,
+        );
         // 绘制白色文字
         draw_glyph(overlay, x_pos, y_pos, glyph_w, glyph_h, bitmap, white, 0, 0);
 

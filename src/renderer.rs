@@ -13,15 +13,15 @@ use crate::enemies::Enemies;
 use crate::figures::Figures;
 use crate::glitter::GlitterSystem;
 use crate::gpu::RenderCommand;
-use crate::gpu::sprite_batch::SpriteBatch;
 use crate::gpu::sprite_batch::FillCommand;
+use crate::gpu::sprite_batch::SpriteBatch;
 use crate::players::Players;
+use crate::render_state::RenderState;
 use crate::sprites::{SpriteAtlas, SpriteDataManager};
 use crate::stars::Stars;
 use crate::status::Status;
 use crate::tmpobj::TmpObjManager;
 use crate::txt::Txt;
-use crate::render_state::RenderState;
 
 /// 渲染上下文 - 包含渲染一帧所需的所有引用
 pub struct RenderContext<'a> {
@@ -68,12 +68,12 @@ impl Renderer {
             only_draw: false,
         }
     }
-    
+
     /// GPU模式：开始帧渲染（清空批次）
     pub fn begin_gpu_frame(&self, render_state: &mut RenderState) {
         render_state.begin_gpu_frame();
     }
-    
+
     /// GPU模式：获取收集的渲染批次
     pub fn get_sprite_batch<'a>(&self, render_state: &'a RenderState) -> &'a SpriteBatch {
         render_state.get_sprite_batch()
@@ -84,11 +84,10 @@ impl Renderer {
         ctx.render_state.begin_gpu_frame();
         let commands = self.collect_gpu_frame(ctx, ctx.atlas);
         Self::submit_gpu_commands(ctx.render_state, commands);
-        ctx.figures.set_trace_enabled(false);
     }
 
     /// GPU版 - 渲染游戏主循环帧
-    /// 
+    ///
     /// GPU模式：每帧完全重绘，不需要hide/erase操作
     pub fn render_game_frame(&mut self, ctx: &mut RenderContext) {
         ctx.render_state.begin_gpu_frame();
@@ -96,7 +95,7 @@ impl Renderer {
         Self::submit_gpu_commands(ctx.render_state, commands);
     }
 
-    fn submit_gpu_commands(render_state:&mut RenderState, commands: Vec<RenderCommand>) {
+    fn submit_gpu_commands(render_state: &mut RenderState, commands: Vec<RenderCommand>) {
         // 当前实现每帧上传 row0 调色板，因此统一使用 palette_index=0
         // fade/blink 等效果会直接体现在  render_state.palette.palette 的内容里
         let palette_index: u32 = 0;
@@ -134,7 +133,10 @@ impl Renderer {
                     inst.flip[1] = 1.0;
                     batch.push_instance(inst);
                 }
-                RenderCommand::DrawSpritePart { mut sprite, visible_height } => {
+                RenderCommand::DrawSpritePart {
+                    mut sprite,
+                    visible_height,
+                } => {
                     let full_h = sprite.size[1];
                     if visible_height >= full_h {
                         batch.push_instance(sprite);
@@ -151,11 +153,11 @@ impl Renderer {
     }
 
     /// GPU模式：收集帧渲染命令
-    /// 
+    ///
     /// 替代render_game_frame，不直接绘制到VGA framebuffer，
     /// 而是收集所有渲染命令到Vec<RenderCommand>中，
     /// 最后由GpuRenderer统一提交到GPU
-    /// 
+    ///
     /// 渲染层级顺序:
     /// 1. 天空填充
     /// 2. 星星层
@@ -196,7 +198,7 @@ impl Renderer {
                 palette_index,
             )));
         }
-        
+
         // 1.1 地下室砖墙背景（严格对齐 Oldsrc）
         //
         // Oldsrc FIGURES.DrawSky(Sky=6/7/8, BackGrType=4) 会调用 BACKGR.DrawBricks，
@@ -204,20 +206,21 @@ impl Renderer {
         //
         // wgpu 模式下如果用 0x18 单色 fill 替代，会导致你反馈的现象：
         // WINDOW_001 能看到，但墙面底纹变成纯色(#717171)。
-        if matches!(ctx.buffers.options.sky_type, 6 | 7 | 8) && ctx.buffers.options.backgr_type == 4 {
-            use crate::sprites::SpriteId;
+        if matches!(ctx.buffers.options.sky_type, 6 | 7 | 8) && ctx.buffers.options.backgr_type == 4
+        {
             use crate::gpu::sprite_batch::SpriteCommand;
-            
+            use crate::sprites::SpriteId;
+
             let uv = atlas.get(SpriteId::PALBRICK_000);
-            let tw = uv.width as i32;  // 20
+            let tw = uv.width as i32; // 20
             let th = uv.height as i32; // 14
-            
+
             // 让砖块图案在“世界坐标”上保持对齐，随着 x_view/y_view 滚动。
             let x0 = -x_view.rem_euclid(tw);
             let y0 = -y_view.rem_euclid(th);
             let screen_w = crate::render_state::SCREEN_WIDTH;
             let screen_h = crate::render_state::VIR_SCREEN_HEIGHT;
-            
+
             let mut y = y0;
             while y < screen_h {
                 let mut x = x0;
@@ -237,7 +240,8 @@ impl Renderer {
         // 按 (x/20)%3 在 PALPILL_000/001/002 之间切换，形成黑色垂直渐变的柱子纹理。
         //
         // GPU 版用整屏 tile 平铺实现同样的像素效果（索引0也要绘制）。
-        if matches!(ctx.buffers.options.sky_type, 6 | 7 | 8) && ctx.buffers.options.backgr_type == 6 {
+        if matches!(ctx.buffers.options.sky_type, 6 | 7 | 8) && ctx.buffers.options.backgr_type == 6
+        {
             use crate::gpu::sprite_batch::SpriteCommand;
             use crate::sprites::SpriteId;
 
@@ -277,11 +281,15 @@ impl Renderer {
 
         // 2. 星星层（如果有）
         if has_stars {
-            ctx.stars.collect_stars_gpu(&mut commands, ctx.buffers, palette_index);
+            ctx.stars
+                .collect_stars_gpu(&mut commands, ctx.buffers, palette_index);
         }
 
         // 3. 背景装饰层：BackGrMap 形状（对齐 Oldsrc DrawBackGr 的云带/远景轮廓）
-        for f in ctx.backgr.collect_put_backgr_fills(x_view, &ctx.buffers.options) {
+        for f in ctx
+            .backgr
+            .collect_put_backgr_fills(x_view, &ctx.buffers.options)
+        {
             commands.push(RenderCommand::FillRect(crate::gpu::FillRect::new(
                 f.x,
                 f.y,
@@ -313,7 +321,10 @@ impl Renderer {
         // Intro 特例：对齐 Oldsrc WORLDS/INTRO.PAS::DrawIntroScreen 的 DrawBackGrMap
         // Oldsrc 调用顺序是先画标题，再 DrawBackGrMap，但通过 GetPixel>=0xC0 的 mask 避免覆盖前景/标题。
         // GPU 无读回，这里把 DrawBackGrMap 放到“地形之前”渲染，达到与 mask 等价的像素效果。
-        if self.only_draw && ctx.buffers.options.sky_type == 10 && ctx.buffers.options.backgr_type == 10 {
+        if self.only_draw
+            && ctx.buffers.options.sky_type == 10
+            && ctx.buffers.options.backgr_type == 10
+        {
             // Oldsrc: 云层/近景与山峰层使用同一套调用，但视觉上需要：
             // - 云层更圆（BOGEN26）
             // - 山峰更尖（MOUNT）
@@ -321,7 +332,13 @@ impl Renderer {
             let mount_map = crate::backgr::backgr_map_mount();
 
             // shift=54, color=0xA0：云层（圆）
-            for f in ctx.backgr.collect_backgr_map_fills_from_map(cloud_map, 10 * H + 6, 11 * H - 1, 54, 0xA0) {
+            for f in ctx.backgr.collect_backgr_map_fills_from_map(
+                cloud_map,
+                10 * H + 6,
+                11 * H - 1,
+                54,
+                0xA0,
+            ) {
                 commands.push(RenderCommand::FillRect(crate::gpu::FillRect::new(
                     f.x,
                     f.y,
@@ -332,7 +349,13 @@ impl Renderer {
                 )));
             }
             // shift=55/53, color=0xA1：山峰层（尖）
-            for f in ctx.backgr.collect_backgr_map_fills_from_map(mount_map, 10 * H + 6, 11 * H - 1, 55, 0xA1) {
+            for f in ctx.backgr.collect_backgr_map_fills_from_map(
+                mount_map,
+                10 * H + 6,
+                11 * H - 1,
+                55,
+                0xA1,
+            ) {
                 commands.push(RenderCommand::FillRect(crate::gpu::FillRect::new(
                     f.x,
                     f.y,
@@ -342,7 +365,13 @@ impl Renderer {
                     palette_index,
                 )));
             }
-            for f in ctx.backgr.collect_backgr_map_fills_from_map(mount_map, 10 * H + 6, 11 * H - 1, 53, 0xA1) {
+            for f in ctx.backgr.collect_backgr_map_fills_from_map(
+                mount_map,
+                10 * H + 6,
+                11 * H - 1,
+                53,
+                0xA1,
+            ) {
                 commands.push(RenderCommand::FillRect(crate::gpu::FillRect::new(
                     f.x,
                     f.y,
@@ -360,7 +389,7 @@ impl Renderer {
         let tile_start_y = 0;
         let visible_tiles_x = NH + 2;
         let visible_tiles_y = NV;
-        
+
         let tile_commands = ctx.figures.collect_visible_tiles_gpu(
             tile_start_x,
             tile_start_y,
@@ -376,11 +405,8 @@ impl Renderer {
 
         // 5. 敌人层
         if self.show_objects {
-            ctx.enemies.collect_enemy_sprites_gpu(
-                &mut commands,
-                ctx.buffers,
-                atlas,
-            );
+            ctx.enemies
+                .collect_enemy_sprites_gpu(&mut commands, ctx.buffers, atlas);
         }
 
         // 6. 玩家层
@@ -426,21 +452,14 @@ impl Renderer {
 
         // 7. 临时对象层
         if self.show_objects {
-            ctx.tmpobj.collect_temp_obj_sprites_gpu(
-                &mut commands,
-                ctx.buffers,
-                atlas,
-            );
+            ctx.tmpobj
+                .collect_temp_obj_sprites_gpu(&mut commands, ctx.buffers, atlas);
         }
 
         // 8. 方块动画层（bump效果）
         if self.show_objects {
-            ctx.blocks.collect_bump_sprites_gpu(
-                &mut commands,
-                x_view,
-                y_view,
-                atlas,
-            );
+            ctx.blocks
+                .collect_bump_sprites_gpu(&mut commands, x_view, y_view, atlas);
         }
 
         // 9. 状态栏UI
@@ -462,7 +481,8 @@ impl Renderer {
         }
 
         // 10. 闪光特效层
-        ctx.glitters.collect_glitter_gpu(&mut commands, x_view, y_view, palette_index);
+        ctx.glitters
+            .collect_glitter_gpu(&mut commands, x_view, y_view, palette_index);
         // GPU 模式下每帧完全重绘，不需要 hide_glitter，但必须按 Oldsrc 的节奏递减闪光计数
         ctx.glitters.update_glitter_gpu();
 
