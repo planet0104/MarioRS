@@ -436,7 +436,8 @@ pub struct SpriteDataManager {
 
     pub LAVA_000: ImageBuffer,
     pub LAVA_001: ImageBuffer,
-    // 注意: Pascal 原版没有使用 LAVA2_000, 岩浆底部由颜色5填充实现
+    // LAVA2_000: 岩浆底部纯红色精灵，用于 design=5 时替代 FillRect
+    pub LAVA2_000: ImageBuffer,
     pub LAVA2_001: ImageBuffer,
     pub LAVA2_002: ImageBuffer,
     pub LAVA2_003: ImageBuffer,
@@ -628,7 +629,8 @@ impl SpriteDataManager {
             WINDOW_001: b20x14("WINDOW_001"),
             LAVA_000: b20x14("LAVA_000"),
             LAVA_001: b20x14("LAVA_001"),
-            // 注意: Pascal 原版没有使用 LAVA2_000
+            // LAVA2_000: 岩浆底部纯红色精灵
+            LAVA2_000: b20x14("LAVA2_000"),
             LAVA2_001: b20x14("LAVA2_001"),
             LAVA2_002: b20x14("LAVA2_002"),
             LAVA2_003: b20x14("LAVA2_003"),
@@ -796,7 +798,8 @@ pub enum SpriteId {
     WINDOW_001,
     LAVA_000,
     LAVA_001,
-    // 注意: Pascal 原版没有使用 LAVA2_000
+    // LAVA2_000: 岩浆底部纯红色精灵
+    LAVA2_000,
     LAVA2_001,
     LAVA2_002,
     LAVA2_003,
@@ -1178,7 +1181,8 @@ impl SpriteDataManager {
         add_sprite!(WINDOW_001, 20, 14);
         add_sprite!(LAVA_000, 20, 14);
         add_sprite!(LAVA_001, 20, 14);
-        // 注意: Pascal 原版没有使用 LAVA2_000
+        // LAVA2_000: 岩浆底部纯红色精灵
+        add_sprite!(LAVA2_000, 20, 14);
         add_sprite!(LAVA2_001, 20, 14);
         add_sprite!(LAVA2_002, 20, 14);
         add_sprite!(LAVA2_003, 20, 14);

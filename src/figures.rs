@@ -5,7 +5,7 @@
 use crate::backgr::BackGr;
 use crate::buffers::{Buffers, EX, EY1, ImageBuffer, NV, WorldBuffer, WorldOptions};
 use crate::gpu::sprite_batch::{FillCommand, SpriteCommand};
-use crate::gpu::{FillRect, RenderCommand};
+use crate::gpu::RenderCommand;
 use crate::palettes::Palettes;
 use crate::render_state::RenderState;
 use crate::sprites::SpriteDataManager;
@@ -976,16 +976,11 @@ impl Figures {
                     None
                 }
                 5 => {
-                    // design=5时填充颜色5
-                    // Pascal: vga.fill_world(xpos, ypos, W, H, 5)
-                    commands.push(RenderCommand::FillRect(FillRect::new(
-                        xpos as f32,
-                        ypos as f32,
-                        crate::buffers::W as f32,
-                        crate::buffers::H as f32,
-                        5,
-                        0,
-                    )));
+                    // design=5: 使用 LAVA2_000 精灵渲染岩浆底部
+                    let uv = atlas.get(SpriteId::LAVA2_000);
+                    commands.push(RenderCommand::Sprite(
+                        SpriteCommand::new(xpos, ypos, uv).with_opaque(true),
+                    ));
                     None
                 }
                 _ => None,
@@ -1047,13 +1042,14 @@ impl Figures {
                     // LAVA2 动画 (001~005)
                     // 注意: 原版中没有 LAVA2_000 精灵, 底部红色由 '#' 字符的颜色5填充实现
                     let idx = ((x + (buffers.lava_counter as i32 / 8)) % 5) as u8;
-                    Some(match idx {
+                    let sprite_id = match idx {
                         0 => SpriteId::LAVA2_001,
                         1 => SpriteId::LAVA2_002,
                         2 => SpriteId::LAVA2_003,
                         3 => SpriteId::LAVA2_004,
                         _ => SpriteId::LAVA2_005,
-                    })
+                    };
+                    Some(sprite_id)
                 }
                 _ => None,
             },
