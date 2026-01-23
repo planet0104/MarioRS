@@ -1029,32 +1029,7 @@ impl Play {
                     buffers.text_counter = 0;
                 }
                 buffers.text_counter += 1;
-
-                if !self.show_score
-                    && (buffers.text_counter >= 50 && buffers.text_counter <= 50 + MAX_PAGE)
-                {
-                    txt.set_font(0, FontStyle::BOLD | FontStyle::SHADOW);
-                    txt.center_text(
-                        render_state,
-                        20,
-                        &buffers.player_name[cur_player as usize],
-                        0x1E,
-                        buffers.x_view,
-                        SCREEN_WIDTH,
-                    );
-                    txt.set_font(1, FontStyle::BOLD | FontStyle::SHADOW);
-                    txt.center_text(
-                        render_state,
-                        40,
-                        "STAGE CLEAR!",
-                        31,
-                        buffers.x_view,
-                        SCREEN_WIDTH,
-                    );
-                    if buffers.text_counter == 50 + MAX_PAGE {
-                        self.show_score = true;
-                    }
-                }
+                // 注意：show_score 的设置已移到 if self.waiting 分支中
             } else if buffers.game_done {
                 // Pascal一致性: lives不能为负数, 0表示本玩家GameOver
                 let idx = cur_player as usize;
@@ -1075,6 +1050,11 @@ impl Play {
             buffers.text_counter += 1;
 
             if buffers.passed {
+                // 当 text_counter >= 50 时，设置 show_score = true
+                // 对应 Pascal 截图: "STAGE CLEAR!" 和 "TOTAL SCORE" 同时显示
+                if !self.show_score && buffers.text_counter >= 50 {
+                    self.show_score = true;
+                }
                 if buffers.text_counter > 250 {
                     self.waiting = false;
                     // 启动非阻塞渐隐（对应Pascal FadeDown(64)）
@@ -1084,25 +1064,8 @@ impl Play {
                 }
             } else if buffers.data.lives[cur_player as usize] == 0 {
                 // 当前玩家生命为0，显示 GAME OVER 后切换到另一个玩家
+                // 注意：文字渲染已移到 render_game_frame 之后，避免被 begin_gpu_frame 清除
                 if buffers.text_counter >= 100 && buffers.text_counter <= 100 + MAX_PAGE {
-                    txt.set_font(0, FontStyle::BOLD | FontStyle::SHADOW);
-                    txt.center_text(
-                        render_state,
-                        20,
-                        &buffers.player_name[cur_player as usize],
-                        0x1E,
-                        buffers.x_view,
-                        SCREEN_WIDTH,
-                    );
-                    txt.set_font(1, FontStyle::BOLD | FontStyle::SHADOW);
-                    txt.center_text(
-                        render_state,
-                        40,
-                        "GAME OVER",
-                        31,
-                        buffers.x_view,
-                        SCREEN_WIDTH,
-                    );
                     self.show_score = true;
                 }
                 if buffers.text_counter > 350 {
@@ -1199,6 +1162,58 @@ impl Play {
             // 对齐 原版：游戏过程中状态栏一直显示（地下室也一样）
             self.renderer.show_status = true;
             self.renderer.render_game_frame(&mut ctx);
+        }
+
+        // 关卡结束文字渲染（必须在 render_game_frame 之后，避免被 begin_gpu_frame 清除）
+        // 对应Pascal截图: "STAGE CLEAR!" 和 "TOTAL SCORE" 同时显示直到关卡结束
+        // 条件: passed && waiting && text_counter >= 50
+        // 必须检查 waiting，避免在管道动画期间提前显示（此时 text_counter 可能已增加但还未重置）
+        if buffers.passed && self.waiting && buffers.text_counter >= 50 {
+            // 显示 "STAGE CLEAR!" 文字
+            txt.set_font(0, FontStyle::BOLD | FontStyle::SHADOW);
+            txt.center_text_ui(
+                render_state,
+                20,
+                &buffers.player_name[cur_player as usize],
+                0x1E,
+                buffers.x_view,
+                SCREEN_WIDTH,
+            );
+            txt.set_font(1, FontStyle::BOLD | FontStyle::SHADOW);
+            txt.center_text_ui(
+                render_state,
+                40,
+                "STAGE CLEAR!",
+                31,
+                buffers.x_view,
+                SCREEN_WIDTH,
+            );
+        }
+
+        // 玩家死亡后显示 "GAME OVER" 文字
+        if self.waiting
+            && buffers.data.lives[cur_player as usize] == 0
+            && buffers.text_counter >= 100
+            && buffers.text_counter <= 100 + MAX_PAGE
+        {
+            txt.set_font(0, FontStyle::BOLD | FontStyle::SHADOW);
+            txt.center_text_ui(
+                render_state,
+                20,
+                &buffers.player_name[cur_player as usize],
+                0x1E,
+                buffers.x_view,
+                SCREEN_WIDTH,
+            );
+            txt.set_font(1, FontStyle::BOLD | FontStyle::SHADOW);
+            txt.center_text_ui(
+                render_state,
+                40,
+                "GAME OVER",
+                31,
+                buffers.x_view,
+                SCREEN_WIDTH,
+            );
         }
 
         if self.show_score {
@@ -1475,7 +1490,9 @@ impl Play {
             }
         }
         let text = format!("TOTAL SCORE:{}", s);
-        txt.center_text(render_state, 120, &text, 31, buffers.x_view, SCREEN_WIDTH);
+        // 使用UI层渲染，确保分数文字在所有精灵之上显示
+        // 对应Pascal版本ShowTotalBack在DrawPlayer之后、ShowStatus之前的渲染顺序
+        txt.center_text_ui(render_state, 120, &text, 31, buffers.x_view, SCREEN_WIDTH);
     }
 
     pub fn show_total_back(
@@ -1955,7 +1972,8 @@ impl Play {
                 self.pause_text.push(decoded as char);
             }
             // GPU渲染每帧完全重绘，不需要背景保存/恢复
-            txt.center_text(
+            // 使用UI层渲染确保在精灵之上显示
+            txt.center_text_ui(
                 render_state,
                 85,
                 &self.pause_text,
