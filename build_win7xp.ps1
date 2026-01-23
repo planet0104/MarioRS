@@ -1,5 +1,6 @@
 # Windows 7/XP 兼容版本编译脚本
 # 使用 YY-Thunks 提供 API 兼容层，解决 api-ms-win-core-synch-l1-2-0.dll 等依赖问题
+# 使用 cpu-backend 纯CPU软件渲染，无需wgpu/Vulkan/DirectX 12
 # 禁用 dark-theme feature 以移除 dwmapi.dll 依赖
 #
 # 适用系统：
@@ -9,10 +10,11 @@
 #
 # 功能：
 # 1. 链接 YY-Thunks 提供旧版 Windows 缺失的 API 实现
-# 2. 移除暗黑主题适配功能（需要 Win10 20H1+ dwmapi.dll 新 API）
-# 3. 设置正确的子系统版本
+# 2. 使用纯CPU软件渲染（通过GDI显示），无GPU依赖
+# 3. 移除暗黑主题适配功能（需要 Win10 20H1+ dwmapi.dll 新 API）
+# 4. 设置正确的子系统版本
 #
-# 注意：默认版本（不使用此脚本）仅支持 Windows 10+
+# 注意：默认版本（不使用此脚本）使用wgpu GPU渲染，仅支持 Windows 7+
 
 param(
     [ValidateSet("x86", "x64")]
@@ -83,16 +85,17 @@ if (-not (Test-Path $objPath)) {
 
 Write-Host "Target: $target" -ForegroundColor Yellow
 Write-Host "YY-Thunks: $objPath" -ForegroundColor Yellow
-Write-Host "Features: gdi-backend (dark-theme disabled)" -ForegroundColor Yellow
+Write-Host "Features: cpu-backend (CPU software rendering, dark-theme disabled)" -ForegroundColor Yellow
+Write-Host "Rendering: Pure CPU + GDI (no GPU required)" -ForegroundColor Yellow
 Write-Host "Compatible: Windows XP SP3 / 7 / 8 / 10 / 11" -ForegroundColor Yellow
 Write-Host ""
 
 # 设置环境变量启用 YY-Thunks 链接
 $env:MARIO_XP_COMPAT = "1"
 
-# 编译
+# 编译 (使用 --bin mario 只编译可执行文件，避免生成 cdylib dll)
 Write-Host "Building..." -ForegroundColor Cyan
-cargo build --release --target $target --no-default-features --features gdi-backend
+cargo build --release --target $target --no-default-features --features cpu-backend --bin mario
 
 if ($LASTEXITCODE -ne 0) {
     Write-Host ""

@@ -9,8 +9,8 @@
 
 use crate::buffers::GameData;
 use crate::mario::{ConfigData, MAX_SAVE};
-use crate::platform::{DesktopStorage, log_info, log_warn, log_error, StorageBackend};
 use crate::persist as ps;
+use crate::platform::{DesktopStorage, StorageBackend, log_error, log_info, log_warn};
 
 /// 配置文件存储键名
 const CONFIG_KEY: &str = "mario.cfg";
@@ -29,13 +29,13 @@ pub fn new_game_data() -> GameData {
 }
 
 /// 读取配置文件
-/// 
+///
 /// 对应 Pascal ReadConfig 过程（MARIO.PAS line 108-148）
-/// 
+///
 /// 如果配置文件不存在或读取失败，返回默认配置
 pub fn read_config() -> ConfigData {
     let storage = DesktopStorage::new();
-    
+
     // 尝试读取配置文件
     if let Some(buffer) = storage.load(CONFIG_KEY) {
         // 尝试手动反序列化（小端）
@@ -48,7 +48,7 @@ pub fn read_config() -> ConfigData {
     } else {
         log_info("配置文件不存在，使用默认配置");
     }
-    
+
     // 返回默认配置
     // Pascal: 初始化所有存档槽位为空，设置默认选项
     let mut config = ConfigData::default();
@@ -57,19 +57,19 @@ pub fn read_config() -> ConfigData {
         config.games[i] = empty_data.clone();
         config.games[i].progress = [0, 0]; // 空存档
     }
-    config.sline = true;  // 默认显示状态栏
-    config.sound = true;  // 默认开启音效
+    config.sline = true; // 默认显示状态栏
+    config.sound = true; // 默认开启音效
     config.use_js = false; // 默认不使用手柄
-    
+
     config
 }
 
 /// 写入配置文件
-/// 
+///
 /// 对应 Pascal WriteConfig 过程（MARIO.PAS line 150-168）
 pub fn write_config(config: &ConfigData) -> bool {
     let mut storage = DesktopStorage::new();
-    
+
     // 序列化配置数据
     match serialize_config(config) {
         Ok(data) => {
@@ -88,7 +88,7 @@ pub fn write_config(config: &ConfigData) -> bool {
             log_error(&format!("序列化配置数据失败: {}", e));
         }
     }
-    
+
     false
 }
 
@@ -174,32 +174,32 @@ fn serialize_config(config: &ConfigData) -> Result<Vec<u8>, &'static str> {
 }
 
 /// 检查存档是否为空
-/// 
+///
 /// Pascal 逻辑：if (Progress[plMario] = 0) and (Progress[plLuigi] = 0) then 'EMPTY'
 pub fn is_save_empty(game: &GameData) -> bool {
     game.progress[0] == 0 && game.progress[1] == 0
 }
 
 /// 获取存档显示信息
-/// 
+///
 /// 返回类似 "LEVEL 3 * 2P" 的字符串（Pascal Intro 菜单中的存档显示）
 pub fn get_save_display(game: &GameData) -> String {
     if is_save_empty(game) {
         return "EMPTY".to_string();
     }
-    
+
     // 计算最高进度
     let mut level = game.progress[0].max(game.progress[1]);
     let is_turbo = level >= crate::mario::NUM_LEV as i16;
-    
+
     if is_turbo {
         level -= crate::mario::NUM_LEV as i16;
     }
-    
+
     // 生成显示字符串
     let turbo_mark = if is_turbo { "*" } else { "" };
     let players = game.num_players;
-    
+
     format!("LEVEL {} {} {}P", level + 1, turbo_mark, players)
 }
 
@@ -219,7 +219,7 @@ mod tests {
     fn test_is_save_empty() {
         let mut data = new_game_data();
         assert!(is_save_empty(&data));
-        
+
         data.progress[0] = 1;
         assert!(!is_save_empty(&data));
     }
@@ -228,7 +228,7 @@ mod tests {
     fn test_get_save_display() {
         let mut data = new_game_data();
         assert_eq!(get_save_display(&data), "EMPTY");
-        
+
         data.progress[0] = 2;
         data.num_players = 1;
         assert_eq!(get_save_display(&data), "LEVEL 3  1P");

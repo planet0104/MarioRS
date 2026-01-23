@@ -5,7 +5,7 @@
 // 1 WORLDS.PAS 内包含扩展字符，直接复制容易出现替换字符，从而丢失真实字节
 // 2 本文件的地图常量通过工具 tools/dump_level4_map.ps1 从原始字节导出
 
-use crate::buffers::{WorldOptions, H, W, NV, MAX_WORLD_SIZE};
+use crate::buffers::{H, W, WorldOptions};
 
 // ============================================================================
 // Level 4a 地图数据（主关卡）
@@ -228,8 +228,8 @@ pub const LEVEL_4B_MAP: &[&[u8]] = &[
     b"AAA         A",
     b"AAA\x89        A",
     b"AAA         A",
-    b"AAAJ      \xE002",  // 修复：0x89 -> 0xE0（管道出口标记，FindPipeExit会查找0xE0-0xEF范围）
-    b"AAAJ      \xE013",  // 修复：0x89 -> 0xE0（配对标记，必须与pipe_code[1]=0xE0匹配）
+    b"AAAJ      \xE002", // 修复：0x89 -> 0xE0（管道出口标记，FindPipeExit会查找0xE0-0xEF范围）
+    b"AAAJ      \xE013", // 修复：0x89 -> 0xE0（配对标记，必须与pipe_code[1]=0xE0匹配）
     b"AAA         A",
     b"AAA\x89        A",
     b"AAA         A",
@@ -455,23 +455,4 @@ impl Level4 {
     }
 
     // run 方法已删除 - 使用新的状态机驱动的 play.frame_update() 方法
-
-    fn convert_map_data(map_bytes: &[&[u8]]) -> [[char; NV as usize]; MAX_WORLD_SIZE as usize + 1] {
-        let mut map = [['\0'; NV as usize]; MAX_WORLD_SIZE as usize + 1];
-
-        for (col, line) in map_bytes.iter().enumerate() {
-            let x = col + 1;
-            if x > MAX_WORLD_SIZE as usize {
-                break;
-            }
-            for (y, &byte_val) in line.iter().enumerate() {
-                if y >= NV as usize {
-                    break;
-                }
-                map[x][y] = byte_val as char;
-            }
-        }
-
-        map
-    }
 }

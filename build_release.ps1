@@ -31,8 +31,11 @@ Write-Host "========================================" -ForegroundColor Cyan
 # - MSVC 链接器优化 (/OPT:REF, /OPT:ICF, /INCREMENTAL:NO)
 # 此处不设置 $env:RUSTFLAGS，避免覆盖配置文件
 
-# force Windows GDI backend with dark-theme support, disable default features for minimal size
-$featureArgs = @("--no-default-features", "--features", "gdi-backend,dark-theme")
+# force Windows GDI backend with wgpu rendering and dark-theme support
+# gdi-backend: 使用 GDI 创建窗口（比 winit 体积小）
+# wgpu-backend: 使用 wgpu GPU 渲染
+# dark-theme: 暗黑主题适配（Win10+）
+$featureArgs = @("--no-default-features", "--features", "gdi-backend,wgpu-backend,dark-theme")
 
 # ensure cargo-zbuild is available (cargo subcommand executable is cargo-zbuild)
 $cz = Get-Command cargo-zbuild -ErrorAction SilentlyContinue
@@ -52,22 +55,25 @@ if ($Nightly) {
 
     Write-Host "[2/3] Using nightly + cargo zbuild (build-std)..." -ForegroundColor Yellow
     Write-Host "  RUSTFLAGS: from .cargo/config.toml (CRT static + MSVC optimizations)" -ForegroundColor Gray
-    Write-Host "  Features: --no-default-features --features gdi-backend,dark-theme" -ForegroundColor Gray
+    Write-Host "  Features: --no-default-features --features gdi-backend,wgpu-backend,dark-theme" -ForegroundColor Gray
 
     # cargo zbuild 自带 build-std 优化，产生最小体积
+    # 使用 --bin mario 只编译可执行文件，避免生成 cdylib (mario.dll)
     cargo +nightly zbuild @featureArgs `
         -Z build-std=std,panic_abort `
-        --target x86_64-pc-windows-msvc
+        --target x86_64-pc-windows-msvc `
+        --bin mario
 
     $exePath = "target\x86_64-pc-windows-msvc\release\mario.exe"
 } else {
     Write-Host "`n[1/3] Building with stable toolchain via cargo zbuild..." -ForegroundColor Yellow
     Write-Host "  RUSTFLAGS: from .cargo/config.toml (CRT static + MSVC optimizations)" -ForegroundColor Gray
-    Write-Host "  Features: --no-default-features --features gdi-backend,dark-theme" -ForegroundColor Gray
+    Write-Host "  Features: --no-default-features --features gdi-backend,wgpu-backend,dark-theme" -ForegroundColor Gray
 
-    cargo zbuild @featureArgs --target x86_64-pc-windows-msvc
+    # 使用 --bin mario 只编译可执行文件，避免生成 cdylib (mario.dll)
+    cargo zbuild @featureArgs --target x86_64-pc-windows-msvc --bin mario
 
-    $exePath = "target\release\mario_rs.exe"
+    $exePath = "target\release\mario.exe"
 }
 
 if ($LASTEXITCODE -ne 0) {

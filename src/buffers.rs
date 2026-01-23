@@ -1,4 +1,4 @@
-use crate::vga256::MAX_PAGE;
+use crate::render_state::MAX_PAGE;
 
 pub const W: i32 = 20;
 pub const H: i32 = 14;
@@ -189,9 +189,9 @@ pub struct Buffers {
     pub x_view: i32,
     pub y_view: i32,
     pub last_x_view: [i32; (MAX_PAGE + 1) as usize],
-    pub star_backgr: StarBuffer, // StarBufferPtr
+    pub star_backgr: Box<StarBuffer>, // StarBufferPtr
     pub size: u16,
-    pub pictures: PictureBuffer, // PictureBufferPtr
+    pub pictures: Box<PictureBuffer>, // PictureBufferPtr
     pub demo: i32,
     pub text_counter: i32,
     pub lava_counter: u8,
@@ -242,20 +242,42 @@ impl Buffers {
     /// 创建并初始化所有缓冲区和资源
     pub fn new() -> Self {
         // WorldBuffer: [-EX..MAX_WORLD_SIZE-1+EX, -EY1..NV-1+EY2]
+
+        eprintln!("[DEBUG] Buffers::new: 开始.....");
+
         let w_width = (MAX_WORLD_SIZE + 2 * EX) as usize;
+
+        eprintln!("[DEBUG] Buffers::new: w_width = {}", w_width);
+        eprintln!("[DEBUG] Buffers::new: EX = {}", EX);
+        eprintln!("[DEBUG] Buffers::new: EY1 = {}", EY1);
+        eprintln!("[DEBUG] Buffers::new: EY2 = {}", EY2);
+        eprintln!("[DEBUG] Buffers::new: NV = {}", NV);
+        eprintln!("[DEBUG] Buffers::new: MAX_WORLD_SIZE = {}", MAX_WORLD_SIZE);
         let w_height = (NV + EY1 + EY2) as usize;
+
+        eprintln!("[DEBUG] Buffers::new: w_height = {}", w_height);
         let world_map = vec![vec![0; w_height]; w_width];
+
         let save_world_map = vec![vec![0; w_height]; w_width];
 
         // StarBuffer: [[u8; 320]; MAX_PAGE+1]
-        let star_backgr = [[0u8; 320]; MAX_PAGE as usize + 1];
+        let star_backgr = Box::new([[0u8; 320]; MAX_PAGE as usize + 1]);
 
         // PictureBuffer: 2玩家 × 3形态 × 4帧 × 2方向 × (2*H × W)
-        let pictures = [[[[PicBuffer::default(); 2]; 4]; 3]; 2];
+        // 使用堆分配避免在栈上构造大数组导致栈溢出
+        let pictures: Box<PictureBuffer> = {
+            let mut buf = Box::<std::mem::MaybeUninit<PictureBuffer>>::new_uninit();
+            unsafe {
+                std::ptr::write_bytes(buf.as_mut_ptr(), 0, 1);
+                // 兼容旧Rust版本，不依赖 Box<MaybeUninit<T>>::assume_init
+                let ptr = Box::into_raw(buf) as *mut PictureBuffer;
+                Box::from_raw(ptr)
+            }
+        };
 
         Self {
             player: 0,
-            data: GameData::new(),  // 必须使用 new() 而非 default()，确保 num_players = 1
+            data: GameData::new(), // 必须使用 new() 而非 default()，确保 num_players = 1
             world_number: String::new(),
             level_score: 0,
             timer: 0,

@@ -15,7 +15,7 @@ macro_rules! error {
 #[cfg(not(all(feature = "logging", debug_assertions)))]
 #[macro_export]
 macro_rules! error {
-    ($($arg:tt)*) => {}; 
+    ($($arg:tt)*) => {};
 }
 
 #[cfg(all(feature = "logging", debug_assertions))]
@@ -27,7 +27,7 @@ macro_rules! warn {
 #[cfg(not(all(feature = "logging", debug_assertions)))]
 #[macro_export]
 macro_rules! warn {
-    ($($arg:tt)*) => {}; 
+    ($($arg:tt)*) => {};
 }
 
 #[cfg(all(feature = "logging", debug_assertions))]
@@ -39,7 +39,7 @@ macro_rules! info {
 #[cfg(not(all(feature = "logging", debug_assertions)))]
 #[macro_export]
 macro_rules! info {
-    ($($arg:tt)*) => {}; 
+    ($($arg:tt)*) => {};
 }
 
 #[cfg(all(feature = "logging", debug_assertions))]
@@ -51,6 +51,5 @@ macro_rules! debug {
 #[cfg(not(all(feature = "logging", debug_assertions)))]
 #[macro_export]
 macro_rules! debug {
-    ($($arg:tt)*) => {}; 
+    ($($arg:tt)*) => {};
 }
-

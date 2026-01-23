@@ -9,43 +9,48 @@
 //! - 日志输出
 //! - 键盘事件获取
 //!
-//! 调色板、视口控制、背景保存等都是游戏逻辑，在 VGA/Buffers 模块内用纯 Rust 实现
+//! 调色板、视口控制、背景保存等都是游戏逻辑，在 RenderState/Buffers 模块内用纯 Rust 实现
 
 // ============================================================================
 // 子模块声明
 // ============================================================================
 
 pub mod audio;
+pub mod common;
 pub mod touch_panel;
 
-#[cfg(all(target_os = "windows", feature = "gdi-backend"))]
+// Windows GDI + wgpu 后端（需要同时启用 gdi-backend 和 wgpu-backend）
+#[cfg(all(target_os = "windows", feature = "gdi-backend", feature = "wgpu-backend", not(feature = "cpu-backend")))]
 mod windows;
+
+// Windows CPU 软件渲染后端（XP兼容）
+#[cfg(all(target_os = "windows", feature = "cpu-backend", not(feature = "wgpu-backend")))]
+mod windows_cpu;
 
 #[cfg(feature = "wgpu-backend")]
 mod desktop;
 
-#[cfg(target_os = "android")]
+// Android 后端（需要 wgpu-backend）
+#[cfg(all(target_os = "android", feature = "wgpu-backend"))]
 mod android;
 
 // ============================================================================
 // 显示后端 - 最底层的渲染抽象
 // ============================================================================
 
-/// 显示后端接口
+/// 显示后端接口（纯GPU模式）
 ///
 /// 不同平台的实现：
-/// - Desktop: pixels + wgpu
-/// - Windows GDI: Win32 GDI
-/// - Web: canvas 2D 或 WebGL
+/// - Desktop: wgpu (GPU加速)
+/// - Windows: wgpu (GPU加速)
+/// - Android: wgpu (GPU加速)
+/// - Web: WebGPU
 pub trait DisplayBackend {
-    /// 获取 framebuffer 的可变引用（RGBA8888 格式）
-    fn framebuffer_mut(&mut self) -> &mut [u8];
-
     /// 获取显示尺寸
     fn width(&self) -> u32;
     fn height(&self) -> u32;
 
-    /// 将 framebuffer 提交到屏幕显示
+    /// 提交渲染到屏幕显示
     fn present(&mut self) -> Result<(), String>;
 
     /// 请求窗口重绘
@@ -204,13 +209,44 @@ pub enum KeyCode {
     Backspace,
 
     // 字母键
-    KeyA, KeyB, KeyC, KeyD, KeyE, KeyF, KeyG, KeyH, KeyI, KeyJ,
-    KeyK, KeyL, KeyM, KeyN, KeyO, KeyP, KeyQ, KeyR, KeyS, KeyT,
-    KeyU, KeyV, KeyW, KeyX, KeyY, KeyZ,
+    KeyA,
+    KeyB,
+    KeyC,
+    KeyD,
+    KeyE,
+    KeyF,
+    KeyG,
+    KeyH,
+    KeyI,
+    KeyJ,
+    KeyK,
+    KeyL,
+    KeyM,
+    KeyN,
+    KeyO,
+    KeyP,
+    KeyQ,
+    KeyR,
+    KeyS,
+    KeyT,
+    KeyU,
+    KeyV,
+    KeyW,
+    KeyX,
+    KeyY,
+    KeyZ,
 
     // 数字键
-    Digit0, Digit1, Digit2, Digit3, Digit4,
-    Digit5, Digit6, Digit7, Digit8, Digit9,
+    Digit0,
+    Digit1,
+    Digit2,
+    Digit3,
+    Digit4,
+    Digit5,
+    Digit6,
+    Digit7,
+    Digit8,
+    Digit9,
 
     // 其他
     Unknown,
@@ -289,40 +325,58 @@ pub enum GamePhase {
 // 触摸面板公共模块导出
 // ============================================================================
 
-pub use touch_panel::{TouchAction, ButtonStates, VirtualButtonsRenderer, TouchPanelInput};
+pub use touch_panel::{ButtonStates, TouchAction, TouchPanelInput, VirtualButtonsRenderer};
 
 // ============================================================================
 // 平台实现导出 - 根据 feature 和目标平台选择
 // ============================================================================
 
-// Windows GDI 后端（仅 Windows + gdi-backend 且未启用 wgpu-backend）
-#[cfg(all(target_os = "windows", feature = "gdi-backend", not(feature = "wgpu-backend")))]
+// Windows GDI + wgpu 后端（需要 gdi-backend + wgpu-backend，且未启用 cpu-backend）
+#[cfg(all(
+    target_os = "windows",
+    feature = "gdi-backend",
+    feature = "wgpu-backend",
+    not(feature = "cpu-backend")
+))]
 pub use self::windows::{
-    random_i32, random_usize, random_u32, random_u8, random_f32,
-    now_ms,
-    log_debug, log_info, log_warn, log_error,
-    DesktopStorage, DesktopAudio, DesktopDisplay, DesktopInput, DesktopTime, DesktopRandom, DesktopLog,
-    run_game,
+    DesktopAudio, DesktopDisplay, DesktopInput, DesktopLog, DesktopRandom, DesktopStorage,
+    DesktopTime, log_debug, log_error, log_info, log_warn, now_ms, random_f32, random_i32,
+    random_u8, random_u32, random_usize, run_game,
 };
 
-// wgpu 后端（跨平台桌面，wgpu-backend 优先）
-#[cfg(feature = "wgpu-backend")]
+// Windows CPU 软件渲染后端（XP兼容，仅 Windows + cpu-backend 且未启用 wgpu-backend）
+#[cfg(all(
+    target_os = "windows",
+    feature = "cpu-backend",
+    not(feature = "wgpu-backend")
+))]
+pub use self::windows_cpu::{
+    DesktopAudio, DesktopDisplay, DesktopInput, DesktopLog, DesktopRandom, DesktopStorage,
+    DesktopTime, log_debug, log_error, log_info, log_warn, now_ms, random_f32, random_i32,
+    random_u8, random_u32, random_usize, run_game,
+};
+
+// wgpu 后端（跨平台桌面，使用 winit 窗口）
+// 注意：
+// - 在 Windows 上如果启用了 gdi-backend，则使用 windows.rs 而不是 desktop.rs
+// - 在 Android 上使用 android.rs 而不是 desktop.rs
+#[cfg(all(
+    feature = "wgpu-backend",
+    not(all(target_os = "windows", feature = "gdi-backend")),
+    not(target_os = "android")
+))]
 pub use self::desktop::{
-    random_i32, random_usize, random_u32, random_u8, random_f32,
-    now_ms,
-    log_debug, log_info, log_warn, log_error,
-    DesktopStorage, DesktopAudio, DesktopDisplay, DesktopInput, DesktopTime, DesktopRandom, DesktopLog,
-    run_game,
+    DesktopAudio, DesktopDisplay, DesktopInput, DesktopLog, DesktopRandom, DesktopStorage,
+    DesktopTime, log_debug, log_error, log_info, log_warn, now_ms, random_f32, random_i32,
+    random_u8, random_u32, random_usize, run_game,
 };
 
-// Android 后端
-#[cfg(target_os = "android")]
+// Android 后端（需要 wgpu-backend）
+#[cfg(all(target_os = "android", feature = "wgpu-backend"))]
 pub use self::android::{
-    random_i32, random_usize, random_u32, random_u8, random_f32,
-    now_ms,
-    log_debug, log_info, log_warn, log_error,
-    DesktopStorage, DesktopAudio, DesktopDisplay, DesktopInput, DesktopTime, DesktopRandom, DesktopLog,
-    run_game, android_main,
+    DesktopAudio, DesktopDisplay, DesktopInput, DesktopLog, DesktopRandom, DesktopStorage,
+    DesktopTime, android_main, log_debug, log_error, log_info, log_warn, now_ms, random_f32,
+    random_i32, random_u8, random_u32, random_usize, run_game,
 };
 
 // Web 平台（未来扩展）

@@ -6,7 +6,7 @@
 // 2. 本文件的地图常量通过工具 tools/dump_level5_map.py 从原始字节导出
 // 3. 所有字节严格对应 Pascal 原版，使用 Latin-1 (ISO-8859-1) 编码
 
-use crate::buffers::{WorldOptions, H, W, NV, MAX_WORLD_SIZE};
+use crate::buffers::{H, W, WorldOptions};
 
 // ============================================================================
 // Level 5a 地图数据（主关卡）
@@ -351,23 +351,4 @@ impl Level5 {
     }
 
     // run 方法已删除 - 使用新的状态机驱动的 play.frame_update() 方法
-
-    fn convert_map_data(map_bytes: &[&[u8]]) -> [[char; NV as usize]; MAX_WORLD_SIZE as usize + 1] {
-        let mut map = [['\0'; NV as usize]; MAX_WORLD_SIZE as usize + 1];
-
-        for (col, line) in map_bytes.iter().enumerate() {
-            let x = col + 1;
-            if x > MAX_WORLD_SIZE as usize {
-                break;
-            }
-            for (y, &byte_val) in line.iter().enumerate() {
-                if y >= NV as usize {
-                    break;
-                }
-                map[x][y] = byte_val as char;
-            }
-        }
-
-        map
-    }
 }

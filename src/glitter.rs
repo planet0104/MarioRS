@@ -1,19 +1,15 @@
-// Glitter System - 闪光效果系统
-// 严格按照Pascal GLITTER.PAS翻译
-use crate::buffers::{H, NH, NV, W};
-use crate::vga256::{MAX_PAGE, VGA, VIR_SCREEN_WIDTH};
+// Glitter System - 闪光效果系统 - GPU版本
+use crate::buffers::{Buffers, H, NH, NV, W};
+use crate::gpu::{FillRect, RenderCommand};
+use crate::render_state::{MAX_PAGE, RenderState, VIR_SCREEN_WIDTH};
 
 pub const MAX_GLITTER: usize = 75;
 
+// GPU版 - 简化的闪光结构体
 #[derive(Debug, Clone, Copy)]
-#[repr(C)]
 pub struct Glitter {
-    pub attr: u8,
-    pub pos: u16,
-    pub back_gr: [u8; MAX_PAGE as usize + 1],
-    pub dummy1: u8,
-    pub dummy2: u8,
-    pub dummy3: u8,
+    pub attr: u8, // 颜色属性
+    pub pos: u16, // 屏幕位置
 }
 
 // Pascal: var Count: String [MaxGlitter];
@@ -23,11 +19,9 @@ pub struct GlitterSystem {
     pub glitter_list: Vec<Glitter>, // 长度 MAX_GLITTER+1
 }
 
-use crate::buffers::Buffers;
-
 impl GlitterSystem {
     /// 清空所有闪光
-    pub fn clear_glitter(&mut self, _vga: &mut VGA, _buffers: &mut Buffers) {
+    pub fn clear_glitter(&mut self, _render_state: &mut RenderState, _buffers: &mut Buffers) {
         for v in self.count.iter_mut() {
             *v = 0;
         }
@@ -83,9 +77,6 @@ impl GlitterSystem {
                 .wrapping_add(screen_x as u16);
             let glitter = &mut self.glitter_list[i];
             glitter.pos = pos;
-            for b in glitter.back_gr.iter_mut() {
-                *b = 0;
-            }
             glitter.attr = new_attr;
         }
     }
@@ -97,69 +88,6 @@ impl GlitterSystem {
         self.new_glitter(x, y + 1, new_attr, duration, buffers);
         self.new_glitter(x - 1, y, new_attr, duration, buffers);
         self.new_glitter(x, y - 1, new_attr, duration, buffers);
-    }
-
-    /// 显示所有闪光
-    pub fn show_glitter(&mut self, vga: &mut VGA) {
-        // Pascal:
-        // PageOffset := GetPageOffset;
-        // Page := CurrentPage;
-        // if NumGlitter > 0 then
-        //   for i := 1 to MaxGlitter do
-        //     if Count [i] > Chr (MAX_PAGE + 1) then
-        //       { 记录背景像素并绘制闪光像素 }
-        //     else if Count [i] > #0 then
-        //       { BackGr [CurrentPage] := 0 }
-
-        let num_glitter = self.count[0];
-        if num_glitter > 0 {
-            let working_page = vga.current_page() as usize;
-            for i in 1..=MAX_GLITTER {
-                if self.count[i] > (MAX_PAGE as u8 + 1) {
-                    let glitter = &mut self.glitter_list[i];
-                    let x = (glitter.pos % VIR_SCREEN_WIDTH as u16) as i32;
-                    let y = (glitter.pos / VIR_SCREEN_WIDTH as u16) as i32;
-                    glitter.back_gr[working_page] = vga.get_pixel(x, y);
-                    vga.put_pixel(x, y, glitter.attr);
-                } else if self.count[i] > 0 {
-                    let current_page = vga.current_page() as usize;
-                    self.glitter_list[i].back_gr[current_page] = 0;
-                }
-            }
-        }
-    }
-
-    /// 隐藏所有闪光
-    pub fn hide_glitter(&mut self, vga: &mut VGA) {
-        // Pascal:
-        // PageOffset := GetPageOffset;
-        // if NumGlitter = 0 then Exit;
-        // Page := CurrentPage;
-        // for i := MaxGlitter downto 1 do
-        //   if Count [i] > #0 then
-        //     { 恢复背景像素，减少计数，必要时减少 NumGlitter }
-
-        let num_glitter = self.count[0];
-        if num_glitter == 0 {
-            return;
-        }
-        let working_page = vga.current_page() as usize;
-        for i in (1..=MAX_GLITTER).rev() {
-            if self.count[i] > 0 {
-                let glitter = &mut self.glitter_list[i];
-                let x = (glitter.pos % VIR_SCREEN_WIDTH as u16) as i32;
-                let y = (glitter.pos / VIR_SCREEN_WIDTH as u16) as i32;
-                let back = glitter.back_gr[working_page];
-                if back != 0 {
-                    vga.put_pixel(x, y, back);
-                }
-                self.count[i] = self.count[i].saturating_sub(1);
-                if self.count[i] == 0 {
-                    self.count[0] = self.count[0].saturating_sub(1);
-                }
-                glitter.back_gr[working_page] = 0;
-            }
-        }
     }
 
     /// 金币特效
@@ -192,53 +120,57 @@ impl GlitterSystem {
             );
         }
     }
-}
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::buffers::Buffers;
-    use crate::vga256::{SCREEN_HEIGHT, SCREEN_WIDTH, VGA};
-    use image::{ImageBuffer, Rgba};
+    /// GPU渲染: 收集所有活跃闪光像素
+    /// 闪光是单像素效果，使用1x1的填充矩形来渲染
+    /// 使用UIFillRect确保在精灵层之后渲染（不被火球等遮挡）
+    pub fn collect_glitter_gpu(
+        &self,
+        commands: &mut Vec<RenderCommand>,
+        _x_view: i32,
+        _y_view: i32,
+        palette_index: u32,
+    ) {
+        let num_glitter = self.count[0];
+        if num_glitter == 0 {
+            return;
+        }
 
-    #[test]
-    fn test_glitter_to_png() {
-        // 初始化VGA和Buffers
-        let mut vga = VGA::new_offscreen(SCREEN_WIDTH as usize, SCREEN_HEIGHT as usize);
-        let mut buffers = Buffers::new();
-        // 初始化GlitterSystem
-        let mut glitter = GlitterSystem {
-            count: vec![0u8; MAX_GLITTER + 2],
-            glitter_list: vec![
-                Glitter {
-                    attr: 0,
-                    pos: 0,
-                    back_gr: [0; MAX_PAGE as usize + 1],
-                    dummy1: 0,
-                    dummy2: 0,
-                    dummy3: 0,
-                };
-                MAX_GLITTER + 2
-            ],
-        };
-        // 在屏幕中央生成一组glitter
-        let x = (SCREEN_WIDTH / 2) as i32;
-        let y = (SCREEN_HEIGHT / 2) as i32;
-        glitter.start_glitter(x, y, 20, 20, &mut buffers);
-        // 渲染一次glitter
-        glitter.show_glitter(&mut vga);
-        // 保存framebuffer为PNG
-        let mut img =
-            ImageBuffer::<Rgba<u8>, Vec<u8>>::new(SCREEN_WIDTH as u32, SCREEN_HEIGHT as u32);
-        for y in 0..SCREEN_HEIGHT as u32 {
-            for x in 0..SCREEN_WIDTH as u32 {
-                let idx = (y as usize) * SCREEN_WIDTH as usize + (x as usize);
-                let pal_idx = vga.framebuffer[idx];
-                let rgb = vga.palette.get_rgb(pal_idx);
-                img.put_pixel(x, y, Rgba([rgb[0], rgb[1], rgb[2], 255]));
+        for i in 1..=MAX_GLITTER {
+            // 只渲染活跃的闪光 (count > MAX_PAGE + 1 表示可见)
+            if self.count[i] > (MAX_PAGE as u8 + 1) {
+                let glitter = &self.glitter_list[i];
+                // 注意：pos 在 原版 中存的是"屏幕坐标"（创建时已经减过 x_view/y_view）
+                let x = (glitter.pos % VIR_SCREEN_WIDTH as u16) as f32;
+                let y = (glitter.pos / VIR_SCREEN_WIDTH as u16) as f32;
+
+                if x >= 0.0
+                    && x < crate::render_state::SCREEN_WIDTH as f32
+                    && y >= 0.0
+                    && y < crate::render_state::SCREEN_HEIGHT as f32
+                {
+                    let fill = FillRect::new(x, y, 1.0, 1.0, glitter.attr, palette_index);
+                    commands.push(RenderCommand::UIFillRect(fill));
+                }
             }
         }
-        img.save("./output/test_glitter.png")
-            .expect("Failed to save PNG");
+    }
+
+    /// GPU渲染: 更新闪光计数器（不需要VGA）
+    /// 在每帧结束时调用以减少闪光持续时间
+    pub fn update_glitter_gpu(&mut self) {
+        let num_glitter = self.count[0];
+        if num_glitter == 0 {
+            return;
+        }
+
+        for i in (1..=MAX_GLITTER).rev() {
+            if self.count[i] > 0 {
+                self.count[i] = self.count[i].saturating_sub(1);
+                if self.count[i] == 0 {
+                    self.count[0] = self.count[0].saturating_sub(1);
+                }
+            }
+        }
     }
 }

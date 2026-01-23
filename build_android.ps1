@@ -10,8 +10,8 @@ MarioRS Android 构建脚本
 使用方法:
   .\build_android.ps1              # 构建 Debug APK (仅 arm64)
   .\build_android.ps1 -Release     # 构建 Release APK (仅 arm64)
-  .\build_android.ps1 -AllArch     # 构建所有架构合并的 APK (arm64, armv7, x86_64)
-  .\build_android.ps1 -SeparateApks # 构建三个独立 APK (每个架构一个)
+  .\build_android.ps1 -Release -AllArch     # 构建所有架构合并的 APK (arm64, armv7, x86_64)
+  .\build_android.ps1 -Release -SeparateApks # 构建三个独立 APK (每个架构一个)
   .\build_android.ps1 -SkipRust    # 仅构建 APK (跳过 Rust 编译)
 
 环境要求:

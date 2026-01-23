@@ -1,3 +1,5 @@
+#![allow(unused)]
+
 //! 音乐与音效系统，严格对齐 Pascal 版的播放节奏。
 //!
 //! Pascal 使用 PC Speaker 的 `Sound/NoSound` 组合出旋律，
@@ -215,15 +217,33 @@ impl MusicPlayer {
     }
 
     // --- 便捷方法 ---
-    pub fn play_life(&self) { self.start_music(LIFE_MUSIC); }
-    pub fn play_coin(&self) { self.start_music(COIN_MUSIC); }
-    pub fn play_fire(&self) { self.start_music(FIRE_MUSIC); }
-    pub fn play_hit(&self) { self.start_music(HIT_MUSIC); }
-    pub fn play_dead(&self) { self.start_music(DEAD_MUSIC); }
-    pub fn play_note(&self) { self.start_music(NOTE_MUSIC); }
-    pub fn play_star(&self) { self.start_music(STAR_MUSIC); }
-    pub fn play_grow(&self) { self.start_music(GROW_MUSIC); }
-    pub fn play_pipe(&self) { self.start_music(PIPE_MUSIC); }
+    pub fn play_life(&self) {
+        self.start_music(LIFE_MUSIC);
+    }
+    pub fn play_coin(&self) {
+        self.start_music(COIN_MUSIC);
+    }
+    pub fn play_fire(&self) {
+        self.start_music(FIRE_MUSIC);
+    }
+    pub fn play_hit(&self) {
+        self.start_music(HIT_MUSIC);
+    }
+    pub fn play_dead(&self) {
+        self.start_music(DEAD_MUSIC);
+    }
+    pub fn play_note(&self) {
+        self.start_music(NOTE_MUSIC);
+    }
+    pub fn play_star(&self) {
+        self.start_music(STAR_MUSIC);
+    }
+    pub fn play_grow(&self) {
+        self.start_music(GROW_MUSIC);
+    }
+    pub fn play_pipe(&self) {
+        self.start_music(PIPE_MUSIC);
+    }
 
     pub fn play_powerup_rise(&self) {
         if !self.beeper_sound {
@@ -241,10 +261,18 @@ impl MusicPlayer {
         self.state.borrow_mut().audio.play_sequence(&notes);
     }
 
-    pub fn play_bump(&self) { self.beep(110); }
-    pub fn play_coin_beep(&self) { self.beep(2420); }
-    pub fn play_death_start(&self) { self.beep(220); }
-    pub fn play_collision(&self) { self.beep(30); }
+    pub fn play_bump(&self) {
+        self.beep(110);
+    }
+    pub fn play_coin_beep(&self) {
+        self.beep(2420);
+    }
+    pub fn play_death_start(&self) {
+        self.beep(220);
+    }
+    pub fn play_collision(&self) {
+        self.beep(30);
+    }
 
     pub fn beeper_on(&mut self) {
         self.beeper_sound = true;
@@ -361,15 +389,33 @@ impl MusicPlayer {
         }
     }
 
-    pub fn play_life(&self) { self.start_music(LIFE_MUSIC); }
-    pub fn play_coin(&self) { self.start_music(COIN_MUSIC); }
-    pub fn play_fire(&self) { self.start_music(FIRE_MUSIC); }
-    pub fn play_hit(&self) { self.start_music(HIT_MUSIC); }
-    pub fn play_dead(&self) { self.start_music(DEAD_MUSIC); }
-    pub fn play_note(&self) { self.start_music(NOTE_MUSIC); }
-    pub fn play_star(&self) { self.start_music(STAR_MUSIC); }
-    pub fn play_grow(&self) { self.start_music(GROW_MUSIC); }
-    pub fn play_pipe(&self) { self.start_music(PIPE_MUSIC); }
+    pub fn play_life(&self) {
+        self.start_music(LIFE_MUSIC);
+    }
+    pub fn play_coin(&self) {
+        self.start_music(COIN_MUSIC);
+    }
+    pub fn play_fire(&self) {
+        self.start_music(FIRE_MUSIC);
+    }
+    pub fn play_hit(&self) {
+        self.start_music(HIT_MUSIC);
+    }
+    pub fn play_dead(&self) {
+        self.start_music(DEAD_MUSIC);
+    }
+    pub fn play_note(&self) {
+        self.start_music(NOTE_MUSIC);
+    }
+    pub fn play_star(&self) {
+        self.start_music(STAR_MUSIC);
+    }
+    pub fn play_grow(&self) {
+        self.start_music(GROW_MUSIC);
+    }
+    pub fn play_pipe(&self) {
+        self.start_music(PIPE_MUSIC);
+    }
 
     pub fn play_powerup_rise(&self) {
         if !self.beeper_sound {
@@ -389,10 +435,18 @@ impl MusicPlayer {
         }
     }
 
-    pub fn play_bump(&self) { self.beep(110); }
-    pub fn play_coin_beep(&self) { self.beep(2420); }
-    pub fn play_death_start(&self) { self.beep(220); }
-    pub fn play_collision(&self) { self.beep(30); }
+    pub fn play_bump(&self) {
+        self.beep(110);
+    }
+    pub fn play_coin_beep(&self) {
+        self.beep(2420);
+    }
+    pub fn play_death_start(&self) {
+        self.beep(220);
+    }
+    pub fn play_collision(&self) {
+        self.beep(30);
+    }
 
     pub fn beeper_on(&mut self) {
         self.beeper_sound = true;

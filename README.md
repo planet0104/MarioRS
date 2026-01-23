@@ -6,13 +6,17 @@
 
 > **原版官网**: [Wiering Software - Mario](https://wieringsoftware.nl/mario/) | [源码下载](https://wieringsoftware.nl/mario/source.html)
 
+> **学习文档**: [wgpu游戏开发学习指南](docs/WGPU_LEARNING_GUIDE.md) - 从零开始学习本项目的GPU渲染实现
+
 ## 特性
 
 - 完整移植原版 6 个关卡
 - 双人轮流模式（Mario 和 Luigi）
 - 多平台支持：Windows / Linux / macOS / Android
-- Windows 原生 GDI 渲染（体积小，约 700KB）
-- Windows 7/XP 兼容版本
+- **双渲染后端架构**：
+  - **wgpu GPU 渲染**（默认）：跨平台硬件加速，支持 Vulkan/Metal/DirectX 12
+  - **CPU 软件渲染**：纯软件渲染，兼容 Windows XP 等老旧系统
+- Windows 7/XP 兼容版本（使用 CPU 后端 + YY-Thunks）
 - Android 原生支持（触摸屏虚拟按键）
 - 窗口缩放和全屏支持
 - 暗黑主题自动适配（Windows 10+）
@@ -85,7 +89,7 @@ Android 版本提供虚拟按键界面：
 
 ### Windows 编译
 
-#### 默认版本（Windows 10+，推荐）
+#### 默认版本（wgpu GPU 渲染，Windows 10+ 推荐）
 
 ```powershell
 cargo build --release
@@ -93,20 +97,26 @@ cargo build --release
 .\build_release.ps1
 ```
 
-#### Windows 7/XP 兼容版本
+默认使用 wgpu GPU 渲染后端，需要支持 Vulkan/DirectX 12 的显卡。
+
+#### Windows 7/XP 兼容版本（CPU 软件渲染）
 
 ```powershell
 .\build_win7xp.ps1           # 64位
 .\build_win7xp.ps1 -Arch x86 # 32位
 ```
 
+此版本使用 CPU 软件渲染后端，通过 GDI StretchDIBits 显示，无需 GPU 支持，兼容 Windows XP SP3 及以上系统。
+
 详见 [build_win7xp.md](build_win7xp.md)
 
 ### Linux/macOS 编译
 
 ```bash
-cargo build --release --features wgpu-backend
+cargo build --release
 ```
+
+Linux/macOS 默认使用 wgpu 后端进行 GPU 渲染。
 
 ### Android 编译
 
@@ -194,11 +204,11 @@ adb install -r dist/android/app-release-arm64-v8a.apk
 ### 运行
 
 ```bash
-# Windows (GDI 后端，默认)
+# Windows/Linux/macOS（wgpu GPU 渲染，默认）
 cargo run --release
 
-# Linux/macOS (wgpu 后端)
-cargo run --release --features wgpu-backend
+# Windows XP 兼容模式（CPU 软件渲染）
+cargo run --release --features cpu-backend --no-default-features
 ```
 
 ## 项目结构
@@ -206,79 +216,139 @@ cargo run --release --features wgpu-backend
 ```
 MarioRS/
 ├── src/
-│   ├── main.rs          # 程序入口
-│   ├── lib.rs           # 库入口
-│   ├── mario.rs         # 游戏状态机
-│   ├── play.rs          # 主游戏逻辑
-│   ├── players.rs       # 玩家行为 (Mario/Luigi)
-│   ├── enemies.rs       # 敌人系统
-│   ├── figures.rs       # 游戏物体行为
-│   ├── vga256.rs        # VGA 渲染抽象
-│   ├── renderer.rs      # 渲染器
-│   ├── backgr.rs        # 背景绘制
-│   ├── sprites.rs       # 精灵数据
-│   ├── palettes.rs      # 调色板管理
-│   ├── keyboard.rs      # 键盘输入
-│   ├── music.rs         # 音效系统
-│   ├── txt.rs           # 文本渲染
-│   ├── config.rs        # 配置管理
-│   ├── persist.rs       # 持久化工具
-│   ├── worlds/          # 关卡数据
-│   │   ├── intro.rs     # 开场动画
-│   │   └── level_*.rs   # 关卡 1-6
-│   └── platform/        # 平台抽象层
-│       ├── mod.rs       # 平台 trait 定义
-│       ├── windows.rs   # Windows GDI 后端
-│       ├── desktop.rs   # 跨平台 wgpu 后端
-│       ├── android.rs   # Android 原生后端
+│   ├── main.rs           # 程序入口
+│   ├── lib.rs            # 库入口
+│   ├── mario.rs          # 游戏状态机
+│   ├── game_runner.rs    # 游戏主运行器
+│   ├── context.rs        # 游戏上下文
+│   ├── play.rs           # 主游戏逻辑
+│   ├── players.rs        # 玩家行为 (Mario/Luigi)
+│   ├── enemies.rs        # 敌人系统
+│   ├── figures.rs        # 游戏物体行为
+│   ├── renderer.rs       # 统一渲染管线
+│   ├── render_state.rs   # 渲染状态管理
+│   ├── backgr.rs         # 背景绘制
+│   ├── sprites.rs        # 精灵数据
+│   ├── sprite_assets.rs  # 精灵资源管理
+│   ├── palettes.rs       # 调色板管理
+│   ├── keyboard.rs       # 键盘输入
+│   ├── music.rs          # 音效系统
+│   ├── txt.rs            # 文本渲染
+│   ├── config.rs         # 配置管理
+│   ├── persist.rs        # 持久化工具
+│   │
+│   ├── gpu/              # GPU 渲染模块 (wgpu)
+│   │   ├── mod.rs        # 模块入口
+│   │   ├── renderer.rs   # GPU 渲染器核心
+│   │   ├── pipeline.rs   # 渲染管线创建
+│   │   ├── buffer_pool.rs # GPU 缓冲区池
+│   │   ├── sprite_batch.rs # 精灵批处理
+│   │   ├── texture_atlas.rs # 纹理图集
+│   │   ├── tilemap.rs    # 地图块渲染
+│   │   ├── palette.rs    # 调色板管理
+│   │   ├── types.rs      # 渲染数据类型
+│   │   └── shaders/      # WGSL 着色器
+│   │       ├── sprite.wgsl  # 精灵着色器
+│   │       ├── fill.wgsl    # 填充着色器
+│   │       ├── scale.wgsl   # 缩放着色器
+│   │       └── overlay.wgsl # 叠加层着色器
+│   │
+│   ├── cpu/              # CPU 软件渲染模块
+│   │   ├── mod.rs        # 模块入口
+│   │   └── renderer.rs   # CPU 软件渲染器
+│   │
+│   ├── worlds/           # 关卡数据
+│   │   ├── intro.rs      # 开场动画
+│   │   └── level_*.rs    # 关卡 1-6
+│   │
+│   └── platform/         # 平台抽象层
+│       ├── mod.rs        # 平台 trait 定义
+│       ├── windows.rs    # Windows wgpu + GDI 后端
+│       ├── windows_cpu.rs # Windows CPU 软件渲染后端 (XP 兼容)
+│       ├── desktop.rs    # 跨平台 wgpu 后端 (Linux/macOS)
+│       ├── android.rs    # Android 原生后端
 │       ├── touch_panel.rs # 触摸屏虚拟按键
-│       └── audio/       # 音频后端
+│       ├── common/       # 公共平台实现
+│       │   ├── frame_timer.rs # 帧率控制
+│       │   ├── input.rs      # 输入处理
+│       │   ├── random.rs     # 随机数生成
+│       │   ├── storage.rs    # 持久化存储
+│       │   └── time.rs       # 时间管理
+│       └── audio/        # 音频后端
 │           ├── waveout.rs    # Windows WaveOut
 │           ├── cpal_audio.rs # 跨平台 cpal
-│           ├── oboe_audio.rs # Android Oboe
 │           └── web_audio.rs  # Web Audio (占位)
-├── android/             # Android 项目
+│
+├── android/              # Android 项目
 │   ├── app/
 │   │   ├── src/main/
-│   │   │   ├── java/        # Java/Kotlin 代码
-│   │   │   ├── jniLibs/     # 编译生成的 .so 文件
+│   │   │   ├── java/         # Java/Kotlin 代码
+│   │   │   ├── jniLibs/      # 编译生成的 .so 文件
 │   │   │   └── AndroidManifest.xml
 │   │   └── build.gradle.kts
 │   └── build.gradle.kts
 ├── assets/
-│   ├── sprites/         # 精灵数据文件
+│   ├── sprites/          # 精灵数据文件
 │   ├── onscreen_controls/ # 触摸按键图片资源
-│   ├── *.BK             # 背景数据
-│   └── mario.ico        # 应用图标
+│   ├── *.BK              # 背景数据
+│   └── mario.ico         # 应用图标
 ├── examples/
-│   ├── create_icon.rs   # 图标生成工具
+│   ├── create_icon.rs    # 图标生成工具
 │   └── export_sprites.rs # 精灵导出工具
-├── build_android.ps1    # Android 构建脚本
-└── build.rs             # 构建脚本
+├── build_android.ps1     # Android 构建脚本
+└── build.rs              # 构建脚本
 ```
+
+## 渲染架构
+
+MarioRS 采用双渲染后端架构，支持现代 GPU 加速渲染和传统 CPU 软件渲染：
+
+### GPU 渲染后端 (wgpu)
+
+- 使用 wgpu 进行跨平台 GPU 硬件加速渲染
+- 支持 Vulkan (Linux/Windows/Android)、Metal (macOS)、DirectX 12 (Windows)
+- 精灵批处理、纹理图集、WGSL 着色器
+- 渲染管线：精灵 -> 填充 -> 缩放 -> 叠加
+
+### CPU 软件渲染后端
+
+- 纯 CPU 软件渲染，无 GPU 依赖
+- 通过 Windows GDI StretchDIBits 显示帧缓冲
+- 兼容 Windows XP 等不支持现代图形 API 的老旧系统
+- 支持索引色精灵、调色板、翻转、透明等效果
 
 ## 构建选项
 
 | Feature | 说明 | 平台 |
 |---------|------|------|
-| `gdi-backend` | Windows 原生 GDI 渲染 | Windows |
-| `wgpu-backend` | 跨平台 GPU 渲染 | Windows/Linux/macOS |
+| `wgpu-backend` | wgpu GPU 硬件加速渲染 | Windows/Linux/macOS/Android |
+| `cpu-backend` | CPU 软件渲染（XP 兼容） | Windows |
+| `gdi-backend` | Windows GDI 窗口创建 | Windows |
 | `android` | Android 原生渲染 | Android |
 | `touch-panel` | 触摸屏虚拟按键 | Android |
 | `dark-theme` | 暗黑主题适配 | Windows 10+ |
 
-默认: `gdi-backend` + `dark-theme`
+**默认**: `wgpu-backend` + `dark-theme`
+
+### Feature 组合说明
+
+| 场景 | Features | 说明 |
+|------|----------|------|
+| Windows 现代版（推荐） | `wgpu-backend`, `gdi-backend`, `dark-theme` | GPU 渲染 + GDI 窗口 |
+| Windows XP 兼容 | `cpu-backend` | CPU 软件渲染 + GDI 窗口 |
+| Linux/macOS | `wgpu-backend` | GPU 渲染 + winit 窗口 |
+| Android | `android` | 自动启用 `wgpu-backend` + `touch-panel` |
 
 ## 平台支持
 
-| 平台 | 后端 | 最低版本 |
-|------|------|----------|
-| Windows 10/11 | GDI | 默认支持 |
-| Windows 7/8 | GDI + YY-Thunks | 需使用兼容版本 |
-| Windows XP | GDI + YY-Thunks | 需使用兼容版本 |
-| Linux | wgpu + cpal | 需 wgpu-backend |
-| macOS | wgpu + cpal | 需 wgpu-backend |
-| Android | ANativeWindow + Oboe | 需 android feature |
+| 平台 | 渲染后端 | 音频后端 | 最低版本 |
+|------|----------|----------|----------|
+| Windows 10/11 | wgpu (GPU) | WaveOut | 默认支持 |
+| Windows 7/8 | CPU 软件渲染 + YY-Thunks | WaveOut | 需使用兼容版本 |
+| Windows XP | CPU 软件渲染 + YY-Thunks | WaveOut | 需使用兼容版本 |
+| Linux | wgpu (GPU) | cpal | 默认支持 |
+| macOS | wgpu (GPU) | cpal | 默认支持 |
+| Android | wgpu (GPU) | cpal | 需 android feature |
 
 ## 关卡
 

@@ -15,8 +15,12 @@ categories = ["games"]
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-# wgpu 渲染后端（可选）
-pixels = { version = "0.15", optional = true }
+# GPU 渲染核心依赖 (wgpu-backend feature 启用)
+wgpu = { version = "28.0.0", default-features = false, features = ["wgsl", "vulkan"], optional = true }
+bytemuck = { version = "1.21", features = ["derive"], optional = true }
+futures = { version = "0.3", optional = true }
+
+# winit 窗口管理 (桌面平台)
 winit = { version = "0.30", optional = true }
 bitflags = "2.9.1"
 
@@ -81,13 +85,12 @@ log = "0.4"
 tracing-android = { version = "0.2", optional = true }
 
 # ============================================================================
-# 触摸面板可选依赖 - PNG 解码 + 2D 绘图
+# PNG 解码 - 精灵加载必需
 # ============================================================================
 [dependencies.image]
 version = "0.25"
 default-features = false
 features = ["png"]
-optional = true
 
 [dependencies.tiny-skia]
 version = "0.11"
@@ -114,13 +117,14 @@ rand = { version = "0.8", default-features = false, features = ["alloc", "small_
 hashbrown = "0.15"
 
 [features]
-default = ["gdi-backend", "dark-theme"]   # 默认使用 gdi 后端 + 暗黑主题适配
+default = ["wgpu-backend", "dark-theme"]   # 默认使用 GPU + GDI回退 + 暗黑主题适配
 logging = ["dep:tracing", "dep:tracing-subscriber", "dep:tracing-wasm", "dep:tracing-android"]
-wgpu-backend = ["dep:pixels", "dep:winit"]  # wgpu 渲染后端（跨平台，体积大）
-gdi-backend = ["dep:windows-sys"]           # Win32 GDI 后端（仅 Windows，体积小）
-dark-theme = []                             # 暗黑主题适配（需要 Vista+ dwmapi.dll）
-touch-panel = ["dep:image", "dep:tiny-skia"] # 触摸控制面板 (PNG解码 + 2D绘图)
-android = ["touch-panel"]                   # Android 平台后端 (自动启用 touch-panel)
+wgpu-backend = ["dep:winit", "dep:wgpu", "dep:bytemuck", "dep:futures"]  # wgpu 渲染后端（跨平台，体积大）
+gdi-backend = ["dep:windows-sys"]         # Windows GDI（仅用于窗口创建，渲染使用GPU）
+cpu-backend = ["gdi-backend"]             # CPU软件渲染后端（XP兼容，使用GDI显示）
+dark-theme = []                           # 暗黑主题适配（需要 Vista+ dwmapi.dll）
+touch-panel = ["dep:tiny-skia"]           # 触摸控制面板 (2D绘图)
+android = ["touch-panel", "wgpu-backend"]  # Android 平台后端 (自动启用 touch-panel 和 wgpu)
 
 # ============================================================================
 # Release 编译优化 - 最小体积
@@ -136,6 +140,11 @@ embed-resource = "3.0"
 # ============================================================================
 [dev-dependencies]
 image = "0.25"
+png = "0.17"
+winit = "0.30"
+wgpu = { version = "28.0.0", default-features = false, features = ["wgsl", "vulkan"] }
+bytemuck = { version = "1.21", features = ["derive"] }
+futures = "0.3"
 
 [profile.release]
 opt-level = "z"         # 优化体积而非速度

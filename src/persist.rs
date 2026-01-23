@@ -116,7 +116,10 @@ pub fn write_string<W: Write>(w: &mut W, s: &str) -> std::io::Result<()> {
     let bytes = s.as_bytes();
     let len = bytes.len();
     if len > u16::MAX as usize {
-        return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "string too long"));
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "string too long",
+        ));
     }
     write_u16_le(w, len as u16)?;
     w.write_all(bytes)

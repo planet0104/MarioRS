@@ -8,7 +8,7 @@ use std::fs;
 use std::path::Path;
 
 // 引入游戏模块
-use mario::sprites::{SpriteDataManager, PALETTE};
+use mario::sprites::{PALETTE, SpriteDataManager};
 
 fn main() {
     // 创建输出目录

@@ -1,13 +1,13 @@
 // TmpObj Pascal 转换为 Rust
-// 临时对象管理模块 - 处理游戏中的临时对象如破碎方块、金币、命中效果等
+// 临时对象管理模块 - GPU版本
+// 处理游戏中的临时对象如破碎方块、金币、命中效果等
 
-use crate::backgr::BackGr;
 use crate::buffers::{Buffers, H, NH, NV, W, WorldOptions};
 use crate::figures::Figures;
 use crate::glitter::GlitterSystem;
+use crate::gpu::{RenderCommand, SpriteInstance};
 use crate::music::MusicPlayer;
-use crate::sprites::SpriteDataManager;
-use crate::vga256::{MAX_PAGE, VGA};
+use crate::sprites::{SpriteAtlas, SpriteDataManager, SpriteId};
 
 // 常量定义 - 临时对象类型
 pub const TP_BROKEN: i32 = 1; // 破碎方块类型
@@ -26,32 +26,25 @@ pub const HIT_TIME: i32 = 4; // 命中效果持续时间
 pub const MAX_TEMP_OBJ: usize = 20; // 最大临时对象数量
 pub const MAX_REMOVE: usize = 10; // 最大移除操作数量
 
-// 临时对象记录结构体
+// 临时对象记录结构体 - GPU版本简化
 #[derive(Debug, Clone)]
 pub struct TempRec {
-    pub alive: bool,                            // 对象是否存活
-    pub visible: [bool; MAX_PAGE as usize + 1], // 各页面可见性
-    pub tp: i32,                                // 对象类型
-    // Pascal: BackGrAddr: array[0..MAX_PAGE] of Integer; 0 表示无效（句柄版，避免 x>255 截断）
-    pub back_gr: Vec<i32>,
-    pub x_pos: i32,                          // X坐标位置
-    pub y_pos: i32,                          // Y坐标位置
-    pub h_size: i32,                         // 水平尺寸
-    pub v_size: i32,                         // 垂直尺寸
-    pub x_vel: i32,                          // X轴速度
-    pub y_vel: i32,                          // Y轴速度
-    pub delay_counter: i32,                  // 延迟计数器
-    pub old_x: [i32; MAX_PAGE as usize + 1], // 旧X坐标
-    pub old_y: [i32; MAX_PAGE as usize + 1], // 旧Y坐标
+    pub alive: bool,        // 对象是否存活
+    pub tp: i32,            // 对象类型
+    pub x_pos: i32,         // X坐标位置
+    pub y_pos: i32,         // Y坐标位置
+    pub h_size: i32,        // 水平尺寸
+    pub v_size: i32,        // 垂直尺寸
+    pub x_vel: i32,         // X轴速度
+    pub y_vel: i32,         // Y轴速度
+    pub delay_counter: i32, // 延迟计数器
 }
 
 impl Default for TempRec {
     fn default() -> Self {
         Self {
             alive: false,
-            visible: [false; MAX_PAGE as usize + 1],
             tp: 0,
-            back_gr: vec![0; MAX_PAGE as usize + 1],
             x_pos: 0,
             y_pos: 0,
             h_size: 0,
@@ -59,8 +52,6 @@ impl Default for TempRec {
             x_vel: 0,
             y_vel: 0,
             delay_counter: 0,
-            old_x: [0; MAX_PAGE as usize + 1],
-            old_y: [0; MAX_PAGE as usize + 1],
         }
     }
 }
@@ -93,7 +84,7 @@ impl Default for RemoveRec {
 
 // 临时对象管理器结构体
 pub struct TmpObjManager {
-    pub temp_obj: Vec<TempRec>, // 临时对象数组
+    pub temp_obj: Vec<TempRec>,   // 临时对象数组
     pub rem_list: Vec<RemoveRec>, // 移除列表数组
 }
 
@@ -106,7 +97,7 @@ impl TmpObjManager {
         }
     }
 
-    // 初始化临时对象系统
+    /// GPU版 - 初始化临时对象系统
     pub fn init_temp_obj(
         &mut self,
         options: &WorldOptions,
@@ -116,9 +107,6 @@ impl TmpObjManager {
         // 初始化所有临时对象为非存活状态
         for i in 0..MAX_TEMP_OBJ {
             self.temp_obj[i].alive = false;
-            for j in 0..=MAX_PAGE as usize {
-                self.temp_obj[i].visible[j] = false;
-            }
         }
 
         // 初始化移除列表为非激活状态
@@ -130,35 +118,14 @@ impl TmpObjManager {
         figures.recolor(&mut sprites.PART_000, None, options.brick_color);
     }
 
-    // 读取背景图像数据
-    fn read_back_gr(&mut self, i: usize, vga: &mut VGA) {
-        let temp_obj = &mut self.temp_obj[i];
-        // 读取背景图像
-        let current_page = vga.current_page() as usize;
-        temp_obj.back_gr[current_page] = vga.push_backgr_address_world(
-            temp_obj.x_pos,
-            temp_obj.y_pos,
-            temp_obj.h_size + 4,
-            temp_obj.v_size,
-        );
-        temp_obj.old_x[current_page] = temp_obj.x_pos;
-        temp_obj.old_y[current_page] = temp_obj.y_pos;
-    }
+    // GPU模式下不需要保存背景
 
-    // 检查临时对象槽位是否可用
+    // GPU版 - 检查临时对象槽位是否可用
     fn available(&self, i: usize) -> bool {
-        let temp_obj = &self.temp_obj[i];
-        let mut used = temp_obj.alive;
-
-        // 检查所有页面的可见性
-        for j in 0..=MAX_PAGE as usize {
-            used = used || temp_obj.visible[j];
-        }
-
-        !used
+        !self.temp_obj[i].alive
     }
 
-    // 创建新的临时对象
+    /// GPU版 - 创建新的临时对象
     pub fn new_temp_obj(
         &mut self,
         new_type: i32,
@@ -168,20 +135,16 @@ impl TmpObjManager {
         yv: i32,
         wid: i32,
         ht: i32,
-        vga: &mut VGA,
-        buffers: &mut Buffers,
+        buffers: &Buffers,
     ) {
         // 对破碎方块进行边界检查
         if new_type == TP_BROKEN {
-            // 边界检查
             if xv > 0 {
                 if x + 32 * xv > buffers.x_view + NH as i32 * W as i32 + 2 * W as i32 {
                     return;
                 }
-            } else {
-                if x + 32 * xv + 2 * (W as i32) < buffers.x_view {
-                    return;
-                }
+            } else if x + 32 * xv + 2 * (W as i32) < buffers.x_view {
+                return;
             }
         }
 
@@ -195,13 +158,6 @@ impl TmpObjManager {
         if i < MAX_TEMP_OBJ {
             let temp_obj = &mut self.temp_obj[i];
             temp_obj.alive = true;
-
-            // 重置所有页面的可见性
-            for j in 0..=MAX_PAGE as usize {
-                temp_obj.visible[j] = false;
-            }
-
-            // 设置对象属性
             temp_obj.tp = new_type;
             temp_obj.x_pos = x;
             temp_obj.y_pos = y;
@@ -210,79 +166,59 @@ impl TmpObjManager {
             temp_obj.h_size = wid;
             temp_obj.v_size = ht;
             temp_obj.delay_counter = 0;
-
-            // 读取背景
-            self.read_back_gr(i, vga);
         }
     }
 
-    // 显示所有临时对象
-    pub fn show_temp_obj(&mut self, vga: &mut VGA, sprites: &SpriteDataManager) {
+    /// GPU渲染: 收集所有临时对象的精灵实例
+    pub fn collect_temp_obj_sprites_gpu(
+        &self,
+        commands: &mut Vec<RenderCommand>,
+        buffers: &Buffers,
+        atlas: &SpriteAtlas,
+    ) {
         for i in 0..MAX_TEMP_OBJ {
-            if self.temp_obj[i].alive {
-                self.read_back_gr(i, vga);
-
-                let temp_obj = &self.temp_obj[i];
-
-                // 根据对象类型绘制相应图像
-                match temp_obj.tp {
-                    TP_BROKEN => {
-                        vga.draw_image_imagebuffer_world(
-                            temp_obj.x_pos,
-                            temp_obj.y_pos,
-                            &sprites.PART_000,
-                        );
-                    }
-                    TP_COIN => {
-                        vga.draw_image_imagebuffer_world(
-                            temp_obj.x_pos,
-                            temp_obj.y_pos,
-                            &sprites.COIN_000,
-                        );
-                    }
-                    TP_HIT => {
-                        vga.draw_image_imagebuffer_world(
-                            temp_obj.x_pos,
-                            temp_obj.y_pos,
-                            &sprites.WHHIT_000,
-                        );
-                    }
-                    TP_FIRE => {
-                        vga.draw_image_imagebuffer_world(
-                            temp_obj.x_pos,
-                            temp_obj.y_pos,
-                            &sprites.WHFIRE_000,
-                        );
-                    }
-                    TP_NOTE => {
-                        vga.draw_image_imagebuffer_world(
-                            temp_obj.x_pos,
-                            temp_obj.y_pos,
-                            &sprites.NOTE_000,
-                        );
-                    }
-                    _ => {}
-                }
-
-                // 设置当前页面可见性
-                self.temp_obj[i].visible[vga.current_page() as usize] = true;
+            if !self.temp_obj[i].alive {
+                continue;
             }
-        }
-    }
 
-    // 隐藏所有临时对象
-    pub fn hide_temp_obj(&mut self, vga: &mut VGA) {
-        for i in (0..MAX_TEMP_OBJ).rev() {
-            // 页面可见性检查和背景恢复
-            let current_page = vga.current_page() as usize;
-            if self.temp_obj[i].visible[current_page] {
-                let addr = self.temp_obj[i].back_gr[current_page];
-                if addr != 0 {
-                    vga.pop_backgr_address(addr);
-                    self.temp_obj[i].back_gr[current_page] = 0;
-                }
-                self.temp_obj[i].visible[current_page] = false;
+            let temp_obj = &self.temp_obj[i];
+
+            // 检查是否在可视区域内
+            if temp_obj.x_pos + temp_obj.h_size < buffers.x_view
+                || temp_obj.x_pos > buffers.x_view + crate::render_state::SCREEN_WIDTH as i32
+                || temp_obj.y_pos + temp_obj.v_size < buffers.y_view
+                || temp_obj.y_pos > buffers.y_view + crate::render_state::SCREEN_HEIGHT as i32
+            {
+                continue;
             }
+
+            // 计算屏幕坐标
+            let sx = (temp_obj.x_pos - buffers.x_view) as f32;
+            let sy = (temp_obj.y_pos - buffers.y_view) as f32;
+
+            // 根据对象类型选择精灵
+            let sprite_id = match temp_obj.tp {
+                TP_BROKEN => SpriteId::PART_000,
+                TP_COIN => SpriteId::COIN_000,
+                TP_HIT => SpriteId::WHHIT_000,
+                TP_FIRE => SpriteId::WHFIRE_000,
+                TP_NOTE => SpriteId::NOTE_000,
+                _ => continue,
+            };
+
+            let uv = atlas.get(sprite_id);
+            let (u, v, u_size, v_size) = uv.normalized(atlas.size());
+            let inst = SpriteInstance::new(
+                sx,
+                sy,
+                uv.width as f32,
+                uv.height as f32,
+                u,
+                v,
+                u_size,
+                v_size,
+            );
+            commands.push(RenderCommand::DrawSprite(inst));
         }
     }
 
@@ -359,74 +295,16 @@ impl TmpObjManager {
             rem_rec.rem_w = w;
             rem_rec.rem_h = h;
             rem_rec.new_image = new_img;
-            rem_rec.rem_count = (MAX_PAGE + 1) as i32 + 1;
+            rem_rec.rem_count = 4; // GPU模式：只需要几帧的延迟
             rem_rec.active = true;
         }
     }
 
-    // 执行移除操作
-    pub fn run_remove(
-        &mut self,
-        vga: &mut VGA,
-        backgr: &mut BackGr,
-        sprites: &SpriteDataManager,
-        options: &WorldOptions,
-    ) {
-        for i in 0..MAX_REMOVE {
-            if self.rem_list[i].active {
-                let rem_rec = &mut self.rem_list[i];
-
-                // 根据新图像类型执行相应绘制操作
-                match rem_rec.new_image {
-                    0 => {
-                        backgr.draw_backgr_block(
-                            rem_rec.rem_x,
-                            rem_rec.rem_y,
-                            rem_rec.rem_w,
-                            rem_rec.rem_h,
-                            vga,
-                            options,
-                            sprites,
-                        );
-                    }
-                    1 => {
-                        vga.draw_image_imagebuffer_world(
-                            rem_rec.rem_x,
-                            rem_rec.rem_y,
-                            &sprites.QUEST_001,
-                        );
-                    }
-                    2 => {
-                        vga.draw_image_imagebuffer_world(
-                            rem_rec.rem_x,
-                            rem_rec.rem_y,
-                            &sprites.QUEST_000,
-                        );
-                    }
-                    5 => {
-                        vga.draw_image_imagebuffer_world(
-                            rem_rec.rem_x,
-                            rem_rec.rem_y,
-                            &sprites.NOTE_000,
-                        );
-                    }
-                    _ => {}
-                }
-
-                rem_rec.rem_count -= 1;
-                if rem_rec.rem_count < 1 {
-                    rem_rec.active = false;
-                }
-            }
-        }
-    }
-
-    // 破坏方块 - 创建破碎效果
+    /// GPU版 - 破坏方块 - 创建破碎效果
     pub fn break_block(
         &mut self,
         x: i32,
         y: i32,
-        vga: &mut VGA,
         buffers: &mut Buffers,
         music_player: &MusicPlayer,
     ) {
@@ -444,9 +322,7 @@ impl TmpObjManager {
         let h_half = H as i32 / 2;
 
         // 左上片段
-        self.new_temp_obj(
-            TP_BROKEN, pixel_x, pixel_y, -2, -6, 12, h_half, vga, buffers,
-        );
+        self.new_temp_obj(TP_BROKEN, pixel_x, pixel_y, -2, -6, 12, h_half, buffers);
         // 右上片段
         self.new_temp_obj(
             TP_BROKEN,
@@ -456,7 +332,6 @@ impl TmpObjManager {
             -6,
             12,
             h_half,
-            vga,
             buffers,
         );
         // 左下片段
@@ -468,7 +343,6 @@ impl TmpObjManager {
             -4,
             12,
             h_half,
-            vga,
             buffers,
         );
         // 右下片段
@@ -480,7 +354,6 @@ impl TmpObjManager {
             -4,
             12,
             h_half,
-            vga,
             buffers,
         );
 
@@ -488,13 +361,12 @@ impl TmpObjManager {
         music_player.beep(110);
     }
 
-    // 命中金币 - 处理金币收集
+    /// GPU版 - 命中金币 - 处理金币收集
     pub fn hit_coin(
         &mut self,
         x: i32,
         y: i32,
         throw_up: bool,
-        vga: &mut VGA,
         glitter_sys: &mut GlitterSystem,
         buffers: &mut Buffers,
         music_player: &MusicPlayer,
@@ -513,7 +385,6 @@ impl TmpObjManager {
                 COIN_SPEED,
                 W as i32,
                 H as i32,
-                vga,
                 buffers,
             );
         } else {
@@ -525,12 +396,10 @@ impl TmpObjManager {
 
         // 播放音效和处理得分
         music_player.beep(2420);
-        // Pascal 中 StartMusic(CoinMusic) 被注释掉了，只播放 beep(2420)
-        // music_player.play_coin();
-        buffers.data.coins[buffers.player] += 1; // 玩家金币数加 1
+        buffers.data.coins[buffers.player] += 1;
         buffers.add_score(50);
 
-        // 每 100 枚金币加 1 命，并把金币数清零
+        // 每100枚金币加1命，并把金币数清零
         if buffers.data.coins[buffers.player] % 100 == 0 {
             self.add_life(buffers, music_player);
             buffers.data.coins[buffers.player] = 0;

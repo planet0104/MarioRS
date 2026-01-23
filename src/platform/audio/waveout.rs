@@ -7,8 +7,8 @@
 
 #![allow(nonstandard_style)]
 
-use std::ptr;
 use super::super::AudioBackend;
+use std::ptr;
 
 // ============================================================================
 // WinMM FFI 绑定
@@ -42,7 +42,14 @@ type MMRESULT = u32;
 
 #[link(name = "winmm")]
 unsafe extern "system" {
-    fn waveOutOpen(phwo: *mut HWAVEOUT, uDeviceID: u32, pwfx: *const WAVEFORMATEX, dwCallback: usize, dwInstance: usize, dwFlags: u32) -> MMRESULT;
+    fn waveOutOpen(
+        phwo: *mut HWAVEOUT,
+        uDeviceID: u32,
+        pwfx: *const WAVEFORMATEX,
+        dwCallback: usize,
+        dwInstance: usize,
+        dwFlags: u32,
+    ) -> MMRESULT;
     fn waveOutPrepareHeader(hwo: HWAVEOUT, pwh: *mut WAVEHDR, cbwh: u32) -> MMRESULT;
     fn waveOutWrite(hwo: HWAVEOUT, pwh: *mut WAVEHDR, cbwh: u32) -> MMRESULT;
     fn waveOutUnprepareHeader(hwo: HWAVEOUT, pwh: *mut WAVEHDR, cbwh: u32) -> MMRESULT;
@@ -154,12 +161,12 @@ impl WaveOutAudio {
     fn generate_square_wave(&self, frequency: f32, duration_s: f32) -> Vec<i16> {
         let total_samples = (duration_s * SAMPLE_RATE as f32) as usize;
         let amplitude = (16000.0 * self.volume.clamp(0.0, 1.0)) as i16;
-        
+
         if frequency < 20.0 {
             // 频率太低，返回静音
             return vec![0i16; total_samples];
         }
-        
+
         let samples_per_period = ((SAMPLE_RATE as f32) / frequency).max(2.0) as usize;
         let half = samples_per_period / 2;
 
@@ -186,7 +193,7 @@ impl WaveOutAudio {
             let idx = (start + i) % NUM_BUFFERS;
             if !self.buffers[idx].in_use {
                 self.next_buffer = (idx + 1) % NUM_BUFFERS;
-                
+
                 let buf = &mut self.buffers[idx];
                 buf.data = samples;
                 buf.in_use = true;
@@ -200,12 +207,14 @@ impl WaveOutAudio {
                         self.hwo,
                         &mut buf.header,
                         std::mem::size_of::<WAVEHDR>() as u32,
-                    ) == 0 {
+                    ) == 0
+                    {
                         if waveOutWrite(
                             self.hwo,
                             &mut buf.header,
                             std::mem::size_of::<WAVEHDR>() as u32,
-                        ) != 0 {
+                        ) != 0
+                        {
                             // 写入失败，取消准备
                             waveOutUnprepareHeader(
                                 self.hwo,
@@ -237,7 +246,7 @@ impl Drop for WaveOutAudio {
             unsafe {
                 // 停止所有播放
                 waveOutReset(self.hwo);
-                
+
                 // 取消所有已准备的缓冲区
                 for buf in &mut self.buffers {
                     if buf.in_use && (buf.header.dwFlags & WHDR_PREPARED) != 0 {
@@ -248,7 +257,7 @@ impl Drop for WaveOutAudio {
                         );
                     }
                 }
-                
+
                 waveOutClose(self.hwo);
             }
         }
@@ -261,10 +270,7 @@ impl AudioBackend for WaveOutAudio {
             return;
         }
 
-        let samples = self.generate_square_wave(
-            frequency as f32,
-            duration_ms as f32 / 1000.0,
-        );
+        let samples = self.generate_square_wave(frequency as f32, duration_ms as f32 / 1000.0);
         self.submit_buffer(samples);
     }
 

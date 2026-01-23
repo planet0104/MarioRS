@@ -1,13 +1,14 @@
 use crate::buffers::*;
 use crate::figures::Figures;
 use crate::glitter::*;
+use crate::gpu::{RenderCommand, SpriteInstance};
 use crate::music::*;
+use crate::render_state::*;
 use crate::sprites::SpriteDataManager;
 use crate::tmpobj::TP_FIRE;
 use crate::tmpobj::TP_HIT;
 use crate::tmpobj::TmpObjManager;
 use crate::utils::*;
-use crate::vga256::*;
 
 // Constants
 pub const START_ENEMIES_AT: i32 = 2;
@@ -83,8 +84,6 @@ struct EnemyRec {
     counter: i32,
     status: i32,
     dir_counter: u8,
-    // Pascal: BackGr: array[0..MAX_PAGE] of Integer; 0 表示无效（句柄版，避免 x>255 截断）
-    back_gr: Vec<i32>,
 }
 
 impl Default for EnemyRec {
@@ -105,7 +104,6 @@ impl Default for EnemyRec {
             counter: 0,
             status: ENEMY_GROUNDED,
             dir_counter: 0,
-            back_gr: vec![0; MAX_PAGE as usize + 1],
         }
     }
 }
@@ -222,6 +220,10 @@ impl Enemies {
                 enemy.tp = TP_DEAD_VERT_PLANT;
                 enemy.delay_counter = 0;
                 enemy.y_vel = 0;
+                // 对齐 原版：死亡特效必须固定在击中位置，不能回到管道口
+                enemy.status = 0;
+                enemy.last_x_pos = enemy.x_pos;
+                enemy.last_y_pos = enemy.y_pos;
                 buffers.add_score(100);
             }
             _ => {}
@@ -232,14 +234,14 @@ impl Enemies {
         &self,
         x: i32,
         y: i32,
-        vga: &mut VGA,
+        _render_state: &mut RenderState,
         buffers: &mut Buffers,
         tmp_obj_manager: &mut TmpObjManager,
         music_player: &MusicPlayer,
     ) {
         music_player.beep(100);
         if x + W > buffers.x_view && x < buffers.x_view + SCREEN_WIDTH as i32 {
-            tmp_obj_manager.new_temp_obj(TP_HIT, x, y, 0, 0, W, H, vga, buffers);
+            tmp_obj_manager.new_temp_obj(TP_HIT, x, y, 0, 0, W, H, buffers);
         }
     }
 
@@ -247,7 +249,7 @@ impl Enemies {
         &self,
         x: i32,
         y: i32,
-        vga: &mut VGA,
+        _render_state: &mut RenderState,
         buffers: &mut Buffers,
         tmp_obj_manager: &mut TmpObjManager,
         music_player: &MusicPlayer,
@@ -256,7 +258,7 @@ impl Enemies {
         let x = x - 4;
         let y = y - 4;
         if x + W > buffers.x_view && x < buffers.x_view + SCREEN_WIDTH as i32 {
-            tmp_obj_manager.new_temp_obj(TP_FIRE, x, y, 0, 0, W, H, vga, buffers);
+            tmp_obj_manager.new_temp_obj(TP_FIRE, x, y, 0, 0, W, H, buffers);
         }
     }
 
@@ -410,7 +412,7 @@ impl Enemies {
         enemy.delay_counter = 0;
         enemy.dir_counter = 0;
         enemy.status = ENEMY_GROUNDED;
-        enemy.back_gr = vec![0; MAX_PAGE as usize + 1];
+        // GPU渲染每帧完全重绘，不需要背景保存/恢复
         enemy.counter = 0;
 
         match init_type {
@@ -434,377 +436,365 @@ impl Enemies {
         self.num_enemies = self.active_enemies.len();
     }
 
-    pub fn show_enemies(
-        &mut self,
-        vga: &mut VGA,
-        buffers: &mut Buffers,
-        sprites: &SpriteDataManager,
-        glitter_sys: &mut GlitterSystem,
+    /// GPU渲染: 收集所有敌人的精灵实例
+    /// 替代show_enemies，不再直接绘制到VGA，而是收集RenderCommand
+    /// 使用SpriteId和着色器翻转，而非动态生成的镜像ImageBuffer
+    /// 注意：火花效果(glitter)在move_enemies中通过glitter_sys创建
+    pub fn collect_enemy_sprites_gpu(
+        &self,
+        commands: &mut Vec<RenderCommand>,
+        buffers: &Buffers,
+        atlas: &crate::sprites::SpriteAtlas,
     ) {
-        let page = vga.current_page() as usize;
+        use crate::sprites::SpriteId;
 
-        // Rust 的 Vec 是 0-based；这里必须遍历 active_enemies 本身，不能用 1..=num_enemies
         for &j in self.active_enemies.iter() {
             let j = j as usize;
             if j >= self.enemies.len() {
                 continue;
             }
+            let enemy = &self.enemies[j];
 
-            let enemy = &mut self.enemies[j];
-
-            if (enemy.x_pos as i32 + 1 * W < buffers.x_view)
-                || (enemy.x_pos > buffers.x_view + SCREEN_WIDTH as i32 + 0 * W)
+            // 检查是否在可视区域内
+            if (enemy.x_pos as i32 + W < buffers.x_view)
+                || (enemy.x_pos > buffers.x_view + SCREEN_WIDTH as i32)
                 || (enemy.y_pos >= buffers.y_view + SCREEN_HEIGHT as i32)
             {
-                enemy.back_gr[page] = 0;
-            } else {
-                if enemy.tp == TP_FIREBALL || enemy.tp == TP_DYING_FIREBALL {
-                    enemy.back_gr[page] =
-                        vga.push_backgr_address_world(enemy.x_pos, enemy.y_pos, W, H / 2);
-                } else {
-                    if enemy.tp == TP_VERT_PLANT || enemy.tp == TP_DEAD_VERT_PLANT {
-                        enemy.back_gr[page] =
-                            vga.push_backgr_address_world(enemy.x_pos, enemy.y_pos, 24, 20);
-                    } else if matches!(
-                        enemy.tp,
-                        TP_KOOPA
-                            | TP_SLEEPING_KOOPA
-                            | TP_WAKING_KOOPA
-                            | TP_RUNNING_KOOPA
-                            | TP_DYING_KOOPA
-                            | TP_DEAD_KOOPA
-                    ) {
-                        enemy.back_gr[page] =
-                            vga.push_backgr_address_world(enemy.x_pos, enemy.y_pos - 10, 24, 24);
-                    } else {
-                        enemy.back_gr[page] =
-                            vga.push_backgr_address_world(enemy.x_pos, enemy.y_pos, W + 4, H);
-                    }
-                }
+                continue;
+            }
 
-                match enemy.tp {
-                    TP_CHIBIBO => {
-                        vga.draw_image_imagebuffer_world(
-                            enemy.x_pos,
-                            enemy.y_pos,
-                            &self.enemy_pictures[1 + 3 * enemy.sub_tp as usize]
-                                [(enemy.dir_counter % 32 < 16) as usize],
-                        );
-                    }
-                    TP_FLAT_CHIBIBO => {
-                        vga.draw_image_imagebuffer_world(
-                            enemy.x_pos,
-                            enemy.y_pos,
-                            &self.enemy_pictures[2 + 3 * enemy.sub_tp as usize]
-                                [(enemy.dir_counter % 32 < 16) as usize],
-                        );
-                    }
-                    TP_DEAD_CHIBIBO => {
-                        vga.up_side_down_imagebuffer_world(
-                            enemy.x_pos,
-                            enemy.y_pos,
-                            &self.enemy_pictures[1][LEFT],
-                        );
-                    }
-                    TP_RISING_CHAMP => {
-                        if enemy.y_pos != (enemy.map_y * H) {
-                            if enemy.sub_tp == 0 {
-                                vga.draw_part_imagebuffer_world(
-                                    enemy.x_pos,
-                                    enemy.y_pos,
-                                    0,
-                                    (H - (enemy.y_pos % H) - 1) as usize,
-                                    &sprites.CHAMP_000,
-                                );
-                            } else {
-                                vga.draw_part_imagebuffer_world(
-                                    enemy.x_pos,
-                                    enemy.y_pos,
-                                    0,
-                                    (H - (enemy.y_pos % H) - 1) as usize,
-                                    &sprites.POISON_000,
-                                );
-                            }
-                        }
-                    }
-                    TP_CHAMP => {
-                        if enemy.sub_tp == 0 {
-                            vga.draw_image_imagebuffer_world(
-                                enemy.x_pos,
-                                enemy.y_pos,
-                                &sprites.CHAMP_000,
-                            );
-                        } else {
-                            vga.draw_image_imagebuffer_world(
-                                enemy.x_pos,
-                                enemy.y_pos,
-                                &sprites.POISON_000,
-                            );
-                        }
-                    }
-                    TP_RISING_LIFE => {
-                        if enemy.y_pos != (enemy.map_y * H) {
-                            vga.draw_part_imagebuffer_world(
-                                enemy.x_pos,
-                                enemy.y_pos,
-                                0,
-                                (H - (enemy.y_pos % H) - 1) as usize,
-                                &sprites.LIFE_000,
-                            );
-                        }
-                    }
-                    TP_LIFE => {
-                        vga.draw_image_imagebuffer_world(
-                            enemy.x_pos,
-                            enemy.y_pos,
-                            &sprites.LIFE_000,
-                        );
-                    }
-                    TP_RISING_FLOWER => {
-                        if enemy.y_pos != (enemy.map_y * H) {
-                            vga.draw_part_imagebuffer_world(
-                                enemy.x_pos,
-                                enemy.y_pos,
-                                0,
-                                (H - (enemy.y_pos % H) - 1) as usize,
-                                &sprites.FLOWER_000,
-                            );
-                        }
-                    }
-                    TP_FLOWER => {
-                        vga.draw_image_imagebuffer_world(
-                            enemy.x_pos,
-                            enemy.y_pos,
-                            &sprites.FLOWER_000,
-                        );
-                    }
-                    TP_RISING_STAR => {
-                        if enemy.y_pos != (enemy.map_y * H) {
-                            vga.draw_part_imagebuffer_world(
-                                enemy.x_pos,
-                                enemy.y_pos,
-                                0,
-                                (H - (enemy.y_pos % H) - 1) as usize,
-                                &sprites.STAR_000,
-                            );
-                        }
-                    }
-                    TP_STAR => {
-                        vga.draw_image_imagebuffer_world(
-                            enemy.x_pos,
-                            enemy.y_pos,
-                            &sprites.STAR_000,
-                        );
-                    }
-                    TP_FIREBALL => {
-                        if enemy.x_pos % 4 < 2 {
-                            vga.draw_image_imagebuffer_world(
-                                enemy.x_pos,
-                                enemy.y_pos,
-                                &sprites.FIRE_000,
-                            );
-                        } else {
-                            vga.draw_image_imagebuffer_world(
-                                enemy.x_pos,
-                                enemy.y_pos,
-                                &sprites.FIRE_001,
-                            );
-                        }
-                    }
-                    TP_VERT_FISH => {
-                        if (enemy.y_vel != 0) || (enemy.y_pos < NV * H - H) {
-                            vga.draw_image_imagebuffer_world(
-                                enemy.x_pos,
-                                enemy.y_pos,
-                                &self.enemy_pictures[3][(self.player_x1 > enemy.x_pos) as usize],
-                            );
-                        }
-                    }
-                    TP_DEAD_VERT_FISH => {
-                        if (enemy.y_pos < NV * H - H) || (enemy.y_vel != 0) {
-                            vga.up_side_down_imagebuffer_world(
-                                enemy.x_pos,
-                                enemy.y_pos,
-                                &self.enemy_pictures[3][(self.player_x1 <= enemy.x_pos) as usize],
-                            );
-                        }
-                    }
-                    TP_VERT_FIREBALL => {
-                        if (enemy.delay_counter - enemy.move_delay).abs() <= 1 {
-                            vga.draw_image_imagebuffer_world(
-                                enemy.x_pos,
-                                enemy.y_pos,
-                                &self.fire_ball_list[random_usize(4)],
-                            );
-                            glitter_sys.new_glitter(
-                                enemy.x_pos + random_i32(W),
-                                enemy.y_pos + random_i32(H),
-                                57 + random_u8(7),
-                                14 + random_u8(20),
-                                buffers,
-                            );
-                            glitter_sys.new_star(
-                                enemy.x_pos + random_i32(W),
-                                enemy.y_pos + random_i32(H),
-                                57 + random_u8(7),
-                                14 + random_u8(20),
-                                buffers,
-                            );
-                        }
-                    }
-                    TP_VERT_PLANT => {
-                        let fig = if self.time_counter % 32 < 16 {
-                            match enemy.sub_tp {
-                                0 | 1 => &sprites.PPLANT_002,
-                                _ => &sprites.PPLANT_000,
-                            }
-                        } else {
-                            match enemy.sub_tp {
-                                0 | 1 => &sprites.PPLANT_003,
-                                _ => &sprites.PPLANT_001,
-                            }
-                        };
-                        // 计算可见高度：当食人花缩回管道内部时，y_pos增大，可见高度减小
-                        // 如果结果为负数，说明完全隐藏在管道内，不应绘制
-                        let visible_height = (enemy.map_y * H) - enemy.y_pos - 1;
-                        if visible_height >= 0 {
-                            vga.draw_part_imagebuffer_world(
-                                enemy.x_pos,
-                                enemy.y_pos,
-                                0,
-                                visible_height as usize,
-                                fig,
-                            );
-                        }
-                    }
-                    TP_DEAD_VERT_PLANT => {
-                        enemy.delay_counter = 0;
-                        enemy.move_delay = 0;
-                        enemy.y_vel = 0;
-                        enemy.status += 1;
-                        if enemy.status < 12 {
-                            vga.draw_image_imagebuffer_world(
-                                enemy.x_pos,
-                                enemy.y_pos,
-                                &sprites.HIT_000,
-                            );
-                        } else if enemy.status > 14 {
-                            enemy.tp = TP_DYING;
-                        }
-                    }
-                    TP_RED => {
-                        vga.draw_image_imagebuffer_world(
-                            enemy.x_pos,
-                            enemy.y_pos,
-                            &self.enemy_pictures[6 + ((enemy.dir_counter % 16 <= 8) as usize)]
-                                [(enemy.x_vel > 0) as usize],
-                        );
-                    }
-                    TP_DEAD_RED => {
-                        vga.up_side_down_imagebuffer_world(
-                            enemy.x_pos,
-                            enemy.y_pos,
-                            &self.enemy_pictures[6 + ((enemy.dir_counter % 16 <= 8) as usize)]
-                                [(enemy.x_vel > 0) as usize],
-                        );
-                    }
-                    TP_KOOPA => {
-                        vga.draw_image_imagebuffer_world(
-                            enemy.x_pos,
-                            enemy.y_pos - 10,
-                            &self.koopa_list[(enemy.x_vel > 0) as usize][enemy.sub_tp as usize]
-                                [(enemy.dir_counter % 16 <= 8) as usize],
-                        );
-                    }
-                    TP_WAKING_KOOPA | TP_RUNNING_KOOPA => {
-                        let base = 8 + 2 * enemy.sub_tp;
-                        let idx = if enemy.dir_counter % 16 <= 8 {
-                            base + 1
-                        } else {
-                            base
-                        };
-                        let idx = idx as usize;
-                        let frame = if enemy.dir_counter % 32 <= 16 { 1 } else { 0 };
-                        vga.draw_image_imagebuffer_world(
-                            enemy.x_pos,
-                            enemy.y_pos,
-                            &self.enemy_pictures[idx][frame],
-                        );
-                    }
-                    TP_SLEEPING_KOOPA => {
-                        vga.draw_image_imagebuffer_world(
-                            enemy.x_pos,
-                            enemy.y_pos,
-                            &self.enemy_pictures[8 + 2 * (enemy.sub_tp as usize)][0],
-                        );
-                    }
-                    TP_DEAD_KOOPA => {
-                        vga.up_side_down_imagebuffer_world(
-                            enemy.x_pos,
-                            enemy.y_pos,
-                            &self.enemy_pictures[8 + 2 * enemy.sub_tp as usize]
-                                [(enemy.dir_counter % 16 <= 8) as usize],
-                        );
-                    }
-                    TP_BLOCK_LIFT => {
-                        vga.draw_image_imagebuffer_world(
-                            enemy.x_pos,
-                            enemy.y_pos,
-                            &sprites.LIFT1_000,
-                        );
-                    }
-                    TP_DONUT => {
-                        if enemy.status == 0 {
-                            vga.draw_image_imagebuffer_world(
-                                enemy.x_pos,
-                                enemy.y_pos,
-                                &sprites.DONUT_000,
-                            );
-                            if enemy.y_vel == 0 {
-                                enemy.counter = 0;
-                            }
-                        } else {
-                            vga.draw_image_imagebuffer_world(
-                                enemy.x_pos,
-                                enemy.y_pos,
-                                &sprites.DONUT_001,
-                            );
-                            enemy.status -= 1;
-                        }
-                        if enemy.y_vel > 0 {
-                            if enemy.counter % 24 == 0 {
-                                enemy.y_vel += 1;
-                            }
-                        }
-                        enemy.counter += 1;
-                    }
-                    _ => {}
+            // 计算屏幕坐标
+            let sx = (enemy.x_pos - buffers.x_view) as f32;
+            let sy = (enemy.y_pos - buffers.y_view) as f32;
+
+            match enemy.tp {
+                TP_CHIBIBO => {
+                    // 对齐 原版: TP_CHIBIBO 使用 FigList[1 + 3*sub_tp] 的单个图像，
+                    // 并用 dir_counter 在左右镜像之间切换（作为走路动画效果）。
+                    let sprite_id = if enemy.sub_tp == 0 {
+                        SpriteId::CHIBIBO_000
+                    } else {
+                        SpriteId::CHIBIBO_002
+                    };
+                    let flip_x = !(enemy.dir_counter % 32 < 16);
+                    let inst = self.create_enemy_sprite(atlas, sprite_id, sx, sy, flip_x, false);
+                    commands.push(RenderCommand::DrawSprite(inst));
                 }
+                TP_FLAT_CHIBIBO => {
+                    // 被踩扁的栗子怪
+                    let sprite_id = if enemy.sub_tp == 0 {
+                        SpriteId::CHIBIBO_001
+                    } else {
+                        SpriteId::CHIBIBO_003
+                    };
+                    let flip_x = !(enemy.dir_counter % 32 < 16);
+                    let inst = self.create_enemy_sprite(atlas, sprite_id, sx, sy, flip_x, false);
+                    commands.push(RenderCommand::DrawSprite(inst));
+                }
+                TP_DEAD_CHIBIBO => {
+                    // 死亡栗子怪 (上下翻转)
+                    let inst =
+                        self.create_enemy_sprite(atlas, SpriteId::CHIBIBO_000, sx, sy, true, true);
+                    commands.push(RenderCommand::DrawSprite(inst));
+                }
+                TP_RISING_CHAMP => {
+                    if enemy.y_pos != (enemy.map_y * H) {
+                        let visible_h = (H - (enemy.y_pos % H) - 1) as f32;
+                        let sprite_id = if enemy.sub_tp == 0 {
+                            SpriteId::CHAMP_000
+                        } else {
+                            SpriteId::POISON_000
+                        };
+                        let inst = self.create_enemy_sprite(atlas, sprite_id, sx, sy, false, false);
+                        commands.push(RenderCommand::DrawSpritePart {
+                            sprite: inst,
+                            visible_height: visible_h,
+                        });
+                    }
+                }
+                TP_CHAMP => {
+                    let sprite_id = if enemy.sub_tp == 0 {
+                        SpriteId::CHAMP_000
+                    } else {
+                        SpriteId::POISON_000
+                    };
+                    let inst = self.create_enemy_sprite(atlas, sprite_id, sx, sy, false, false);
+                    commands.push(RenderCommand::DrawSprite(inst));
+                }
+                TP_RISING_LIFE => {
+                    if enemy.y_pos != (enemy.map_y * H) {
+                        let visible_h = (H - (enemy.y_pos % H) - 1) as f32;
+                        let inst = self.create_enemy_sprite(
+                            atlas,
+                            SpriteId::LIFE_000,
+                            sx,
+                            sy,
+                            false,
+                            false,
+                        );
+                        commands.push(RenderCommand::DrawSpritePart {
+                            sprite: inst,
+                            visible_height: visible_h,
+                        });
+                    }
+                }
+                TP_LIFE => {
+                    let inst =
+                        self.create_enemy_sprite(atlas, SpriteId::LIFE_000, sx, sy, false, false);
+                    commands.push(RenderCommand::DrawSprite(inst));
+                }
+                TP_RISING_FLOWER => {
+                    if enemy.y_pos != (enemy.map_y * H) {
+                        let visible_h = (H - (enemy.y_pos % H) - 1) as f32;
+                        let inst = self.create_enemy_sprite(
+                            atlas,
+                            SpriteId::FLOWER_000,
+                            sx,
+                            sy,
+                            false,
+                            false,
+                        );
+                        commands.push(RenderCommand::DrawSpritePart {
+                            sprite: inst,
+                            visible_height: visible_h,
+                        });
+                    }
+                }
+                TP_FLOWER => {
+                    let inst =
+                        self.create_enemy_sprite(atlas, SpriteId::FLOWER_000, sx, sy, false, false);
+                    commands.push(RenderCommand::DrawSprite(inst));
+                }
+                TP_RISING_STAR => {
+                    if enemy.y_pos != (enemy.map_y * H) {
+                        let visible_h = (H - (enemy.y_pos % H) - 1) as f32;
+                        let inst = self.create_enemy_sprite(
+                            atlas,
+                            SpriteId::STAR_000,
+                            sx,
+                            sy,
+                            false,
+                            false,
+                        );
+                        commands.push(RenderCommand::DrawSpritePart {
+                            sprite: inst,
+                            visible_height: visible_h,
+                        });
+                    }
+                }
+                TP_STAR => {
+                    let inst =
+                        self.create_enemy_sprite(atlas, SpriteId::STAR_000, sx, sy, false, false);
+                    commands.push(RenderCommand::DrawSprite(inst));
+                }
+                TP_FIREBALL => {
+                    let sprite_id = if enemy.x_pos % 4 < 2 {
+                        SpriteId::FIRE_000
+                    } else {
+                        SpriteId::FIRE_001
+                    };
+                    let inst = self.create_enemy_sprite(atlas, sprite_id, sx, sy, false, false);
+                    commands.push(RenderCommand::DrawSprite(inst));
+                }
+                TP_VERT_FISH => {
+                    if (enemy.y_vel != 0) || (enemy.y_pos < NV * H - H) {
+                        let flip_x = self.player_x1 > enemy.x_pos;
+                        let inst = self.create_enemy_sprite(
+                            atlas,
+                            SpriteId::FISH_001,
+                            sx,
+                            sy,
+                            flip_x,
+                            false,
+                        );
+                        commands.push(RenderCommand::DrawSprite(inst));
+                    }
+                }
+                TP_DEAD_VERT_FISH => {
+                    if (enemy.y_pos < NV * H - H) || (enemy.y_vel != 0) {
+                        let flip_x = self.player_x1 <= enemy.x_pos;
+                        let inst = self.create_enemy_sprite(
+                            atlas,
+                            SpriteId::FISH_001,
+                            sx,
+                            sy,
+                            flip_x,
+                            true,
+                        );
+                        commands.push(RenderCommand::DrawSprite(inst));
+                    }
+                }
+                TP_VERT_FIREBALL => {
+                    if (enemy.delay_counter - enemy.move_delay).abs() <= 1 {
+                        // 随机选择火球帧 (F_000~F_003)
+                        let sprite_id = match random_usize(4) {
+                            0 => SpriteId::F_000,
+                            1 => SpriteId::F_001,
+                            2 => SpriteId::F_002,
+                            _ => SpriteId::F_003,
+                        };
+                        let inst = self.create_enemy_sprite(atlas, sprite_id, sx, sy, false, false);
+                        commands.push(RenderCommand::DrawSprite(inst));
+                        // 火花效果在move_enemies中通过glitter_sys创建
+                    }
+                }
+                TP_VERT_PLANT => {
+                    let sprite_id = if self.time_counter % 32 < 16 {
+                        match enemy.sub_tp {
+                            0 | 1 => SpriteId::PPLANT_002,
+                            _ => SpriteId::PPLANT_000,
+                        }
+                    } else {
+                        match enemy.sub_tp {
+                            0 | 1 => SpriteId::PPLANT_003,
+                            _ => SpriteId::PPLANT_001,
+                        }
+                    };
+                    let visible_h = (enemy.map_y * H) - enemy.y_pos - 1;
+                    if visible_h >= 0 {
+                        let inst = self.create_enemy_sprite(atlas, sprite_id, sx, sy, false, false);
+                        commands.push(RenderCommand::DrawSpritePart {
+                            sprite: inst,
+                            visible_height: visible_h as f32,
+                        });
+                    }
+                }
+                TP_DEAD_VERT_PLANT => {
+                    if self.enemies[j].status < 12 {
+                        let inst = self.create_enemy_sprite(
+                            atlas,
+                            SpriteId::HIT_000,
+                            sx,
+                            sy,
+                            false,
+                            false,
+                        );
+                        commands.push(RenderCommand::DrawSprite(inst));
+                    }
+                }
+                TP_RED => {
+                    let sprite_id = if enemy.dir_counter % 16 <= 8 {
+                        SpriteId::RED_000
+                    } else {
+                        SpriteId::RED_001
+                    };
+                    let flip_x = enemy.x_vel > 0;
+                    let inst = self.create_enemy_sprite(atlas, sprite_id, sx, sy, flip_x, false);
+                    commands.push(RenderCommand::DrawSprite(inst));
+                }
+                TP_DEAD_RED => {
+                    let sprite_id = if enemy.dir_counter % 16 <= 8 {
+                        SpriteId::RED_000
+                    } else {
+                        SpriteId::RED_001
+                    };
+                    let flip_x = enemy.x_vel > 0;
+                    let inst = self.create_enemy_sprite(atlas, sprite_id, sx, sy, flip_x, true);
+                    commands.push(RenderCommand::DrawSprite(inst));
+                }
+                TP_KOOPA => {
+                    // 对齐 原版: 乌龟本体（有头）使用 GRKOOPA/RDKOOPA + y_pos-10
+                    let sprite_id = match (enemy.sub_tp, enemy.dir_counter % 16 <= 8) {
+                        (0, true) => SpriteId::GRKOOPA_000,
+                        (0, false) => SpriteId::GRKOOPA_001,
+                        (_, true) => SpriteId::RDKOOPA_000,
+                        (_, false) => SpriteId::RDKOOPA_001,
+                    };
+                    let flip_x = enemy.x_vel > 0;
+                    let inst =
+                        self.create_enemy_sprite(atlas, sprite_id, sx, sy - 10.0, flip_x, false);
+                    commands.push(RenderCommand::DrawSprite(inst));
+                }
+                TP_WAKING_KOOPA | TP_RUNNING_KOOPA => {
+                    // 对齐 原版: shell 跑动/抖动帧 = GRKP_000/001 + 左右镜像切换
+                    let base0 = if enemy.sub_tp == 0 {
+                        SpriteId::GRKP_000
+                    } else {
+                        SpriteId::RDKP_000
+                    };
+                    let base1 = if enemy.sub_tp == 0 {
+                        SpriteId::GRKP_001
+                    } else {
+                        SpriteId::RDKP_001
+                    };
+                    let sprite_id = if enemy.dir_counter % 16 <= 8 {
+                        base1
+                    } else {
+                        base0
+                    };
+                    let flip_x = !(enemy.dir_counter % 32 <= 16);
+                    let inst = self.create_enemy_sprite(atlas, sprite_id, sx, sy, flip_x, false);
+                    commands.push(RenderCommand::DrawSprite(inst));
+                }
+                TP_SLEEPING_KOOPA => {
+                    // 原版: enemy_pictures[8 + 2*sub_tp][0]（固定使用镜像帧）
+                    let sprite_id = if enemy.sub_tp == 0 {
+                        SpriteId::GRKP_000
+                    } else {
+                        SpriteId::RDKP_000
+                    };
+                    let inst = self.create_enemy_sprite(atlas, sprite_id, sx, sy, true, false);
+                    commands.push(RenderCommand::DrawSprite(inst));
+                }
+                TP_DEAD_KOOPA => {
+                    // 原版: up_side_down(enemy_pictures[8 + 2*sub_tp][(dir_counter%16<=8)])
+                    let sprite_id = if enemy.sub_tp == 0 {
+                        SpriteId::GRKP_000
+                    } else {
+                        SpriteId::RDKP_000
+                    };
+                    let flip_x = !(enemy.dir_counter % 16 <= 8);
+                    let inst = self.create_enemy_sprite(atlas, sprite_id, sx, sy, flip_x, true);
+                    commands.push(RenderCommand::DrawSprite(inst));
+                }
+                TP_BLOCK_LIFT => {
+                    let inst =
+                        self.create_enemy_sprite(atlas, SpriteId::LIFT1_000, sx, sy, false, false);
+                    commands.push(RenderCommand::DrawSprite(inst));
+                }
+                TP_DONUT => {
+                    let sprite_id = if enemy.status == 0 {
+                        SpriteId::DONUT_000
+                    } else {
+                        SpriteId::DONUT_001
+                    };
+                    let inst = self.create_enemy_sprite(atlas, sprite_id, sx, sy, false, false);
+                    commands.push(RenderCommand::DrawSprite(inst));
+                }
+                _ => {}
             }
         }
     }
 
-    pub fn hide_enemies(&mut self, vga: &mut VGA) {
-        let page = vga.current_page() as usize;
-        // 逆序遍历当前活跃敌人（Pascal 常用倒序安全删除；这里主要是保持绘制/擦除顺序一致）
-        for &j in self.active_enemies.iter().rev() {
-            let j = j as usize;
-            if j >= self.enemies.len() {
-                continue;
-            }
-            let enemy = &mut self.enemies[j];
-            let addr = *enemy.back_gr.get(page).unwrap_or(&0);
-            if addr != 0 {
-                vga.pop_backgr_address(addr);
-                enemy.back_gr[page] = 0;
-            }
-        }
+    /// 辅助方法：从图集创建精灵实例
+    fn create_enemy_sprite(
+        &self,
+        atlas: &crate::sprites::SpriteAtlas,
+        sprite_id: crate::sprites::SpriteId,
+        x: f32,
+        y: f32,
+        flip_x: bool,
+        flip_y: bool,
+    ) -> SpriteInstance {
+        let uv = atlas.get(sprite_id);
+        let (u, v, u_size, v_size) = uv.normalized(atlas.size());
+        SpriteInstance::new(
+            x,
+            y,
+            uv.width as f32,
+            uv.height as f32,
+            u,
+            v,
+            u_size,
+            v_size,
+        )
+        .with_flip(flip_x, flip_y)
     }
 
     fn check(
         &mut self,
         i: usize,
-        vga: &mut VGA,
+        render_state: &mut RenderState,
         buffers: &mut Buffers,
         tmp_obj_manager: &mut TmpObjManager,
         music_player: &MusicPlayer,
@@ -966,7 +956,7 @@ impl Enemies {
                         self.show_star(
                             enemy.x_pos + enemy.x_vel,
                             enemy.y_pos,
-                            vga,
+                            render_state,
                             buffers,
                             tmp_obj_manager,
                             music_player,
@@ -980,30 +970,59 @@ impl Enemies {
                         {
                             match ch {
                                 b'J' => {
-                                    tmp_obj_manager.break_block(
-                                        new_x,
-                                        l,
-                                        vga,
-                                        buffers,
-                                        music_player,
-                                    );
+                                    tmp_obj_manager.break_block(new_x, l, buffers, music_player);
                                 }
                                 b'?' => {
                                     let above_ch = buffers.world_get(new_x, l - 1);
 
                                     match above_ch as u8 {
                                         b' ' => {
-                                            tmp_obj_manager.hit_coin(new_x * W, l * H, true, vga, glitter_sys, buffers, music_player);
+                                            tmp_obj_manager.hit_coin(
+                                                new_x * W,
+                                                l * H,
+                                                true,
+                                                glitter_sys,
+                                                buffers,
+                                                music_player,
+                                            );
                                         }
                                         0xE0 => {
-                                            if buffers.data.mode[buffers.player] == 0 { // mdSmall
-                                                self.new_enemy(TP_RISING_CHAMP, 0, new_x, l, 0, -1, 1, music_player);
+                                            if buffers.data.mode[buffers.player] == 0 {
+                                                // mdSmall
+                                                self.new_enemy(
+                                                    TP_RISING_CHAMP,
+                                                    0,
+                                                    new_x,
+                                                    l,
+                                                    0,
+                                                    -1,
+                                                    1,
+                                                    music_player,
+                                                );
                                             } else {
-                                                self.new_enemy(TP_RISING_FLOWER, 0, new_x, l, 0, -1, 1, music_player);
+                                                self.new_enemy(
+                                                    TP_RISING_FLOWER,
+                                                    0,
+                                                    new_x,
+                                                    l,
+                                                    0,
+                                                    -1,
+                                                    1,
+                                                    music_player,
+                                                );
                                             }
                                         }
                                         0xE1 => {
-                                            self.new_enemy(TP_RISING_LIFE, 0, new_x, l, 0, -1, 2, music_player);
+                                            self.new_enemy(
+                                                TP_RISING_LIFE,
+                                                0,
+                                                new_x,
+                                                l,
+                                                0,
+                                                -1,
+                                                2,
+                                                music_player,
+                                            );
                                         }
                                         _ => {}
                                     }
@@ -1121,7 +1140,7 @@ impl Enemies {
                                 self.show_star(
                                     enemy.x_pos,
                                     enemy.y_pos,
-                                    vga,
+                                    render_state,
                                     buffers,
                                     tmp_obj_manager,
                                     music_player,
@@ -1130,7 +1149,7 @@ impl Enemies {
                                     self.show_star(
                                         self.enemies[j].x_pos,
                                         self.enemies[j].y_pos,
-                                        vga,
+                                        render_state,
                                         buffers,
                                         tmp_obj_manager,
                                         music_player,
@@ -1165,7 +1184,7 @@ impl Enemies {
                             self.show_star(
                                 enemy.x_pos,
                                 enemy.y_pos,
-                                vga,
+                                render_state,
                                 buffers,
                                 tmp_obj_manager,
                                 music_player,
@@ -1180,7 +1199,7 @@ impl Enemies {
 
     pub fn move_enemies(
         &mut self,
-        vga: &mut VGA,
+        render_state: &mut RenderState,
         music_player: &MusicPlayer,
         buffers: &mut Buffers,
         glitter_sys: &mut GlitterSystem,
@@ -1302,6 +1321,7 @@ impl Enemies {
                             }
                         }
                     }
+
                 }
 
                 // 处理睡眠中的库巴
@@ -1327,6 +1347,19 @@ impl Enemies {
                         } else {
                             self.enemies[j].x_vel = -1;
                         }
+                    }
+                }
+
+                // 处理死亡食人花动画（对齐原版：show_enemies中的TP_DEAD_VERT_PLANT逻辑）
+                // wgpu版本使用collect_enemy_sprites_gpu渲染，需要在move_enemies中更新状态
+                if self.enemies[j].tp == TP_DEAD_VERT_PLANT {
+                    self.enemies[j].delay_counter = 0;
+                    self.enemies[j].move_delay = 0;
+                    self.enemies[j].y_vel = 0;
+                    self.enemies[j].status += 1;
+                    // 动画播放完毕后销毁敌人
+                    if self.enemies[j].status > 14 {
+                        self.enemies[j].tp = TP_DYING;
                     }
                 }
 
@@ -1390,7 +1423,7 @@ impl Enemies {
                     // 垂直移动逻辑
                     if matches!(
                         self.enemies[j].tp,
-                        TP_VERT_FISH | TP_DEAD_VERT_FISH | TP_VERT_FIREBALL | TP_DEAD_VERT_PLANT
+                        TP_VERT_FISH | TP_DEAD_VERT_FISH | TP_VERT_FIREBALL
                     ) {
                         if (self.enemies[j].dir_counter % 3 == 0)
                             && (self.enemies[j].y_pos + H < NV * H)
@@ -1407,7 +1440,14 @@ impl Enemies {
                             self.enemies[j].y_vel += 1;
                         }
                     } else {
-                        self.check(j, vga, buffers, tmp_obj_manager, music_player, glitter_sys);
+                        self.check(
+                            j,
+                            render_state,
+                            buffers,
+                            tmp_obj_manager,
+                            music_player,
+                            glitter_sys,
+                        );
                     }
 
                     // Pascal: XPos := XPos + XVel; YPos := YPos + YVel
@@ -1420,7 +1460,7 @@ impl Enemies {
                             self.show_fire(
                                 self.enemies[j].x_pos,
                                 self.enemies[j].y_pos,
-                                vga,
+                                render_state,
                                 buffers,
                                 tmp_obj_manager,
                                 music_player,
@@ -1441,6 +1481,29 @@ impl Enemies {
                 let ly = self.enemies[j].last_y_pos;
                 self.enemies[j].x_pos = lx + (dc * xv) / (md + 1);
                 self.enemies[j].y_pos = ly + (dc * yv) / (md + 1);
+            }
+
+            // TP_VERT_FIREBALL 火花效果（严格对齐 Pascal ENEMIES.PAS ShowEnemies 第501-511行）
+            // 重要：Pascal的ShowEnemies是每帧独立执行的，不受MoveEnemies的delay条件限制
+            // 因此这个检查必须在delay_counter > move_delay条件块之外
+            if self.enemies[j].tp == TP_VERT_FIREBALL {
+                if (self.enemies[j].delay_counter - self.enemies[j].move_delay).abs() <= 1 {
+                    // 在火球附近生成随机火花（与Pascal一致，各一次调用）
+                    glitter_sys.new_glitter(
+                        self.enemies[j].x_pos + random_i32(W),
+                        self.enemies[j].y_pos + random_i32(H),
+                        57 + random_u8(7),
+                        14 + random_u8(20),
+                        buffers,
+                    );
+                    glitter_sys.new_star(
+                        self.enemies[j].x_pos + random_i32(W),
+                        self.enemies[j].y_pos + random_i32(H),
+                        57 + random_u8(7),
+                        14 + random_u8(20),
+                        buffers,
+                    );
+                }
             }
         }
 

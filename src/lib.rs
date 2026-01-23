@@ -15,32 +15,42 @@ pub extern "C" fn android_main(app: AndroidApp) {
     platform::android_main(app);
 }
 
+// GPU渲染模块 - 包含渲染数据类型和命令
+// 注意：该模块始终编译，因为数据类型被游戏逻辑使用
+// wgpu特定的渲染器在模块内部条件编译
+pub mod gpu;
+
+// CPU软件渲染模块（仅在cpu-backend时编译，用于XP兼容）
+#[cfg(feature = "cpu-backend")]
+pub mod cpu;
+
 // 游戏核心模块
+pub mod backgr;
+pub mod blocks;
 pub mod buffers;
 pub mod config;
 pub mod context;
 pub mod enemies;
-pub mod game_runner;
-pub mod play;
-pub mod players;
-pub mod utils;
-pub mod persist;
-pub mod logging;
-pub mod vga256;
-pub mod backgr;
-pub mod blocks;
 pub mod figures;
+pub mod game_runner;
 pub mod glitter;
 pub mod joystick;
 pub mod keyboard;
+pub mod logging;
 pub mod mario;
 pub mod mpal256;
 pub mod music;
 pub mod palettes;
+pub mod persist;
+pub mod play;
+pub mod players;
+pub mod render_state;
 pub mod renderer;
+pub mod sprite_assets;
 pub mod sprites;
 pub mod stars;
 pub mod status;
 pub mod tmpobj;
 pub mod txt;
+pub mod utils;
 pub mod worlds;
