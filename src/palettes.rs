@@ -109,6 +109,7 @@ impl Palettes {
 
     /// 修改单色
     pub fn change_palette(&mut self, color: usize, r: u8, g: u8, b: u8) {
+        // 内部使用 6-bit VGA 值 (0-63)
         self.palette[color][0] = r;
         self.palette[color][1] = g;
         self.palette[color][2] = b;
@@ -454,6 +455,7 @@ impl Palettes {
     }
 
     /// 设置并输出单个调色板颜色
+    /// 内部使用 6-bit VGA 值 (0-63)
     pub fn out_palette(
         &mut self,
         color: usize,

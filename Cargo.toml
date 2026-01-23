@@ -85,13 +85,12 @@ log = "0.4"
 tracing-android = { version = "0.2", optional = true }
 
 # ============================================================================
-# 触摸面板可选依赖 - PNG 解码 + 2D 绘图
+# PNG 解码 - 精灵加载必需
 # ============================================================================
 [dependencies.image]
 version = "0.25"
 default-features = false
 features = ["png"]
-optional = true
 
 [dependencies.tiny-skia]
 version = "0.11"
@@ -120,10 +119,10 @@ hashbrown = "0.15"
 [features]
 default = ["wgpu-backend", "dark-theme"]   # 默认使用 GPU + GDI回退 + 暗黑主题适配
 logging = ["dep:tracing", "dep:tracing-subscriber", "dep:tracing-wasm", "dep:tracing-android"]
-wgpu-backend = ["dep:winit", "dep:image"] # wgpu 渲染后端（跨平台，体积大）
+wgpu-backend = ["dep:winit"]              # wgpu 渲染后端（跨平台，体积大）
 gdi-backend = ["dep:windows-sys"]         # Windows GDI（仅用于窗口创建，渲染使用GPU）
 dark-theme = []                           # 暗黑主题适配（需要 Vista+ dwmapi.dll）
-touch-panel = ["dep:image", "dep:tiny-skia"] # 触摸控制面板 (PNG解码 + 2D绘图)
+touch-panel = ["dep:tiny-skia"]           # 触摸控制面板 (2D绘图)
 android = ["touch-panel"]                 # Android 平台后端 (自动启用 touch-panel)
 
 # ============================================================================
@@ -140,6 +139,7 @@ embed-resource = "3.0"
 # ============================================================================
 [dev-dependencies]
 image = "0.25"
+png = "0.17"
 winit = "0.30"
 wgpu = { version = "28.0.0", default-features = false, features = ["wgsl", "vulkan"] }
 futures = "0.3"

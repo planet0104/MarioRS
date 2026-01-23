@@ -1,10 +1,9 @@
 // 马里奥游戏精灵数据和调色板模块
 #![allow(non_snake_case)]
 #![allow(non_camel_case_types)]
-// 说明：历史版本此文件为自动生成的"硬编码数组"形式。
-// 当前版本改为：编译期嵌入 assets/sprites 目录，再在 Rust 中解析 Pascal db 数据并做 Mode X 去平面化。
+// 说明：精灵资源通过 include_bytes! 嵌入 PNG 文件，运行时解码
 
-use crate::backgr::get_generated_asset;
+use crate::sprite_assets::get_sprite;
 use crate::buffers::{ImageBuffer, ImageBuffer12x7, ImageBuffer20x24, ImageBuffer24x20};
 
 /// 调色板静态数组，索引0-159，每个元素为RGBA值
@@ -233,19 +232,18 @@ pub type SpritePlant = Sprite<20, 14>; // PALPILL 柱子装饰（修复：实际
 pub type SpriteLarge = Sprite<108, 28>; // Intro 大图
 
 // ============================================================================
-// Pascal 精灵数据加载器
+// 精灵数据加载器
 // ============================================================================
+//
+// 精灵资源通过 include_bytes! 嵌入 PNG 文件，运行时解码
+// PNG 已经是线性 row-major 格式，无需 Mode X 去平面化
 
-// include_dir removed: assets are provided by generated_assets.rs at build time.
-// Fallback runtime embedding via include_dir has been removed because all
-// sprite files are converted to binary statics during the build.
-
-/// 精灵加载器：统一封装 include_dir + Pascal db 解析 + Mode X 去平面化 + 长度校验。
+/// 精灵加载器：从嵌入的 PNG 文件加载精灵数据
 ///
 /// 说明：
-/// - Sprites 目录既有二进制 `.000`，也有 Pascal include 文本 `.$00`（db 列表）。
-/// - 游戏资源在 Pascal 原版里是编译期 include 进源码；Rust 这里用 include_dir 在编译期嵌入。
-/// - 像素数据采用 Pascal VGA256 Mode X 的 4-plane 平面布局，需要去平面化成线性 row-major 才能按 (x,y) 访问。
+/// - 精灵 PNG 通过 include_bytes! 在编译时嵌入
+/// - 启动时解码 PNG 并缓存像素数据
+/// - 像素数据是线性 row-major 格式，可直接使用
 #[derive(Clone, Copy)]
 struct SpriteLoader;
 
@@ -255,102 +253,31 @@ impl SpriteLoader {
         Self
     }
 
-    #[inline]
-    fn parse_field_name(field_name: &str) -> (&str, u16) {
-        let (base, frame) = field_name
-            .rsplit_once('_')
-            .unwrap_or_else(|| panic!("bad sprite field name: {field_name}"));
-        let frame_u16: u16 = frame
-            .parse()
-            .unwrap_or_else(|_| panic!("bad sprite frame number: {field_name}"));
-        (base, frame_u16)
-    }
-
-    fn load_raw_sprite_bytes(&self, base: &str, frame: u16) -> Vec<u8> {
-        // 优先使用 .$00 这类 Pascal include 文件
-        let ext_inc = format!("${:02}", frame);
-        let ext_bin = format!("{:03}", frame);
-        let inc_name = format!("{base}.{ext_inc}");
-        let bin_name = format!("{base}.{ext_bin}");
-        // Try generated assets (produced by build.rs) first
-        //
-        // 特例 LAVA2 000 的底图在原资源中是二进制 LAVA2 000 红色底层
-        // 同时也存在 LAVA2 00 的 pascal include 版本
-        // 这里强制优先选择 000 用于岩浆两格高度的底层贴图避免视觉不一致
-        if base == "LAVA2" && frame == 0 {
-            if let Some(bytes) = get_generated_asset(&bin_name) {
-                return bytes.to_vec();
-            }
-            if let Some(bytes) = get_generated_asset(&inc_name) {
-                return bytes.to_vec();
-            }
-        } else {
-            if let Some(bytes) = get_generated_asset(&inc_name) {
-                return bytes.to_vec();
-            }
-            if let Some(bytes) = get_generated_asset(&bin_name) {
-                return bytes.to_vec();
-            }
+    /// 加载精灵原始字节数据
+    fn load_sprite_bytes(&self, field_name: &str) -> Vec<u8> {
+        // 使用 field_name 格式 (如 "BROWN_000") 查找
+        if let Some(bytes) = get_sprite(field_name) {
+            return bytes.clone();
         }
 
-        // No runtime fallback: generated assets must contain the files.
-        panic!(
-            "sprite file not found (must be generated): {} or {}",
-            inc_name, bin_name
-        );
+        panic!("sprite not found: {}", field_name);
     }
 
-    #[inline]
-    fn verify_len(&self, label: &str, got: usize, expected: usize) {
+    /// 获取精灵像素数据（线性格式）
+    fn pixels<const WW: usize, const HH: usize>(&self, field_name: &str) -> Vec<u8> {
+        let bytes = self.load_sprite_bytes(field_name);
+        let expected = WW * HH;
         assert!(
-            got == expected,
-            "ModeX sprite length mismatch: {} got={} expected={}",
-            label,
-            got,
+            bytes.len() == expected,
+            "sprite size mismatch: {} got={} expected={}",
+            field_name,
+            bytes.len(),
             expected
         );
+        bytes
     }
 
-    fn modex_deplane(&self, label: &str, bytes: &[u8], w: usize, h: usize) -> Vec<u8> {
-        // Pascal VGA256 Mode X 平面格式：
-        // **平面优先**（所有plane0数据，然后plane1，然后plane2，然后plane3）
-        //
-        // 格式：[plane0: all_rows] [plane1: all_rows] [plane2: all_rows] [plane3: all_rows]
-        // 每个平面有 (w/4) * h 字节
-
-        assert!(
-            w % 4 == 0,
-            "ModeX requires width divisible by 4: {} w={}",
-            label,
-            w
-        );
-        self.verify_len(label, bytes.len(), w * h);
-
-        let bytes_per_line = w / 4;
-        let plane_size = bytes_per_line * h;
-        let mut out = vec![0u8; w * h];
-
-        for y in 0..h {
-            for x in 0..w {
-                let plane = x & 3;
-                let bx = x >> 2;
-                let src_idx = plane * plane_size + y * bytes_per_line + bx;
-                out[y * w + x] = bytes[src_idx];
-            }
-        }
-
-        out
-    }
-
-    fn pixels<const WW: usize, const HH: usize>(&self, field_name: &str) -> Vec<u8> {
-        let (base, frame) = Self::parse_field_name(field_name);
-        let bytes = self.load_raw_sprite_bytes(base, frame);
-
-        // 所有精灵使用标准的 ModeX 平面优先格式（包括 WOOD）
-        // Pascal 的 DrawImage 实现确认了这一点
-        self.modex_deplane(field_name, &bytes, WW, HH)
-    }
-
+    /// 获取精灵像素数据为二维数组
     fn buf<const WW: usize, const HH: usize>(&self, field_name: &str) -> [[u8; WW]; HH] {
         let pixels = self.pixels::<WW, HH>(field_name);
         let mut out = [[0u8; WW]; HH];
@@ -362,7 +289,7 @@ impl SpriteLoader {
         out
     }
 
-    /// 加载为 const-generic Sprite（替代 leak_sprite_data，消除 Box::leak）
+    /// 加载为 const-generic Sprite
     fn load_sprite<const W: usize, const H: usize>(&self, base: &str, frame: u16) -> Sprite<W, H> {
         let field_name = format!("{}_{:03}", base, frame);
         let pixels = self.buf::<W, H>(&field_name);

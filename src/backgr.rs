@@ -5,29 +5,22 @@ use crate::buffers::{H, MAX_WORLD_SIZE, NH, NV, W, WorldOptions};
 use crate::gpu::sprite_batch::FillCommand;
 use crate::palettes::Palettes;
 use crate::render_state::RenderState;
-
-// Include generated assets produced by build.rs
-include!(concat!(env!("OUT_DIR"), "/generated_assets.rs"));
-
-// Generated static slices provided by build.rs:
-// BOGEN_BK, BOGEN7_BK, BOGEN26_BK, MOUNT_BK
-// They are &[u8] slices defined in generated_assets.rs
-// e.g. pub static BOGEN_BK: &[u8] = &[..];
+use crate::sprite_assets::{get_background, get_mpal256_palette};
 
 fn bogen() -> &'static [u8] {
-    BOGEN_BK
+    get_background("BOGEN")
 }
 
 fn bogen7() -> &'static [u8] {
-    BOGEN7_BK
+    get_background("BOGEN7")
 }
 
 fn bogen26() -> &'static [u8] {
-    BOGEN26_BK
+    get_background("BOGEN26")
 }
 
 fn mount() -> &'static [u8] {
-    MOUNT_BK
+    get_background("MOUNT")
 }
 
 /// 获取 Intro 使用的云层高度表（BOGEN26）
@@ -40,9 +33,9 @@ pub fn backgr_map_mount() -> &'static [u8] {
     mount()
 }
 
-/// 获取 MPAL256 调色板（编译期生成的静态常量）
+/// 获取 MPAL256 调色板
 pub fn get_generated_asset_mpal256() -> &'static crate::palettes::PalType {
-    &MPAL256_PALETTE
+    get_mpal256_palette()
 }
 
 pub const LEFT: i32 = 0;

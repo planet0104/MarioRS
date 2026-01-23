@@ -40,6 +40,7 @@ pub mod play;
 pub mod players;
 pub mod render_state;
 pub mod renderer;
+pub mod sprite_assets;
 pub mod sprites;
 pub mod stars;
 pub mod status;

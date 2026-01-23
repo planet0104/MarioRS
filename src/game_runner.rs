@@ -81,11 +81,10 @@ impl GameState {
         let mut rgba = [[0u8; 4]; 256];
         let palette = &self.render_state.palette.palette;
         for i in 0..256 {
-            // VGA调色板是6位色（0-63），需要转换为8位（0-255）
-            // 乘以4或使用位移来扩展范围
-            rgba[i][0] = (palette[i][0] as u16 * 255 / 63).min(255) as u8;
-            rgba[i][1] = (palette[i][1] as u16 * 255 / 63).min(255) as u8;
-            rgba[i][2] = (palette[i][2] as u16 * 255 / 63).min(255) as u8;
+            // 内部调色板使用 6-bit VGA 值 (0-63)，输出到 GPU 时转换为 8-bit (0-255)
+            rgba[i][0] = ((palette[i][0] as u16) * 255 / 63).min(255) as u8;
+            rgba[i][1] = ((palette[i][1] as u16) * 255 / 63).min(255) as u8;
+            rgba[i][2] = ((palette[i][2] as u16) * 255 / 63).min(255) as u8;
             rgba[i][3] = 255; // 不透明
         }
         rgba
