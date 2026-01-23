@@ -1031,11 +1031,9 @@ impl Figures {
                     None
                 }
                 4 => {
-                    // 岩浆使用 PutImage 语义（索引0也要绘制）
+                    // design=4: 使用 DrawImage 语义（索引0透明）
                     let uv = atlas.get(SpriteId::LAVA_001);
-                    commands.push(RenderCommand::Sprite(
-                        SpriteCommand::new(xpos, ypos, uv).with_opaque(true),
-                    ));
+                    commands.push(RenderCommand::Sprite(SpriteCommand::new(xpos, ypos, uv)));
                     None
                 }
                 5 => {
