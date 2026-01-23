@@ -1322,26 +1322,6 @@ impl Enemies {
                         }
                     }
 
-                    // TP_VERT_FIREBALL 火花效果（对齐 原版 show_enemies 逻辑）
-                    if self.enemies[j].tp == TP_VERT_FIREBALL {
-                        if (self.enemies[j].delay_counter - self.enemies[j].move_delay).abs() <= 1 {
-                            // 在火球附近生成随机火花
-                            glitter_sys.new_glitter(
-                                self.enemies[j].x_pos + random_i32(W),
-                                self.enemies[j].y_pos + random_i32(H),
-                                57 + random_u8(7),
-                                14 + random_u8(20),
-                                buffers,
-                            );
-                            glitter_sys.new_star(
-                                self.enemies[j].x_pos + random_i32(W),
-                                self.enemies[j].y_pos + random_i32(H),
-                                57 + random_u8(7),
-                                14 + random_u8(20),
-                                buffers,
-                            );
-                        }
-                    }
                 }
 
                 // 处理睡眠中的库巴
@@ -1501,6 +1481,29 @@ impl Enemies {
                 let ly = self.enemies[j].last_y_pos;
                 self.enemies[j].x_pos = lx + (dc * xv) / (md + 1);
                 self.enemies[j].y_pos = ly + (dc * yv) / (md + 1);
+            }
+
+            // TP_VERT_FIREBALL 火花效果（严格对齐 Pascal ENEMIES.PAS ShowEnemies 第501-511行）
+            // 重要：Pascal的ShowEnemies是每帧独立执行的，不受MoveEnemies的delay条件限制
+            // 因此这个检查必须在delay_counter > move_delay条件块之外
+            if self.enemies[j].tp == TP_VERT_FIREBALL {
+                if (self.enemies[j].delay_counter - self.enemies[j].move_delay).abs() <= 1 {
+                    // 在火球附近生成随机火花（与Pascal一致，各一次调用）
+                    glitter_sys.new_glitter(
+                        self.enemies[j].x_pos + random_i32(W),
+                        self.enemies[j].y_pos + random_i32(H),
+                        57 + random_u8(7),
+                        14 + random_u8(20),
+                        buffers,
+                    );
+                    glitter_sys.new_star(
+                        self.enemies[j].x_pos + random_i32(W),
+                        self.enemies[j].y_pos + random_i32(H),
+                        57 + random_u8(7),
+                        14 + random_u8(20),
+                        buffers,
+                    );
+                }
             }
         }
 

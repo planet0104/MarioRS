@@ -1546,11 +1546,13 @@ impl Players {
             if self.star_counter >= STAR_TIME {
                 enemies.star = false;
             }
+            // 严格对齐 Pascal PLAYERS.PAS 第911-914行
+            // StartGlitter (X, Y + 11 * Byte (Mode = mdSmall), W, H + 3 + 11 * Byte (Mode <> mdSmall))
             if self.star_counter % 3 == 0 {
                 let player = buffers.player;
                 let mode = buffers.data.mode[player] as usize;
                 let offset_y = if mode == MD_SMALL { 11 } else { 0 };
-                let offset_h = if mode != MD_SMALL { 3 } else { 0 };
+                let offset_h = if mode != MD_SMALL { 11 } else { 0 };
                 glitter_sys.start_glitter(self.x, self.y + offset_y, W, H + 3 + offset_h, buffers);
             }
             enemies.cd_star = 0;

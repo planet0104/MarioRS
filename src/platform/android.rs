@@ -403,6 +403,20 @@ impl AndroidDisplay {
             gpu.update_scale(config.width, config.height);
         }
     }
+
+    /// 重新配置Surface（用于从后台恢复时）
+    pub fn reconfigure_surface(&mut self) {
+        let (surface, device, config) =
+            match (&self.wgpu_surface, &self.wgpu_device, &self.wgpu_config) {
+                (Some(s), Some(d), Some(c)) => (s, d, c),
+                _ => return,
+            };
+        surface.configure(device, config);
+        log_info(&format!(
+            "[GPU] Surface reconfigured: {}x{}",
+            config.width, config.height
+        ));
+    }
 }
 
 impl DisplayBackend for AndroidDisplay {
@@ -622,6 +636,8 @@ pub fn android_main(app: AndroidApp) {
     let mut overlay_buffer_size: (u32, u32) = (0, 0);
     // 上一帧是否显示了虚拟按钮（用于检测变化）
     let mut last_show_buttons = false;
+    // GPU资源是否需要重新上传（后台恢复后设为true）
+    let mut gpu_resources_invalidated = false;
 
     while running {
         app.poll_events(Some(Duration::ZERO), |event| match event {
@@ -655,6 +671,13 @@ pub fn android_main(app: AndroidApp) {
                         if game_state.is_none() {
                             game_state = Some(GameState::new());
                             log_info("Game state initialized");
+                        } else {
+                            // 从后台恢复时，game_state已存在但GPU渲染器被重建
+                            // 需要标记资源失效，强制重新上传精灵图集和调色板
+                            log_info("GPU renderer recreated, marking resources for re-upload");
+                            gpu_resources_invalidated = true;
+                            // 同时标记触摸板需要重绘，因为overlay纹理也被重建了
+                            input.touch_panel_mut().renderer_mut().mark_dirty();
                         }
                     }
                 }
@@ -674,6 +697,24 @@ pub fn android_main(app: AndroidApp) {
                 MainEvent::Destroy => {
                     log_info("App destroy requested");
                     running = false;
+                }
+                MainEvent::Resume { .. } => {
+                    log_info("=== App resumed ===");
+                    // 应用从后台恢复时，尝试重新配置Surface
+                    if display.wgpu_surface.is_some() {
+                        display.reconfigure_surface();
+                        // 标记GPU资源需要重新上传（纹理可能已失效）
+                        gpu_resources_invalidated = true;
+                    } else if let Some(window) = app.native_window() {
+                        // 如果Surface不存在但窗口存在，重新创建
+                        log_info("Recreating surface on resume...");
+                        display.set_native_window(Some(window));
+                        // 新创建的渲染器需要重新上传所有资源
+                        gpu_resources_invalidated = true;
+                    }
+                }
+                MainEvent::Pause => {
+                    log_info("=== App paused ===");
                 }
                 _ => {}
             },
@@ -753,6 +794,13 @@ pub fn android_main(app: AndroidApp) {
 
         // 游戏帧更新
         if let Some(state) = &mut game_state {
+            // 检查是否需要重新上传GPU资源（从后台恢复后）
+            if gpu_resources_invalidated {
+                log_info("Invalidating GPU resources for re-upload...");
+                state.invalidate_gpu_resources();
+                gpu_resources_invalidated = false;
+            }
+
             let frame_start = Instant::now();
 
             // FPS显示内置到游戏状态栏（使用GPU渲染，无需overlay）
@@ -823,20 +871,34 @@ pub fn android_main(app: AndroidApp) {
 
                 // 获取surface纹理并渲染
                 if let Some(surface) = &display.wgpu_surface {
-                    if let Ok(output) = surface.get_current_texture() {
-                        let view = output
-                            .texture
-                            .create_view(&wgpu::TextureViewDescriptor::default());
+                    match surface.get_current_texture() {
+                        Ok(output) => {
+                            let view = output
+                                .texture
+                                .create_view(&wgpu::TextureViewDescriptor::default());
 
-                        if let Some(gpu_renderer) = display.gpu_renderer_mut() {
-                            // 更新缩放参数
-                            gpu_renderer.update_scale(width, height);
+                            if let Some(gpu_renderer) = display.gpu_renderer_mut() {
+                                // 更新缩放参数
+                                gpu_renderer.update_scale(width, height);
 
-                            // 一次性完成渲染和呈现（单次GPU提交）
-                            gpu_renderer.render_frame_and_present(&view);
+                                // 一次性完成渲染和呈现（单次GPU提交）
+                                gpu_renderer.render_frame_and_present(&view);
+                            }
+
+                            output.present();
                         }
-
-                        output.present();
+                        Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
+                            // Surface丢失或过期，需要重新配置
+                            log_info("[GPU] Surface lost/outdated, reconfiguring...");
+                            display.reconfigure_surface();
+                        }
+                        Err(wgpu::SurfaceError::Timeout) => {
+                            // 超时，跳过这一帧
+                            log_warn("[GPU] Surface timeout, skipping frame");
+                        }
+                        Err(e) => {
+                            log_error(&format!("[GPU] Surface error: {:?}", e));
+                        }
                     }
                 }
             }

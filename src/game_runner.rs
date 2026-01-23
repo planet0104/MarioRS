@@ -63,6 +63,14 @@ impl GameState {
         self.game.set_fps_display(fps, frame_time_ms);
     }
 
+    /// 使GPU资源缓存失效，强制下次submit_to_gpu时重新上传所有资源
+    /// 用于从后台恢复时，GPU渲染器被重建的情况
+    #[cfg(feature = "wgpu-backend")]
+    pub fn invalidate_gpu_resources(&mut self) {
+        self.last_atlas_version = 0;
+        self.last_palette = [[0u8; 3]; 256];
+    }
+
     /// 获取GPU精灵批次数据用于渲染
     #[cfg(feature = "wgpu-backend")]
     pub fn get_sprite_instances(&self) -> Vec<crate::gpu::SpriteInstance> {

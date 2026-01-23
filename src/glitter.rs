@@ -123,6 +123,7 @@ impl GlitterSystem {
 
     /// GPU渲染: 收集所有活跃闪光像素
     /// 闪光是单像素效果，使用1x1的填充矩形来渲染
+    /// 使用UIFillRect确保在精灵层之后渲染（不被火球等遮挡）
     pub fn collect_glitter_gpu(
         &self,
         commands: &mut Vec<RenderCommand>,
@@ -139,7 +140,7 @@ impl GlitterSystem {
             // 只渲染活跃的闪光 (count > MAX_PAGE + 1 表示可见)
             if self.count[i] > (MAX_PAGE as u8 + 1) {
                 let glitter = &self.glitter_list[i];
-                // 注意：pos 在 原版 中存的是“屏幕坐标”（创建时已经减过 x_view/y_view）
+                // 注意：pos 在 原版 中存的是"屏幕坐标"（创建时已经减过 x_view/y_view）
                 let x = (glitter.pos % VIR_SCREEN_WIDTH as u16) as f32;
                 let y = (glitter.pos / VIR_SCREEN_WIDTH as u16) as f32;
 
@@ -149,7 +150,7 @@ impl GlitterSystem {
                     && y < crate::render_state::SCREEN_HEIGHT as f32
                 {
                     let fill = FillRect::new(x, y, 1.0, 1.0, glitter.attr, palette_index);
-                    commands.push(RenderCommand::FillRect(fill));
+                    commands.push(RenderCommand::UIFillRect(fill));
                 }
             }
         }

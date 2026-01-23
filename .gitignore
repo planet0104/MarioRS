@@ -26,3 +26,4 @@ dist.zip
 
 # YY-Thunks 等第三方依赖（脚本会自动下载）
 /vendor
+/android.log
