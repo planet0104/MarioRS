@@ -6,13 +6,17 @@ A Rust port of Mike Wiering's Turbo Pascal Mario clone game.
 
 > **Original Website**: [Wiering Software - Mario](https://wieringsoftware.nl/mario/) | [Source Code](https://wieringsoftware.nl/mario/source.html)
 
+> **Learning Guide**: [wgpu Game Development Guide](docs/WGPU_LEARNING_GUIDE.md) - Learn GPU rendering implementation from scratch (Chinese)
+
 ## Features
 
 - Complete port of all 6 original levels
 - Two-player alternating mode (Mario and Luigi)
 - Cross-platform support: Windows / Linux / macOS / Android
-- Native Windows GDI rendering (small binary, ~700KB)
-- Windows 7/XP compatible version
+- **Dual rendering backend architecture**:
+  - **wgpu GPU rendering** (default): Cross-platform hardware acceleration with Vulkan/Metal/DirectX 12
+  - **CPU software rendering**: Pure software rendering for legacy systems like Windows XP
+- Windows 7/XP compatible version (using CPU backend + YY-Thunks)
 - Android native support (touch screen virtual buttons)
 - Window scaling and fullscreen support
 - Dark theme auto-adaptation (Windows 10+)
@@ -85,7 +89,7 @@ Main Menu (MENU)
 
 ### Windows Build
 
-#### Default Version (Windows 10+, Recommended)
+#### Default Version (wgpu GPU Rendering, Windows 10+ Recommended)
 
 ```powershell
 cargo build --release
@@ -93,20 +97,26 @@ cargo build --release
 .\build_release.ps1
 ```
 
-#### Windows 7/XP Compatible Version
+Uses wgpu GPU rendering backend by default, requires a GPU with Vulkan/DirectX 12 support.
+
+#### Windows 7/XP Compatible Version (CPU Software Rendering)
 
 ```powershell
 .\build_win7xp.ps1           # 64-bit
 .\build_win7xp.ps1 -Arch x86 # 32-bit
 ```
 
+This version uses the CPU software rendering backend, displays via GDI StretchDIBits, requires no GPU support, compatible with Windows XP SP3 and above.
+
 See [build_win7xp.md](build_win7xp.md) for details.
 
 ### Linux/macOS Build
 
 ```bash
-cargo build --release --features wgpu-backend
+cargo build --release
 ```
+
+Linux/macOS uses the wgpu backend for GPU rendering by default.
 
 ### Android Build
 
@@ -194,11 +204,11 @@ adb install -r dist/android/app-release-arm64-v8a.apk
 ### Running
 
 ```bash
-# Windows (GDI backend, default)
+# Windows/Linux/macOS (wgpu GPU rendering, default)
 cargo run --release
 
-# Linux/macOS (wgpu backend)
-cargo run --release --features wgpu-backend
+# Windows XP compatible mode (CPU software rendering)
+cargo run --release --features cpu-backend --no-default-features
 ```
 
 ## Project Structure
@@ -206,79 +216,139 @@ cargo run --release --features wgpu-backend
 ```
 MarioRS/
 ├── src/
-│   ├── main.rs          # Entry point
-│   ├── lib.rs           # Library entry
-│   ├── mario.rs         # Game state machine
-│   ├── play.rs          # Main game logic
-│   ├── players.rs       # Player behavior (Mario/Luigi)
-│   ├── enemies.rs       # Enemy system
-│   ├── figures.rs       # Game object behavior
-│   ├── vga256.rs        # VGA rendering abstraction
-│   ├── renderer.rs      # Renderer
-│   ├── backgr.rs        # Background drawing
-│   ├── sprites.rs       # Sprite data
-│   ├── palettes.rs      # Palette management
-│   ├── keyboard.rs      # Keyboard input
-│   ├── music.rs         # Sound system
-│   ├── txt.rs           # Text rendering
-│   ├── config.rs        # Configuration management
-│   ├── persist.rs       # Persistence utilities
-│   ├── worlds/          # Level data
-│   │   ├── intro.rs     # Opening animation
-│   │   └── level_*.rs   # Levels 1-6
-│   └── platform/        # Platform abstraction layer
-│       ├── mod.rs       # Platform trait definitions
-│       ├── windows.rs   # Windows GDI backend
-│       ├── desktop.rs   # Cross-platform wgpu backend
-│       ├── android.rs   # Android native backend
+│   ├── main.rs           # Entry point
+│   ├── lib.rs            # Library entry
+│   ├── mario.rs          # Game state machine
+│   ├── game_runner.rs    # Game main runner
+│   ├── context.rs        # Game context
+│   ├── play.rs           # Main game logic
+│   ├── players.rs        # Player behavior (Mario/Luigi)
+│   ├── enemies.rs        # Enemy system
+│   ├── figures.rs        # Game object behavior
+│   ├── renderer.rs       # Unified rendering pipeline
+│   ├── render_state.rs   # Render state management
+│   ├── backgr.rs         # Background drawing
+│   ├── sprites.rs        # Sprite data
+│   ├── sprite_assets.rs  # Sprite asset management
+│   ├── palettes.rs       # Palette management
+│   ├── keyboard.rs       # Keyboard input
+│   ├── music.rs          # Sound system
+│   ├── txt.rs            # Text rendering
+│   ├── config.rs         # Configuration management
+│   ├── persist.rs        # Persistence utilities
+│   │
+│   ├── gpu/              # GPU rendering module (wgpu)
+│   │   ├── mod.rs        # Module entry
+│   │   ├── renderer.rs   # GPU renderer core
+│   │   ├── pipeline.rs   # Render pipeline creation
+│   │   ├── buffer_pool.rs # GPU buffer pool
+│   │   ├── sprite_batch.rs # Sprite batching
+│   │   ├── texture_atlas.rs # Texture atlas
+│   │   ├── tilemap.rs    # Tilemap rendering
+│   │   ├── palette.rs    # Palette management
+│   │   ├── types.rs      # Render data types
+│   │   └── shaders/      # WGSL shaders
+│   │       ├── sprite.wgsl  # Sprite shader
+│   │       ├── fill.wgsl    # Fill shader
+│   │       ├── scale.wgsl   # Scale shader
+│   │       └── overlay.wgsl # Overlay shader
+│   │
+│   ├── cpu/              # CPU software rendering module
+│   │   ├── mod.rs        # Module entry
+│   │   └── renderer.rs   # CPU software renderer
+│   │
+│   ├── worlds/           # Level data
+│   │   ├── intro.rs      # Opening animation
+│   │   └── level_*.rs    # Levels 1-6
+│   │
+│   └── platform/         # Platform abstraction layer
+│       ├── mod.rs        # Platform trait definitions
+│       ├── windows.rs    # Windows wgpu + GDI backend
+│       ├── windows_cpu.rs # Windows CPU software rendering backend (XP compatible)
+│       ├── desktop.rs    # Cross-platform wgpu backend (Linux/macOS)
+│       ├── android.rs    # Android native backend
 │       ├── touch_panel.rs # Touch screen virtual buttons
-│       └── audio/       # Audio backends
+│       ├── common/       # Common platform implementations
+│       │   ├── frame_timer.rs # Frame rate control
+│       │   ├── input.rs      # Input handling
+│       │   ├── random.rs     # Random number generation
+│       │   ├── storage.rs    # Persistent storage
+│       │   └── time.rs       # Time management
+│       └── audio/        # Audio backends
 │           ├── waveout.rs    # Windows WaveOut
 │           ├── cpal_audio.rs # Cross-platform cpal
-│           ├── oboe_audio.rs # Android Oboe
 │           └── web_audio.rs  # Web Audio (placeholder)
-├── android/             # Android project
+│
+├── android/              # Android project
 │   ├── app/
 │   │   ├── src/main/
-│   │   │   ├── java/        # Java/Kotlin code
-│   │   │   ├── jniLibs/     # Compiled .so files
+│   │   │   ├── java/         # Java/Kotlin code
+│   │   │   ├── jniLibs/      # Compiled .so files
 │   │   │   └── AndroidManifest.xml
 │   │   └── build.gradle.kts
 │   └── build.gradle.kts
 ├── assets/
-│   ├── sprites/         # Sprite data files
+│   ├── sprites/          # Sprite data files
 │   ├── onscreen_controls/ # Touch button image assets
-│   ├── *.BK             # Background data
-│   └── mario.ico        # Application icon
+│   ├── *.BK              # Background data
+│   └── mario.ico         # Application icon
 ├── examples/
-│   ├── create_icon.rs   # Icon generation tool
+│   ├── create_icon.rs    # Icon generation tool
 │   └── export_sprites.rs # Sprite export tool
-├── build_android.ps1    # Android build script
-└── build.rs             # Build script
+├── build_android.ps1     # Android build script
+└── build.rs              # Build script
 ```
+
+## Rendering Architecture
+
+MarioRS uses a dual rendering backend architecture, supporting both modern GPU-accelerated rendering and traditional CPU software rendering:
+
+### GPU Rendering Backend (wgpu)
+
+- Cross-platform GPU hardware-accelerated rendering using wgpu
+- Supports Vulkan (Linux/Windows/Android), Metal (macOS), DirectX 12 (Windows)
+- Sprite batching, texture atlas, WGSL shaders
+- Render pipeline: Sprites -> Fill -> Scale -> Overlay
+
+### CPU Software Rendering Backend
+
+- Pure CPU software rendering with no GPU dependencies
+- Displays framebuffer via Windows GDI StretchDIBits
+- Compatible with legacy systems like Windows XP that don't support modern graphics APIs
+- Supports indexed color sprites, palettes, flipping, transparency, and other effects
 
 ## Build Options
 
 | Feature | Description | Platform |
 |---------|-------------|----------|
-| `gdi-backend` | Native Windows GDI rendering | Windows |
-| `wgpu-backend` | Cross-platform GPU rendering | Windows/Linux/macOS |
+| `wgpu-backend` | wgpu GPU hardware-accelerated rendering | Windows/Linux/macOS/Android |
+| `cpu-backend` | CPU software rendering (XP compatible) | Windows |
+| `gdi-backend` | Windows GDI window creation | Windows |
 | `android` | Android native rendering | Android |
 | `touch-panel` | Touch screen virtual buttons | Android |
 | `dark-theme` | Dark theme adaptation | Windows 10+ |
 
-Default: `gdi-backend` + `dark-theme`
+**Default**: `wgpu-backend` + `dark-theme`
+
+### Feature Combinations
+
+| Scenario | Features | Description |
+|----------|----------|-------------|
+| Windows Modern (Recommended) | `wgpu-backend`, `gdi-backend`, `dark-theme` | GPU rendering + GDI window |
+| Windows XP Compatible | `cpu-backend` | CPU software rendering + GDI window |
+| Linux/macOS | `wgpu-backend` | GPU rendering + winit window |
+| Android | `android` | Auto-enables `wgpu-backend` + `touch-panel` |
 
 ## Platform Support
 
-| Platform | Backend | Minimum Version |
-|----------|---------|-----------------|
-| Windows 10/11 | GDI | Default support |
-| Windows 7/8 | GDI + YY-Thunks | Use compatible version |
-| Windows XP | GDI + YY-Thunks | Use compatible version |
-| Linux | wgpu + cpal | Requires wgpu-backend |
-| macOS | wgpu + cpal | Requires wgpu-backend |
-| Android | ANativeWindow + Oboe | Requires android feature |
+| Platform | Rendering Backend | Audio Backend | Minimum Version |
+|----------|-------------------|---------------|-----------------|
+| Windows 10/11 | wgpu (GPU) | WaveOut | Default support |
+| Windows 7/8 | CPU software rendering + YY-Thunks | WaveOut | Use compatible version |
+| Windows XP | CPU software rendering + YY-Thunks | WaveOut | Use compatible version |
+| Linux | wgpu (GPU) | cpal | Default support |
+| macOS | wgpu (GPU) | cpal | Default support |
+| Android | wgpu (GPU) | cpal | Requires android feature |
 
 ## Levels
 

@@ -1,4 +1,4 @@
-当前rust项目是从 MarioPascal-master 目录的pascal代码移植过来的。
+当前rust项目是从 MarioPascal 代码移植过来的。
 目前实现了level 1 ~ level 6的关卡。
 
 1、蓝牙手柄的支持(PC/Android)
