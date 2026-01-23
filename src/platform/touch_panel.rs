@@ -25,8 +25,46 @@ const EDIT_BUTTON_MARGIN: f32 = 90.0; // 编辑按钮距离屏幕边缘
 const EDIT_BUTTON_Y: f32 = 90.0; // 编辑按钮 Y 坐标
 const EDIT_BUTTON_SPACING: f32 = 180.0; // 编辑按钮和重置按钮间距
 
-// 暂停按钮常量
-const PAUSE_BUTTON_Y: f32 = 250.0; // 暂停按钮 Y 坐标
+// 键盘按钮常量 (原暂停按钮位置)
+const KEYBOARD_BUTTON_Y: f32 = 250.0; // 键盘按钮 Y 坐标
+
+// 隐藏按钮常量 (在键盘按钮下方)
+const HIDE_BUTTON_Y: f32 = 410.0; // 隐藏按钮 Y 坐标
+
+// ============================================================================
+// 虚拟键盘面板常量
+// ============================================================================
+
+/// 虚拟键盘按键布局
+/// 包含: P(暂停), Tab(作弊模式), 0-9, A-F
+const VKBD_KEYS: &[(&str, PlatformKeyCode)] = &[
+    ("P", PlatformKeyCode::KeyP),      // 暂停
+    ("TAB", PlatformKeyCode::Tab),     // 进入作弊码模式
+    ("0", PlatformKeyCode::Digit0),
+    ("1", PlatformKeyCode::Digit1),
+    ("2", PlatformKeyCode::Digit2),
+    ("3", PlatformKeyCode::Digit3),
+    ("4", PlatformKeyCode::Digit4),
+    ("5", PlatformKeyCode::Digit5),
+    ("6", PlatformKeyCode::Digit6),
+    ("7", PlatformKeyCode::Digit7),
+    ("8", PlatformKeyCode::Digit8),
+    ("9", PlatformKeyCode::Digit9),
+    ("A", PlatformKeyCode::KeyA),
+    ("B", PlatformKeyCode::KeyB),
+    ("C", PlatformKeyCode::KeyC),
+    ("D", PlatformKeyCode::KeyD),
+    ("E", PlatformKeyCode::KeyE),
+    ("F", PlatformKeyCode::KeyF),
+    ("ENT", PlatformKeyCode::Enter),   // 确认 (退出暂停)
+];
+
+// 虚拟键盘布局参数
+const VKBD_COLS: usize = 6;           // 每行按键数
+const VKBD_KEY_WIDTH: f32 = 120.0;    // 按键宽度
+const VKBD_KEY_HEIGHT: f32 = 80.0;    // 按键高度
+const VKBD_KEY_MARGIN: f32 = 10.0;    // 按键间距
+const VKBD_PADDING: f32 = 20.0;       // 面板内边距
 
 // ============================================================================
 // PNG 图片资源 (编译时内嵌) - 仅启用 touch-panel feature 时
@@ -143,7 +181,6 @@ pub struct ButtonStates {
     pub b: bool,
     pub x: bool,
     pub y: bool,
-    pub pause: bool,
 }
 
 // ============================================================================
@@ -259,6 +296,12 @@ pub struct VirtualButtonsRenderer {
     // 编辑模式
     edit_mode: bool,
 
+    // 隐藏虚拟按钮模式 (仅显示右上角控制按钮)
+    hide_controls: bool,
+
+    // 虚拟键盘面板是否显示
+    vkbd_visible: bool,
+
     // 图片资源
     assets: ButtonAssets,
 
@@ -277,9 +320,67 @@ impl VirtualButtonsRenderer {
             dpad_size: DEFAULT_DPAD_SIZE,
             button_size: DEFAULT_BUTTON_SIZE,
             edit_mode: false,
+            hide_controls: false,
+            vkbd_visible: false,
             assets: ButtonAssets::load(),
             needs_redraw: true,
         }
+    }
+
+    /// 切换虚拟键盘面板显示状态
+    pub fn toggle_vkbd(&mut self) {
+        self.vkbd_visible = !self.vkbd_visible;
+        self.needs_redraw = true;
+    }
+
+    /// 设置虚拟键盘面板显示状态
+    pub fn set_vkbd_visible(&mut self, visible: bool) {
+        if self.vkbd_visible != visible {
+            self.vkbd_visible = visible;
+            self.needs_redraw = true;
+        }
+    }
+
+    /// 获取虚拟键盘面板显示状态
+    pub fn is_vkbd_visible(&self) -> bool {
+        self.vkbd_visible
+    }
+
+    // 保留旧接口兼容性
+    pub fn set_keyboard_visible(&mut self, visible: bool) {
+        self.set_vkbd_visible(visible);
+    }
+    
+    pub fn is_keyboard_visible(&self) -> bool {
+        self.is_vkbd_visible()
+    }
+
+    /// 切换隐藏控制按钮模式
+    pub fn toggle_hide_controls(&mut self) {
+        self.hide_controls = !self.hide_controls;
+        self.needs_redraw = true;
+    }
+
+    /// 获取是否隐藏控制按钮
+    pub fn is_hide_controls(&self) -> bool {
+        self.hide_controls
+    }
+
+    /// 获取隐藏按钮位置
+    pub fn hide_button(&self) -> (f32, f32, f32) {
+        (
+            self.screen_width as f32 - EDIT_BUTTON_MARGIN,
+            HIDE_BUTTON_Y,
+            EDIT_BUTTON_RADIUS,
+        )
+    }
+
+    /// 检测是否点击了隐藏按钮
+    pub fn is_on_hide_button(&self, x: f32, y: f32) -> bool {
+        let (hx, hy, r) = self.hide_button();
+        let dx = x - hx;
+        let dy = y - hy;
+        dx * dx + dy * dy <= r * r * 2.25 // 1.5x 触摸区域
     }
 
     /// 设置屏幕尺寸并重新分配缓冲区
@@ -378,9 +479,9 @@ impl VirtualButtonsRenderer {
         let edit_btn_r = EDIT_BUTTON_RADIUS;
         let reset_btn_x = self.screen_width as f32 - EDIT_BUTTON_MARGIN - EDIT_BUTTON_SPACING;
 
-        // 暂停按钮参数 (E按钮下方)
-        let pause_btn_x = self.screen_width as f32 - EDIT_BUTTON_MARGIN;
-        let pause_btn_y = PAUSE_BUTTON_Y;
+        // 键盘按钮参数 (E按钮下方)
+        let kbd_btn_x = self.screen_width as f32 - EDIT_BUTTON_MARGIN;
+        let kbd_btn_y = KEYBOARD_BUTTON_Y;
 
         // 编辑高亮参数
         let dpad_cx = self.layout.dpad_x * w + self.dpad_size / 2.0;
@@ -389,28 +490,32 @@ impl VirtualButtonsRenderer {
         let btn_r = self.button_size / 2.0 + 5.0;
 
         let pixmap = self.pixmap.as_mut()?;
+        let hide_controls = self.hide_controls;
 
         // 清空为透明
         pixmap.fill(tiny_skia::Color::TRANSPARENT);
 
-        // 绘制 D-Pad
-        if let Some(src) = self.assets.get_dpad() {
-            Self::draw_scaled_image_static(
-                pixmap,
-                src,
-                dpad_x,
-                dpad_y,
-                dpad_size_u32,
-                dpad_size_u32,
-            );
-        }
+        // 仅当不隐藏控制按钮时绘制 D-Pad 和 A/B/X/Y
+        if !hide_controls {
+            // 绘制 D-Pad
+            if let Some(src) = self.assets.get_dpad() {
+                Self::draw_scaled_image_static(
+                    pixmap,
+                    src,
+                    dpad_x,
+                    dpad_y,
+                    dpad_size_u32,
+                    dpad_size_u32,
+                );
+            }
 
-        // 绘制右侧按钮
-        for (name, bx, by) in buttons {
-            if let Some(src) = self.assets.get_button(name) {
-                let px = (bx * w) as i32 - half;
-                let py = (by * h) as i32 - half;
-                Self::draw_scaled_image_static(pixmap, src, px, py, btn_size, btn_size);
+            // 绘制右侧按钮
+            for (name, bx, by) in buttons {
+                if let Some(src) = self.assets.get_button(name) {
+                    let px = (bx * w) as i32 - half;
+                    let py = (by * h) as i32 - half;
+                    Self::draw_scaled_image_static(pixmap, src, px, py, btn_size, btn_size);
+                }
             }
         }
 
@@ -423,14 +528,35 @@ impl VirtualButtonsRenderer {
         Self::draw_circle(pixmap, edit_btn_x, edit_btn_y, edit_btn_r, edit_color);
         Self::draw_letter_static(pixmap, edit_btn_x, edit_btn_y, "E", tiny_skia::Color::WHITE);
 
-        // 绘制暂停按钮 (编辑按钮下方)
-        let pause_color = tiny_skia::Color::from_rgba8(100, 100, 200, 180);
-        Self::draw_circle(pixmap, pause_btn_x, pause_btn_y, edit_btn_r, pause_color);
+        // 绘制键盘按钮 (编辑按钮下方) - 用于打开系统软键盘
+        let kbd_color = if self.vkbd_visible {
+            tiny_skia::Color::from_rgba8(100, 200, 100, 180) // 键盘打开: 绿色
+        } else {
+            tiny_skia::Color::from_rgba8(100, 100, 200, 180) // 键盘关闭: 蓝色
+        };
+        Self::draw_circle(pixmap, kbd_btn_x, kbd_btn_y, edit_btn_r, kbd_color);
         Self::draw_letter_static(
             pixmap,
-            pause_btn_x,
-            pause_btn_y,
-            "P",
+            kbd_btn_x,
+            kbd_btn_y,
+            "K",
+            tiny_skia::Color::WHITE,
+        );
+
+        // 绘制隐藏按钮 (暂停按钮下方)
+        let hide_btn_x = self.screen_width as f32 - EDIT_BUTTON_MARGIN;
+        let hide_btn_y = HIDE_BUTTON_Y;
+        let hide_color = if hide_controls {
+            tiny_skia::Color::from_rgba8(200, 100, 100, 180) // 隐藏状态: 红色
+        } else {
+            tiny_skia::Color::from_rgba8(100, 200, 100, 180) // 显示状态: 绿色
+        };
+        Self::draw_circle(pixmap, hide_btn_x, hide_btn_y, edit_btn_r, hide_color);
+        Self::draw_letter_static(
+            pixmap,
+            hide_btn_x,
+            hide_btn_y,
+            "H",
             tiny_skia::Color::WHITE,
         );
 
@@ -459,7 +585,262 @@ impl VirtualButtonsRenderer {
             }
         }
 
+        // 绘制虚拟键盘面板
+        if self.vkbd_visible {
+            Self::draw_virtual_keyboard(pixmap, self.screen_width, self.screen_height);
+        }
+
         Some(pixmap.data())
+    }
+
+    /// 绘制虚拟键盘面板
+    fn draw_virtual_keyboard(pixmap: &mut tiny_skia::Pixmap, screen_width: u32, screen_height: u32) {
+        let w = screen_width as f32;
+        let h = screen_height as f32;
+
+        // 计算缩放
+        let scale = (w.min(h) / 1080.0).max(0.5).min(1.5);
+        let key_w = VKBD_KEY_WIDTH * scale;
+        let key_h = VKBD_KEY_HEIGHT * scale;
+        let margin = VKBD_KEY_MARGIN * scale;
+        let padding = VKBD_PADDING * scale;
+
+        // 计算面板尺寸
+        let rows = (VKBD_KEYS.len() + VKBD_COLS - 1) / VKBD_COLS;
+        let panel_w = VKBD_COLS as f32 * key_w + (VKBD_COLS - 1) as f32 * margin + padding * 2.0;
+        let panel_h = rows as f32 * key_h + (rows - 1) as f32 * margin + padding * 2.0;
+
+        // 面板位置 (居中偏下，避免遮挡作弊码提示)
+        let panel_x = (w - panel_w) / 2.0;
+        let panel_y = h - panel_h - 20.0; // 距离屏幕底部 20 像素
+
+        // 绘制面板背景 (更透明，能看到后面内容)
+        let bg_color = tiny_skia::Color::from_rgba8(0, 0, 0, 140);
+        if let Some(rect) = tiny_skia::Rect::from_xywh(panel_x, panel_y, panel_w, panel_h) {
+            let paint = tiny_skia::Paint {
+                shader: tiny_skia::Shader::SolidColor(bg_color),
+                blend_mode: tiny_skia::BlendMode::SourceOver,
+                anti_alias: true,
+                force_hq_pipeline: false,
+            };
+            pixmap.fill_rect(rect, &paint, tiny_skia::Transform::identity(), None);
+        }
+
+        // 绘制边框
+        let border_color = tiny_skia::Color::from_rgba8(100, 100, 255, 255);
+        Self::draw_rect_outline(pixmap, panel_x, panel_y, panel_w, panel_h, border_color, 2.0);
+
+        // 绘制标题
+        Self::draw_vkbd_text(
+            pixmap,
+            panel_x + panel_w / 2.0,
+            panel_y + padding / 2.0 + 5.0 * scale,
+            "KEYBOARD",
+            2.5 * scale,
+            tiny_skia::Color::from_rgba8(200, 200, 255, 255),
+        );
+
+        // 绘制按键
+        let keys_start_x = panel_x + padding;
+        let keys_start_y = panel_y + padding + 15.0 * scale;
+
+        for (i, (label, _keycode)) in VKBD_KEYS.iter().enumerate() {
+            let col = i % VKBD_COLS;
+            let row = i / VKBD_COLS;
+
+            let key_x = keys_start_x + col as f32 * (key_w + margin);
+            let key_y = keys_start_y + row as f32 * (key_h + margin);
+
+            // 按键背景 (更透明)
+            let key_bg = if *label == "P" {
+                tiny_skia::Color::from_rgba8(100, 100, 200, 160) // P键蓝色
+            } else if *label == "TAB" {
+                tiny_skia::Color::from_rgba8(200, 100, 100, 160) // TAB键红色
+            } else if *label == "ENT" {
+                tiny_skia::Color::from_rgba8(100, 200, 100, 160) // ENT键绿色
+            } else {
+                tiny_skia::Color::from_rgba8(60, 60, 80, 160) // 其他键深灰
+            };
+
+            if let Some(rect) = tiny_skia::Rect::from_xywh(key_x, key_y, key_w, key_h) {
+                let paint = tiny_skia::Paint {
+                    shader: tiny_skia::Shader::SolidColor(key_bg),
+                    blend_mode: tiny_skia::BlendMode::SourceOver,
+                    anti_alias: true,
+                    force_hq_pipeline: false,
+                };
+                pixmap.fill_rect(rect, &paint, tiny_skia::Transform::identity(), None);
+            }
+
+            // 按键边框
+            Self::draw_rect_outline(
+                pixmap,
+                key_x, key_y, key_w, key_h,
+                tiny_skia::Color::from_rgba8(150, 150, 200, 255),
+                1.0,
+            );
+
+            // 按键文字
+            Self::draw_vkbd_text(
+                pixmap,
+                key_x + key_w / 2.0,
+                key_y + key_h / 2.0,
+                label,
+                3.0 * scale,
+                tiny_skia::Color::WHITE,
+            );
+        }
+    }
+
+    /// 绘制矩形边框
+    fn draw_rect_outline(
+        pixmap: &mut tiny_skia::Pixmap,
+        x: f32, y: f32, w: f32, h: f32,
+        color: tiny_skia::Color,
+        width: f32,
+    ) {
+        let mut pb = tiny_skia::PathBuilder::new();
+        pb.move_to(x, y);
+        pb.line_to(x + w, y);
+        pb.line_to(x + w, y + h);
+        pb.line_to(x, y + h);
+        pb.close();
+        if let Some(path) = pb.finish() {
+            let stroke = tiny_skia::Stroke {
+                width,
+                ..Default::default()
+            };
+            let paint = tiny_skia::Paint {
+                shader: tiny_skia::Shader::SolidColor(color),
+                blend_mode: tiny_skia::BlendMode::SourceOver,
+                anti_alias: true,
+                force_hq_pipeline: false,
+            };
+            pixmap.stroke_path(&path, &paint, &stroke, tiny_skia::Transform::identity(), None);
+        }
+    }
+
+    /// 绘制虚拟键盘文字 (像素字体)
+    fn draw_vkbd_text(
+        pixmap: &mut tiny_skia::Pixmap,
+        cx: f32, cy: f32,
+        text: &str,
+        scale: f32,
+        color: tiny_skia::Color,
+    ) {
+        // 5x5 像素字体
+        let font: &[(&str, [u8; 5])] = &[
+            ("0", [0b01110, 0b10001, 0b10001, 0b10001, 0b01110]),
+            ("1", [0b00100, 0b01100, 0b00100, 0b00100, 0b01110]),
+            ("2", [0b01110, 0b10001, 0b00110, 0b01000, 0b11111]),
+            ("3", [0b11110, 0b00001, 0b00110, 0b00001, 0b11110]),
+            ("4", [0b10001, 0b10001, 0b11111, 0b00001, 0b00001]),
+            ("5", [0b11111, 0b10000, 0b11110, 0b00001, 0b11110]),
+            ("6", [0b01110, 0b10000, 0b11110, 0b10001, 0b01110]),
+            ("7", [0b11111, 0b00001, 0b00010, 0b00100, 0b00100]),
+            ("8", [0b01110, 0b10001, 0b01110, 0b10001, 0b01110]),
+            ("9", [0b01110, 0b10001, 0b01111, 0b00001, 0b01110]),
+            ("A", [0b01110, 0b10001, 0b11111, 0b10001, 0b10001]),
+            ("B", [0b11110, 0b10001, 0b11110, 0b10001, 0b11110]),
+            ("C", [0b01110, 0b10001, 0b10000, 0b10001, 0b01110]),
+            ("D", [0b11110, 0b10001, 0b10001, 0b10001, 0b11110]),
+            ("E", [0b11111, 0b10000, 0b11110, 0b10000, 0b11111]),
+            ("F", [0b11111, 0b10000, 0b11110, 0b10000, 0b10000]),
+            ("G", [0b01110, 0b10000, 0b10011, 0b10001, 0b01110]),
+            ("H", [0b10001, 0b10001, 0b11111, 0b10001, 0b10001]),
+            ("I", [0b01110, 0b00100, 0b00100, 0b00100, 0b01110]),
+            ("K", [0b10001, 0b10010, 0b11100, 0b10010, 0b10001]),
+            ("L", [0b10000, 0b10000, 0b10000, 0b10000, 0b11111]),
+            ("M", [0b10001, 0b11011, 0b10101, 0b10001, 0b10001]),
+            ("N", [0b10001, 0b11001, 0b10101, 0b10011, 0b10001]),
+            ("O", [0b01110, 0b10001, 0b10001, 0b10001, 0b01110]),
+            ("P", [0b11110, 0b10001, 0b11110, 0b10000, 0b10000]),
+            ("R", [0b11110, 0b10001, 0b11110, 0b10010, 0b10001]),
+            ("S", [0b01111, 0b10000, 0b01110, 0b00001, 0b11110]),
+            ("T", [0b11111, 0b00100, 0b00100, 0b00100, 0b00100]),
+            ("U", [0b10001, 0b10001, 0b10001, 0b10001, 0b01110]),
+            ("V", [0b10001, 0b10001, 0b10001, 0b01010, 0b00100]),
+            ("W", [0b10001, 0b10001, 0b10101, 0b11011, 0b10001]),
+            ("X", [0b10001, 0b01010, 0b00100, 0b01010, 0b10001]),
+            ("Y", [0b10001, 0b01010, 0b00100, 0b00100, 0b00100]),
+            (" ", [0b00000, 0b00000, 0b00000, 0b00000, 0b00000]),
+        ];
+
+        let char_w = 5.0 * scale;
+        let char_h = 5.0 * scale;
+        let spacing = 1.0 * scale;
+        let total_w = text.len() as f32 * (char_w + spacing) - spacing;
+        let start_x = cx - total_w / 2.0;
+        let start_y = cy - char_h / 2.0;
+
+        let paint = tiny_skia::Paint {
+            shader: tiny_skia::Shader::SolidColor(color),
+            blend_mode: tiny_skia::BlendMode::SourceOver,
+            anti_alias: false,
+            force_hq_pipeline: false,
+        };
+
+        for (i, ch) in text.chars().enumerate() {
+            let ch_upper = ch.to_ascii_uppercase();
+            let ch_str = ch_upper.to_string();
+            if let Some((_, pattern)) = font.iter().find(|(c, _)| *c == ch_str) {
+                let char_x = start_x + i as f32 * (char_w + spacing);
+                for (row, &bits) in pattern.iter().enumerate() {
+                    for col in 0..5 {
+                        if (bits >> (4 - col)) & 1 == 1 {
+                            if let Some(rect) = tiny_skia::Rect::from_xywh(
+                                char_x + col as f32 * scale,
+                                start_y + row as f32 * scale,
+                                scale,
+                                scale,
+                            ) {
+                                pixmap.fill_rect(rect, &paint, tiny_skia::Transform::identity(), None);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// 检测点击了哪个虚拟键盘按键，返回对应的键码
+    pub fn check_vkbd_key(&self, x: f32, y: f32) -> Option<PlatformKeyCode> {
+        if !self.vkbd_visible {
+            return None;
+        }
+
+        let w = self.screen_width as f32;
+        let h = self.screen_height as f32;
+        let scale = (w.min(h) / 1080.0).max(0.5).min(1.5);
+        let key_w = VKBD_KEY_WIDTH * scale;
+        let key_h = VKBD_KEY_HEIGHT * scale;
+        let margin = VKBD_KEY_MARGIN * scale;
+        let padding = VKBD_PADDING * scale;
+
+        let rows = (VKBD_KEYS.len() + VKBD_COLS - 1) / VKBD_COLS;
+        let panel_w = VKBD_COLS as f32 * key_w + (VKBD_COLS - 1) as f32 * margin + padding * 2.0;
+        let panel_h = rows as f32 * key_h + (rows - 1) as f32 * margin + padding * 2.0;
+
+        // 面板位置 (居中偏下，与绘制位置保持一致)
+        let panel_x = (w - panel_w) / 2.0;
+        let panel_y = h - panel_h - 20.0;
+
+        let keys_start_x = panel_x + padding;
+        let keys_start_y = panel_y + padding + 15.0 * scale;
+
+        for (i, (_label, keycode)) in VKBD_KEYS.iter().enumerate() {
+            let col = i % VKBD_COLS;
+            let row = i / VKBD_COLS;
+
+            let key_x = keys_start_x + col as f32 * (key_w + margin);
+            let key_y = keys_start_y + row as f32 * (key_h + margin);
+
+            if x >= key_x && x <= key_x + key_w && y >= key_y && y <= key_y + key_h {
+                return Some(*keycode);
+            }
+        }
+
+        None
     }
 
     /// 缩放绘制图片 (静态方法)
@@ -563,8 +944,9 @@ impl VirtualButtonsRenderer {
     ) {
         let patterns: &[(&str, &[&str])] = &[
             ("E", &["#####", "#    ", "#####", "#    ", "#####"]),
-            ("P", &["#### ", "#   #", "#### ", "#    ", "#    "]),
             ("R", &["#### ", "#   #", "#### ", "#  # ", "#   #"]),
+            ("H", &["#   #", "#   #", "#####", "#   #", "#   #"]),
+            ("K", &["#   #", "#  # ", "###  ", "#  # ", "#   #"]),
         ];
 
         if let Some((_, pattern)) = patterns.iter().find(|(l, _)| *l == letter) {
@@ -675,11 +1057,11 @@ impl VirtualButtonsRenderer {
         )
     }
 
-    /// 暂停按钮位置和半径 (在编辑按钮下方)
-    pub fn pause_button(&self) -> (f32, f32, f32) {
+    /// 键盘按钮位置和半径 (在编辑按钮下方)
+    pub fn keyboard_button(&self) -> (f32, f32, f32) {
         (
             self.screen_width as f32 - EDIT_BUTTON_MARGIN,
-            PAUSE_BUTTON_Y,
+            KEYBOARD_BUTTON_Y,
             EDIT_BUTTON_RADIUS,
         )
     }
@@ -700,11 +1082,11 @@ impl VirtualButtonsRenderer {
         dx * dx + dy * dy <= r * r * 2.25
     }
 
-    /// 检测点是否在暂停按钮上
-    pub fn is_on_pause_button(&self, x: f32, y: f32) -> bool {
-        let (px, py, r) = self.pause_button();
-        let dx = x - px;
-        let dy = y - py;
+    /// 检测点是否在键盘按钮上
+    pub fn is_on_keyboard_button(&self, x: f32, y: f32) -> bool {
+        let (kx, ky, r) = self.keyboard_button();
+        let dx = x - kx;
+        let dy = y - ky;
         dx * dx + dy * dy <= r * r * 2.25
     }
 
@@ -759,16 +1141,16 @@ impl VirtualButtonsRenderer {
             edit_size.min(self.screen_height.saturating_sub(edit_y)),
         ));
 
-        // 暂停按钮边界框 (始终显示)
-        let (px, py, pr) = self.pause_button();
-        let pause_size = (pr * 2.0) as u32;
-        let pause_x = (px - pr).max(0.0) as u32;
-        let pause_y = (py - pr).max(0.0) as u32;
+        // 键盘按钮边界框 (始终显示)
+        let (kx, ky, kr) = self.keyboard_button();
+        let kbd_size = (kr * 2.0) as u32;
+        let kbd_x = (kx - kr).max(0.0) as u32;
+        let kbd_y = (ky - kr).max(0.0) as u32;
         rects.push((
-            pause_x,
-            pause_y,
-            pause_size.min(self.screen_width.saturating_sub(pause_x)),
-            pause_size.min(self.screen_height.saturating_sub(pause_y)),
+            kbd_x,
+            kbd_y,
+            kbd_size.min(self.screen_width.saturating_sub(kbd_x)),
+            kbd_size.min(self.screen_height.saturating_sub(kbd_y)),
         ));
 
         // 如果在编辑模式，添加重置按钮边界框
@@ -883,7 +1265,7 @@ impl VirtualButtonsRenderer {
     pub fn reset_button(&self) -> (f32, f32, f32) {
         (0.0, 0.0, 0.0)
     }
-    pub fn pause_button(&self) -> (f32, f32, f32) {
+    pub fn keyboard_button(&self) -> (f32, f32, f32) {
         (0.0, 0.0, 0.0)
     }
     pub fn is_on_edit_button(&self, _: f32, _: f32) -> bool {
@@ -892,7 +1274,7 @@ impl VirtualButtonsRenderer {
     pub fn is_on_reset_button(&self, _: f32, _: f32) -> bool {
         false
     }
-    pub fn is_on_pause_button(&self, _: f32, _: f32) -> bool {
+    pub fn is_on_keyboard_button(&self, _: f32, _: f32) -> bool {
         false
     }
     pub fn get_blend_rects(&self) -> Vec<(u32, u32, u32, u32)> {
@@ -903,6 +1285,28 @@ impl VirtualButtonsRenderer {
     pub fn set_button_b_position(&mut self, _: f32, _: f32) {}
     pub fn set_button_x_position(&mut self, _: f32, _: f32) {}
     pub fn set_button_y_position(&mut self, _: f32, _: f32) {}
+    pub fn set_keyboard_visible(&mut self, _: bool) {}
+    pub fn is_keyboard_visible(&self) -> bool {
+        false
+    }
+    pub fn toggle_hide_controls(&mut self) {}
+    pub fn is_hide_controls(&self) -> bool {
+        false
+    }
+    pub fn hide_button(&self) -> (f32, f32, f32) {
+        (0.0, 0.0, 0.0)
+    }
+    pub fn is_on_hide_button(&self, _: f32, _: f32) -> bool {
+        false
+    }
+    pub fn toggle_vkbd(&mut self) {}
+    pub fn set_vkbd_visible(&mut self, _: bool) {}
+    pub fn is_vkbd_visible(&self) -> bool {
+        false
+    }
+    pub fn check_vkbd_key(&self, _: f32, _: f32) -> Option<PlatformKeyCode> {
+        None
+    }
 }
 
 #[cfg(not(feature = "touch-panel"))]
@@ -954,6 +1358,9 @@ pub struct TouchPanelInput {
 
     // 编辑模式
     drag_target: DragTarget,
+
+    // 虚拟键盘按下的按键 (pointer_id -> keycode)
+    vkbd_pressed_keys: std::collections::HashMap<usize, PlatformKeyCode>,
 }
 
 impl TouchPanelInput {
@@ -965,6 +1372,7 @@ impl TouchPanelInput {
             layout_changed: false,
             pointers: std::collections::HashMap::new(),
             drag_target: DragTarget::None,
+            vkbd_pressed_keys: std::collections::HashMap::new(),
         }
     }
 
@@ -1037,18 +1445,32 @@ impl TouchPanelInput {
     fn handle_game_touch(&mut self, pointer_id: usize, x: f32, y: f32, action: TouchAction) {
         match action {
             TouchAction::Down => {
+                // 如果虚拟键盘面板可见，优先检测虚拟键盘按键
+                if self.renderer.is_vkbd_visible() {
+                    if let Some(keycode) = self.renderer.check_vkbd_key(x, y) {
+                        // 只发送按下事件，记录按键以便在触摸抬起时释放
+                        self.emit_key(keycode, true);
+                        self.vkbd_pressed_keys.insert(pointer_id, keycode);
+                        self.renderer.mark_dirty();
+                        return;
+                    }
+                }
+
                 // 检查编辑按钮
                 if self.renderer.is_on_edit_button(x, y) {
                     self.toggle_edit_mode();
                     return;
                 }
 
-                // 检查暂停按钮 - 发送 P 键按下事件
-                if self.renderer.is_on_pause_button(x, y) {
-                    // 只发送按下事件，按钮状态保持一帧让游戏检测到
-                    self.button_states.pause = true;
-                    self.emit_key(PlatformKeyCode::KeyP, true);
-                    self.renderer.mark_dirty(); // 标记需要重绘
+                // 检查隐藏按钮 - 切换虚拟按钮显示/隐藏
+                if self.renderer.is_on_hide_button(x, y) {
+                    self.renderer.toggle_hide_controls();
+                    return;
+                }
+
+                // 检查键盘按钮 - 切换虚拟键盘面板显示
+                if self.renderer.is_on_keyboard_button(x, y) {
+                    self.renderer.toggle_vkbd();
                     return;
                 }
 
@@ -1071,13 +1493,16 @@ impl TouchPanelInput {
                 }
             }
             TouchAction::Up | TouchAction::Cancel => {
-                // 释放暂停按钮 (如果之前按下)
-                if self.button_states.pause {
-                    self.button_states.pause = false;
-                    self.emit_key(PlatformKeyCode::KeyP, false);
+                // 检查是否有虚拟键盘按键需要释放
+                if let Some(keycode) = self.vkbd_pressed_keys.remove(&pointer_id) {
+                    self.emit_key(keycode, false);
+                    // 按下 Enter 键后自动隐藏虚拟键盘 (退出暂停状态)
+                    if keycode == PlatformKeyCode::Enter {
+                        self.renderer.set_vkbd_visible(false);
+                    }
                     self.renderer.mark_dirty();
                 }
-
+                
                 if let Some(pointer) = self.pointers.remove(&pointer_id) {
                     if let Some(control) = pointer.control {
                         self.release_control(control);

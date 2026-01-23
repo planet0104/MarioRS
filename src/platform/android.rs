@@ -50,7 +50,6 @@ pub struct AndroidInput {
     pending_events: Vec<PlatformKeyEvent>,
     should_close: bool,
     touch_panel: TouchPanelInput,
-    has_physical_keyboard: bool,
 }
 
 impl AndroidInput {
@@ -60,16 +59,11 @@ impl AndroidInput {
             pending_events: Vec::new(),
             should_close: false,
             touch_panel: TouchPanelInput::new(),
-            has_physical_keyboard: false,
         }
     }
 
     pub fn set_screen_size(&mut self, width: f32, height: f32) {
         self.touch_panel.set_screen_size(width, height);
-    }
-
-    pub fn set_has_physical_keyboard(&mut self, has: bool) {
-        self.has_physical_keyboard = has;
     }
 
     pub fn touch_panel(&self) -> &TouchPanelInput {
@@ -80,8 +74,9 @@ impl AndroidInput {
         &mut self.touch_panel
     }
 
+    /// 触摸面板始终显示（用户通过H按钮手动控制隐藏）
     pub fn should_show_virtual_buttons(&self) -> bool {
-        !self.has_physical_keyboard
+        true
     }
 
     pub fn handle_touch(&mut self, pointer_id: usize, x: f32, y: f32, action: MotionAction) {
@@ -159,6 +154,8 @@ fn android_keycode_to_platform(keycode: Keycode) -> PlatformKeyCode {
         Keycode::ShiftLeft => PlatformKeyCode::ShiftLeft,
         Keycode::ShiftRight => PlatformKeyCode::ShiftRight,
         Keycode::Tab => PlatformKeyCode::Tab,
+        // 反引号(`)映射到Tab，方便在软键盘上输入作弊码 (软键盘没有Tab键)
+        Keycode::Grave => PlatformKeyCode::Tab,
         Keycode::A => PlatformKeyCode::KeyA,
         Keycode::B => PlatformKeyCode::KeyB,
         Keycode::C => PlatformKeyCode::KeyC,
@@ -200,29 +197,6 @@ fn android_keycode_to_platform(keycode: Keycode) -> PlatformKeyCode {
         Keycode::F11 => PlatformKeyCode::F11,
         _ => PlatformKeyCode::Unknown,
     }
-}
-
-/// 检查是否是游戏控制键
-fn is_game_control_key(keycode: Keycode) -> bool {
-    matches!(
-        keycode,
-        Keycode::DpadLeft
-            | Keycode::DpadRight
-            | Keycode::DpadUp
-            | Keycode::DpadDown
-            | Keycode::W
-            | Keycode::A
-            | Keycode::S
-            | Keycode::D
-            | Keycode::Space
-            | Keycode::Enter
-            | Keycode::ShiftLeft
-            | Keycode::ShiftRight
-            | Keycode::CtrlLeft
-            | Keycode::CtrlRight
-            | Keycode::AltLeft
-            | Keycode::AltRight
-    )
 }
 
 // ============================================================================
@@ -730,10 +704,10 @@ pub fn android_main(app: AndroidApp) {
                     match event {
                         InputEvent::KeyEvent(key_event) => {
                             let keycode = key_event.key_code();
-                            input.handle_key(keycode, key_event.action());
-                            if is_game_control_key(keycode) {
-                                input.set_has_physical_keyboard(true);
-                            }
+                            let action = key_event.action();
+                            log_info(&format!("KeyEvent: keycode={:?} action={:?}", keycode, action));
+                            input.handle_key(keycode, action);
+                            // 软键盘模式下不修改触摸面板显示状态
                         }
                         InputEvent::MotionEvent(motion_event) => {
                             let action = motion_event.action();
