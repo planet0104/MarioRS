@@ -25,6 +25,10 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::keyboard::{KeyCode as WinitKeyCode, PhysicalKey};
 use winit::window::{Icon, Window, WindowId};
 
+// Windows平台：禁用Alt键触发的系统菜单（防止游戏卡死）
+#[cfg(target_os = "windows")]
+use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+
 // ============================================================================
 // 类型别名 - 使用公共模块实现
 // ============================================================================
@@ -47,6 +51,31 @@ fn create_window_icon() -> Option<Icon> {
     let rgba_data = rgba_img.into_raw();
 
     Icon::from_rgba(rgba_data, width, height).ok()
+}
+
+/// Windows平台：禁用系统菜单，防止Alt键触发模态菜单循环导致游戏卡死
+/// 
+/// 问题原因：Windows的WS_SYSMENU窗口样式会在按下Alt键时进入模态菜单循环，
+/// 这会阻塞winit的事件循环，导致游戏看起来"卡死"。
+/// 解决方案：创建窗口后移除WS_SYSMENU样式。
+#[cfg(target_os = "windows")]
+fn disable_system_menu(window: &Window) {
+    use std::ffi::c_void;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GetWindowLongPtrW, SetWindowLongPtrW, GWL_STYLE, WS_SYSMENU,
+    };
+
+    if let Ok(handle) = window.window_handle() {
+        if let RawWindowHandle::Win32(win32_handle) = handle.as_raw() {
+            let hwnd = win32_handle.hwnd.get() as *mut c_void;
+            unsafe {
+                let style = GetWindowLongPtrW(hwnd, GWL_STYLE);
+                // 移除 WS_SYSMENU 样式，禁用Alt键触发的系统菜单
+                let new_style = style & !(WS_SYSMENU as isize);
+                SetWindowLongPtrW(hwnd, GWL_STYLE, new_style);
+            }
+        }
+    }
 }
 
 // ============================================================================
@@ -100,10 +129,18 @@ impl DesktopDisplay {
             .with_title("Mario")
             .with_inner_size(size)
             .with_min_inner_size(size)
+            .with_resizable(false) // 禁用窗口调整大小和最大化（像素游戏固定尺寸）
             .with_window_icon(icon)
             .with_visible(false);
 
         let window = Arc::new(event_loop.create_window(window_attributes)?);
+
+        // Windows平台：禁用系统菜单，防止Alt键触发模态菜单循环导致游戏卡死
+        #[cfg(target_os = "windows")]
+        {
+            disable_system_menu(&window);
+        }
+
         let window_size = window.inner_size();
 
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
@@ -120,11 +157,12 @@ impl DesktopDisplay {
                 force_fallback_adapter: false,
             }))?;
 
+        // 使用默认限制，支持更大的纹理尺寸（8192+），以支持高分辨率全屏
         let (device, queue) =
             futures::executor::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
                 label: Some("mario_device"),
                 required_features: wgpu::Features::empty(),
-                required_limits: wgpu::Limits::downlevel_webgl2_defaults(),
+                required_limits: wgpu::Limits::default(),
                 memory_hints: wgpu::MemoryHints::Performance,
                 experimental_features: wgpu::ExperimentalFeatures::disabled(),
                 trace: wgpu::Trace::Off,
@@ -167,6 +205,9 @@ impl DesktopDisplay {
         self.window.is_some()
     }
 
+    // 默认wgpu限制下的最大纹理尺寸（支持高分辨率全屏）
+    const MAX_TEXTURE_SIZE: u32 = 8192;
+
     pub fn resize(
         &mut self,
         new_width: u32,
@@ -175,8 +216,9 @@ impl DesktopDisplay {
         if let (Some(surface), Some(device), Some(config)) =
             (&self.wgpu_surface, &self.wgpu_device, &mut self.wgpu_config)
         {
-            config.width = new_width.max(1);
-            config.height = new_height.max(1);
+            // 限制尺寸不超过最大纹理尺寸
+            config.width = new_width.max(1).min(Self::MAX_TEXTURE_SIZE);
+            config.height = new_height.max(1).min(Self::MAX_TEXTURE_SIZE);
             surface.configure(device, config);
         }
         Ok(())

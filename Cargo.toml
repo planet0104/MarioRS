@@ -119,7 +119,7 @@ hashbrown = "0.15"
 [features]
 default = ["wgpu-backend", "dark-theme"]   # 默认使用 GPU + GDI回退 + 暗黑主题适配
 logging = ["dep:tracing", "dep:tracing-subscriber", "dep:tracing-wasm", "dep:tracing-android"]
-wgpu-backend = ["dep:winit", "dep:wgpu", "dep:bytemuck", "dep:futures"]  # wgpu 渲染后端（跨平台，体积大）
+wgpu-backend = ["dep:winit", "dep:wgpu", "dep:bytemuck", "dep:futures", "dep:windows-sys"]  # wgpu 渲染后端（跨平台，体积大）
 gdi-backend = ["dep:windows-sys"]         # Windows GDI（仅用于窗口创建，渲染使用GPU）
 cpu-backend = ["gdi-backend"]             # CPU软件渲染后端（XP兼容，使用GDI显示）
 dark-theme = []                           # 暗黑主题适配（需要 Vista+ dwmapi.dll）
