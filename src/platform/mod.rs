@@ -19,13 +19,19 @@ pub mod audio;
 pub mod common;
 pub mod touch_panel;
 
-#[cfg(all(target_os = "windows", feature = "gdi-backend"))]
+// Windows GDI + wgpu 后端（需要同时启用 gdi-backend 和 wgpu-backend）
+#[cfg(all(target_os = "windows", feature = "gdi-backend", feature = "wgpu-backend", not(feature = "cpu-backend")))]
 mod windows;
+
+// Windows CPU 软件渲染后端（XP兼容）
+#[cfg(all(target_os = "windows", feature = "cpu-backend", not(feature = "wgpu-backend")))]
+mod windows_cpu;
 
 #[cfg(feature = "wgpu-backend")]
 mod desktop;
 
-#[cfg(target_os = "android")]
+// Android 后端（需要 wgpu-backend）
+#[cfg(all(target_os = "android", feature = "wgpu-backend"))]
 mod android;
 
 // ============================================================================
@@ -325,11 +331,12 @@ pub use touch_panel::{ButtonStates, TouchAction, TouchPanelInput, VirtualButtons
 // 平台实现导出 - 根据 feature 和目标平台选择
 // ============================================================================
 
-// Windows GDI 后端（仅 Windows + gdi-backend 且未启用 wgpu-backend）
+// Windows GDI + wgpu 后端（需要 gdi-backend + wgpu-backend，且未启用 cpu-backend）
 #[cfg(all(
     target_os = "windows",
     feature = "gdi-backend",
-    not(feature = "wgpu-backend")
+    feature = "wgpu-backend",
+    not(feature = "cpu-backend")
 ))]
 pub use self::windows::{
     DesktopAudio, DesktopDisplay, DesktopInput, DesktopLog, DesktopRandom, DesktopStorage,
@@ -337,16 +344,35 @@ pub use self::windows::{
     random_u8, random_u32, random_usize, run_game,
 };
 
-// wgpu 后端（跨平台桌面，wgpu-backend 优先）
-#[cfg(feature = "wgpu-backend")]
+// Windows CPU 软件渲染后端（XP兼容，仅 Windows + cpu-backend 且未启用 wgpu-backend）
+#[cfg(all(
+    target_os = "windows",
+    feature = "cpu-backend",
+    not(feature = "wgpu-backend")
+))]
+pub use self::windows_cpu::{
+    DesktopAudio, DesktopDisplay, DesktopInput, DesktopLog, DesktopRandom, DesktopStorage,
+    DesktopTime, log_debug, log_error, log_info, log_warn, now_ms, random_f32, random_i32,
+    random_u8, random_u32, random_usize, run_game,
+};
+
+// wgpu 后端（跨平台桌面，使用 winit 窗口）
+// 注意：
+// - 在 Windows 上如果启用了 gdi-backend，则使用 windows.rs 而不是 desktop.rs
+// - 在 Android 上使用 android.rs 而不是 desktop.rs
+#[cfg(all(
+    feature = "wgpu-backend",
+    not(all(target_os = "windows", feature = "gdi-backend")),
+    not(target_os = "android")
+))]
 pub use self::desktop::{
     DesktopAudio, DesktopDisplay, DesktopInput, DesktopLog, DesktopRandom, DesktopStorage,
     DesktopTime, log_debug, log_error, log_info, log_warn, now_ms, random_f32, random_i32,
     random_u8, random_u32, random_usize, run_game,
 };
 
-// Android 后端
-#[cfg(target_os = "android")]
+// Android 后端（需要 wgpu-backend）
+#[cfg(all(target_os = "android", feature = "wgpu-backend"))]
 pub use self::android::{
     DesktopAudio, DesktopDisplay, DesktopInput, DesktopLog, DesktopRandom, DesktopStorage,
     DesktopTime, android_main, log_debug, log_error, log_info, log_warn, now_ms, random_f32,

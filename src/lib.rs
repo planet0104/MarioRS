@@ -15,8 +15,14 @@ pub extern "C" fn android_main(app: AndroidApp) {
     platform::android_main(app);
 }
 
-// GPU渲染模块
+// GPU渲染模块 - 包含渲染数据类型和命令
+// 注意：该模块始终编译，因为数据类型被游戏逻辑使用
+// wgpu特定的渲染器在模块内部条件编译
 pub mod gpu;
+
+// CPU软件渲染模块（仅在cpu-backend时编译，用于XP兼容）
+#[cfg(feature = "cpu-backend")]
+pub mod cpu;
 
 // 游戏核心模块
 pub mod backgr;

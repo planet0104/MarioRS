@@ -1,13 +1,13 @@
 // ============================================================================
-// GPU渲染类型定义
+// 渲染类型定义
 // ============================================================================
 //
-// 本模块包含GPU渲染所需的所有数据类型和常量定义
+// 本模块包含渲染所需的所有数据类型和常量定义
+// 这些类型被游戏逻辑使用，无论是GPU还是CPU渲染后端
 //
-// wgpu教学: 数据类型设计原则
-// 1. #[repr(C)] - 确保内存布局与C/GPU兼容
-// 2. bytemuck::Pod/Zeroable - 允许安全地转换为字节数组传递给GPU
-// 3. 字段对齐 - GPU通常要求数据按16字节对齐
+// 设计原则:
+// 1. #[repr(C)] - 确保内存布局一致
+// 2. bytemuck::Pod/Zeroable（仅wgpu-backend）- 允许安全地转换为字节数组传递给GPU
 //
 // ============================================================================
 
@@ -52,7 +52,8 @@ pub const MAX_SPRITES_PER_BATCH: usize = 1024;
 // ============================================================================
 
 #[repr(C)]
-#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(Copy, Clone, Debug)]
+#[cfg_attr(feature = "wgpu-backend", derive(bytemuck::Pod, bytemuck::Zeroable))]
 pub struct SpriteInstance {
     /// 屏幕位置（像素）- 精灵左上角在屏幕上的坐标
     pub position: [f32; 2],
@@ -137,7 +138,8 @@ impl SpriteInstance {
 // ============================================================================
 
 #[repr(C)]
-#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(Copy, Clone, Debug)]
+#[cfg_attr(feature = "wgpu-backend", derive(bytemuck::Pod, bytemuck::Zeroable))]
 pub struct FillRect {
     /// 屏幕位置（像素）
     pub position: [f32; 2],
@@ -214,7 +216,8 @@ pub enum RenderCommand {
 // ============================================================================
 
 #[repr(C)]
-#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(Copy, Clone, Debug)]
+#[cfg_attr(feature = "wgpu-backend", derive(bytemuck::Pod, bytemuck::Zeroable))]
 pub struct CameraUniform {
     /// 视口偏移（世界坐标）
     pub view_offset: [f32; 2],

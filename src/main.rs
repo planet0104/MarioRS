@@ -29,7 +29,8 @@ fn main() {
 
 /// 根据编译 feature 选择平台实现
 /// wgpu-backend 优先，如果同时启用则使用 wgpu
-#[cfg(feature = "wgpu-backend")]
+/// 注意：Android 有自己的入口点（android_main），不使用此函数
+#[cfg(all(feature = "wgpu-backend", not(target_os = "android")))]
 fn run_platform() -> Result<(), Box<dyn std::error::Error>> {
     mario::platform::run_game()
 }
