@@ -45,25 +45,33 @@ A Rust port of Mike Wiering's Turbo Pascal Mario clone game.
 
 ### Android Touch Controls
 
-The Android version provides a virtual button interface:
+The Android version uses native Android buttons for the virtual control interface, which resolves multi-touch latency issues:
+
+**Game Control Buttons (bottom of screen)**:
 
 | Control | Action | Maps to |
 |---------|--------|---------|
-| D-Pad (left side) | Direction control (up/down/left/right); Left to go back in menu | Arrow keys |
-| A Button | Jump (hold for higher jump); Menu confirm | Alt |
+| D-Pad (bottom left) | Direction control (up/down/left/right); Left to go back in menu | Arrow keys |
+| A Button (bottom right) | Jump (hold for higher jump); Menu confirm | Alt |
 | B Button | Run/Accelerate | Ctrl |
 | X Button | Shoot fireball (Fire Mario only) | Space |
 | Y Button | Alternate function | Shift |
-| E Button (top right) | Enter/Exit layout edit mode | - |
-| P Button (below E) | Pause/Resume game | P |
-| R Button (edit mode) | Reset button layout to default | - |
+
+**Function Buttons (top right, from left to right)**:
+
+| Button | Action |
+|--------|--------|
+| H | Hide/Show game control buttons |
+| E | Enter/Exit layout edit mode |
+| KB | Open/Close virtual keyboard (for cheat code input) |
 
 **Menu Controls**:
 - **Confirm selection**: Tap A button
 - **Go back**: Tap D-Pad left
-- **Pause game**: Tap P button
 
 **Layout Edit Mode**: Tap the E button in the top right corner to enter edit mode. You can drag virtual buttons to adjust their positions. Tap the E button again to exit and save the layout.
+
+**Virtual Keyboard**: Tap the KB button to open the virtual keyboard panel for entering cheat codes. The keyboard panel can be dragged to adjust its position.
 
 ### Menu Structure
 
@@ -266,8 +274,7 @@ MarioRS/
 │       ├── windows.rs    # Windows wgpu + GDI backend
 │       ├── windows_cpu.rs # Windows CPU software rendering backend (XP compatible)
 │       ├── desktop.rs    # Cross-platform wgpu backend (Linux/macOS)
-│       ├── android.rs    # Android native backend
-│       ├── touch_panel.rs # Touch screen virtual buttons
+│       ├── android.rs    # Android native backend (JNI button events)
 │       ├── common/       # Common platform implementations
 │       │   ├── frame_timer.rs # Frame rate control
 │       │   ├── input.rs      # Input handling
@@ -282,14 +289,18 @@ MarioRS/
 ├── android/              # Android project
 │   ├── app/
 │   │   ├── src/main/
-│   │   │   ├── java/         # Java/Kotlin code
+│   │   │   ├── java/com/mariogame/mario/
+│   │   │   │   └── MainActivity.java  # Native button overlay
+│   │   │   ├── res/
+│   │   │   │   ├── layout/       # Button layout XML
+│   │   │   │   ├── drawable/     # Button background resources
+│   │   │   │   └── values/       # Styles and dimensions
 │   │   │   ├── jniLibs/      # Compiled .so files
 │   │   │   └── AndroidManifest.xml
 │   │   └── build.gradle.kts
 │   └── build.gradle.kts
 ├── assets/
 │   ├── sprites/          # Sprite data files
-│   ├── onscreen_controls/ # Touch button image assets
 │   ├── *.BK              # Background data
 │   └── mario.ico         # Application icon
 ├── examples/
@@ -324,8 +335,7 @@ MarioRS uses a dual rendering backend architecture, supporting both modern GPU-a
 | `wgpu-backend` | wgpu GPU hardware-accelerated rendering | Windows/Linux/macOS/Android |
 | `cpu-backend` | CPU software rendering (XP compatible) | Windows |
 | `gdi-backend` | Windows GDI window creation | Windows |
-| `android` | Android native rendering | Android |
-| `touch-panel` | Touch screen virtual buttons | Android |
+| `android` | Android native rendering (with native buttons) | Android |
 | `dark-theme` | Dark theme adaptation | Windows 10+ |
 
 **Default**: `wgpu-backend` + `dark-theme`
@@ -337,7 +347,7 @@ MarioRS uses a dual rendering backend architecture, supporting both modern GPU-a
 | Windows Modern (Recommended) | `wgpu-backend`, `gdi-backend`, `dark-theme` | GPU rendering + GDI window |
 | Windows XP Compatible | `cpu-backend` | CPU software rendering + GDI window |
 | Linux/macOS | `wgpu-backend` | GPU rendering + winit window |
-| Android | `android` | Auto-enables `wgpu-backend` + `touch-panel` |
+| Android | `android` | Auto-enables `wgpu-backend` + native button overlay |
 
 ## Platform Support
 
