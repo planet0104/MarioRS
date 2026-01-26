@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 作弊码按钮背景 - 黄色圆形 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="oval">
+    <solid android:color="#B4FFEB3B" />
+    <stroke
+        android:width="4dp"
+        android:color="#FFFFEB3B" />
+</shape>

@@ -5,15 +5,15 @@
     <application
         android:label="@string/app_name"
         android:icon="@drawable/ic_launcher"
-        android:hasCode="false"
+        android:hasCode="true"
         android:allowBackup="true">
 
-        <!-- 纯 Native Activity，由 Rust 代码驱动 -->
+        <!-- 使用自定义 MainActivity, 继承 GameActivity, 添加原生按钮覆盖层 -->
         <activity
-            android:name="android.app.NativeActivity"
+            android:name="com.mariogame.mario.MainActivity"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden"
             android:screenOrientation="landscape"
-            android:theme="@android:style/Theme.NoTitleBar.Fullscreen"
+            android:theme="@style/GameActivityTheme"
             android:exported="true">
 
             <!-- 指定 Rust 编译的动态库名称 -->

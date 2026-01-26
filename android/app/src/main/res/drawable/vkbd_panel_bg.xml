@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 虚拟键盘面板背景 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="#C8000000" />
+    <stroke
+        android:width="2dp"
+        android:color="#6464FF" />
+    <corners android:radius="10dp" />
+</shape>

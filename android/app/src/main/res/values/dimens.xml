@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 按钮尺寸定义 (基于屏幕高度的百分比会在代码中动态计算) -->
+<resources>
+    <!-- D-Pad 按钮尺寸 -->
+    <dimen name="dpad_size">80dp</dimen>
+    <!-- 动作按钮尺寸 (A/B/X/Y) -->
+    <dimen name="action_btn_size">80dp</dimen>
+    <!-- 小按钮尺寸 (暂停/编辑/作弊码) -->
+    <dimen name="small_btn_size">48dp</dimen>
+    <!-- 边距 -->
+    <dimen name="button_margin">24dp</dimen>
+    <!-- 按钮间距 -->
+    <dimen name="button_spacing">8dp</dimen>
+</resources>

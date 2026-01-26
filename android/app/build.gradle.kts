@@ -58,9 +58,11 @@ android {
     }
 
     // 指定 jniLibs 目录 (由 cargo-ndk 生成的 .so 文件)
+    // 添加 Java 源目录 (自定义 MainActivity)
     sourceSets {
         getByName("main") {
             jniLibs.srcDirs("src/main/jniLibs")
+            java.srcDirs("src/main/java")
         }
     }
 
@@ -70,6 +72,20 @@ android {
     }
 }
 
+// 强制统一 Kotlin stdlib 版本，避免重复类冲突
+configurations.all {
+    resolutionStrategy {
+        force("org.jetbrains.kotlin:kotlin-stdlib:1.9.22")
+        force("org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.9.22")
+        force("org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.9.22")
+    }
+}
+
 dependencies {
-    // 纯 Native Activity 应用，无需 Java/Kotlin 依赖
+    // Android Games SDK - 提供 GameActivity
+    // 注意: 版本必须与 Rust android-activity crate 0.6.x 匹配，使用 2.x 版本
+    implementation("androidx.games:games-activity:2.0.2")
+    // GameActivity 依赖 AppCompat
+    implementation("androidx.appcompat:appcompat:1.6.1")
+    implementation("androidx.core:core:1.12.0")
 }

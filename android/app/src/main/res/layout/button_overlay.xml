@@ -1,0 +1,140 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 游戏按钮覆盖层布局 -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/button_layer"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <!-- D-Pad 左 -->
+    <TextView
+        android:id="@+id/btn_dpad_left"
+        android:layout_width="@dimen/dpad_size"
+        android:layout_height="@dimen/dpad_size"
+        android:background="@drawable/button_dpad"
+        android:gravity="center"
+        android:text="&lt;"
+        android:textColor="@android:color/white"
+        android:textSize="24sp"
+        android:textStyle="bold" />
+
+    <!-- D-Pad 右 -->
+    <TextView
+        android:id="@+id/btn_dpad_right"
+        android:layout_width="@dimen/dpad_size"
+        android:layout_height="@dimen/dpad_size"
+        android:background="@drawable/button_dpad"
+        android:gravity="center"
+        android:text="&gt;"
+        android:textColor="@android:color/white"
+        android:textSize="24sp"
+        android:textStyle="bold" />
+
+    <!-- D-Pad 上 -->
+    <TextView
+        android:id="@+id/btn_dpad_up"
+        android:layout_width="@dimen/dpad_size"
+        android:layout_height="@dimen/dpad_size"
+        android:background="@drawable/button_dpad"
+        android:gravity="center"
+        android:text="^"
+        android:textColor="@android:color/white"
+        android:textSize="24sp"
+        android:textStyle="bold" />
+
+    <!-- D-Pad 下 -->
+    <TextView
+        android:id="@+id/btn_dpad_down"
+        android:layout_width="@dimen/dpad_size"
+        android:layout_height="@dimen/dpad_size"
+        android:background="@drawable/button_dpad"
+        android:gravity="center"
+        android:text="v"
+        android:textColor="@android:color/white"
+        android:textSize="24sp"
+        android:textStyle="bold" />
+
+    <!-- A 按钮 (跳跃) - 绿色 -->
+    <TextView
+        android:id="@+id/btn_a"
+        android:layout_width="@dimen/action_btn_size"
+        android:layout_height="@dimen/action_btn_size"
+        android:background="@drawable/button_a"
+        android:gravity="center"
+        android:text="A"
+        android:textColor="@android:color/white"
+        android:textSize="28sp"
+        android:textStyle="bold" />
+
+    <!-- B 按钮 (加速) - 红色 -->
+    <TextView
+        android:id="@+id/btn_b"
+        android:layout_width="@dimen/action_btn_size"
+        android:layout_height="@dimen/action_btn_size"
+        android:background="@drawable/button_b"
+        android:gravity="center"
+        android:text="B"
+        android:textColor="@android:color/white"
+        android:textSize="28sp"
+        android:textStyle="bold" />
+
+    <!-- X 按钮 (射击) - 蓝色 -->
+    <TextView
+        android:id="@+id/btn_x"
+        android:layout_width="@dimen/action_btn_size"
+        android:layout_height="@dimen/action_btn_size"
+        android:background="@drawable/button_x"
+        android:gravity="center"
+        android:text="X"
+        android:textColor="@android:color/white"
+        android:textSize="28sp"
+        android:textStyle="bold" />
+
+    <!-- Y 按钮 (特殊) - 橙色 -->
+    <TextView
+        android:id="@+id/btn_y"
+        android:layout_width="@dimen/action_btn_size"
+        android:layout_height="@dimen/action_btn_size"
+        android:background="@drawable/button_y"
+        android:gravity="center"
+        android:text="Y"
+        android:textColor="@android:color/white"
+        android:textSize="28sp"
+        android:textStyle="bold" />
+
+    <!-- 暂停按钮 - 紫色 -->
+    <TextView
+        android:id="@+id/btn_pause"
+        android:layout_width="@dimen/small_btn_size"
+        android:layout_height="@dimen/small_btn_size"
+        android:background="@drawable/button_pause"
+        android:gravity="center"
+        android:text="||"
+        android:textColor="@android:color/white"
+        android:textSize="16sp"
+        android:textStyle="bold" />
+
+    <!-- 编辑按钮 - 灰色 -->
+    <TextView
+        android:id="@+id/btn_edit"
+        android:layout_width="@dimen/small_btn_size"
+        android:layout_height="@dimen/small_btn_size"
+        android:background="@drawable/button_edit"
+        android:gravity="center"
+        android:text="E"
+        android:textColor="@android:color/white"
+        android:textSize="16sp"
+        android:textStyle="bold" />
+
+    <!-- 作弊码按钮 - 黄色 -->
+    <TextView
+        android:id="@+id/btn_cheat"
+        android:layout_width="@dimen/small_btn_size"
+        android:layout_height="@dimen/small_btn_size"
+        android:background="@drawable/button_cheat"
+        android:gravity="center"
+        android:text="C"
+        android:textColor="@android:color/black"
+        android:textSize="16sp"
+        android:textStyle="bold" />
+
+</FrameLayout>

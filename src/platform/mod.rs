@@ -17,7 +17,6 @@
 
 pub mod audio;
 pub mod common;
-pub mod touch_panel;
 
 // Windows GDI + wgpu 后端（需要同时启用 gdi-backend 和 wgpu-backend）
 #[cfg(all(target_os = "windows", feature = "gdi-backend", feature = "wgpu-backend", not(feature = "cpu-backend")))]
@@ -320,12 +319,6 @@ pub enum GamePhase {
     GameOver,
     Exiting,
 }
-
-// ============================================================================
-// 触摸面板公共模块导出
-// ============================================================================
-
-pub use touch_panel::{ButtonStates, TouchAction, TouchPanelInput, VirtualButtonsRenderer};
 
 // ============================================================================
 // 平台实现导出 - 根据 feature 和目标平台选择

@@ -5,17 +5,216 @@
 //
 // 重要: 这个模块依赖 android-activity, 其他游戏模块通过 platform.rs 抽象访问
 
-use super::common::{CommonRandom, CommonTime, FileStorage, FpsCounter, FrameTimer};
+use super::common::{CommonRandom, CommonTime, FileStorage, FpsCounter};
 use super::{
     DisplayBackend, InputBackend, KeyCode as PlatformKeyCode, KeyEvent as PlatformKeyEvent,
     LogBackend, LogLevel, StorageBackend,
-    touch_panel::{ButtonLayout, LAYOUT_SAVE_KEY, TouchAction, TouchPanelInput},
 };
 use crate::gpu::GpuRenderer;
 
 use std::collections::HashSet;
 use std::path::PathBuf;
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
+
+// ============================================================================
+// JNI 原生按钮事件队列 (解决多点触摸延迟问题)
+// ============================================================================
+
+/// 原生按钮事件
+#[derive(Clone, Copy, Debug)]
+pub struct NativeButtonEvent {
+    pub button_id: i32,
+    pub pressed: bool,
+}
+
+/// 原生按钮 ID 常量 (与 Java 代码保持一致)
+pub mod native_button {
+    pub const DPAD_LEFT: i32 = 1;
+    pub const DPAD_RIGHT: i32 = 2;
+    pub const DPAD_UP: i32 = 3;
+    pub const DPAD_DOWN: i32 = 4;
+    pub const BTN_A: i32 = 5;
+    pub const BTN_B: i32 = 6;
+    pub const BTN_X: i32 = 7;
+    pub const BTN_Y: i32 = 8;
+}
+
+/// 全局事件队列 - 用于 JNI 回调线程和游戏主线程通信
+static NATIVE_BUTTON_EVENTS: Mutex<Vec<NativeButtonEvent>> = Mutex::new(Vec::new());
+
+/// 软键盘按键事件
+#[derive(Clone, Copy, Debug)]
+pub struct SoftKeyEvent {
+    pub key_code: i32,
+    pub pressed: bool,
+}
+
+/// 软键盘事件队列
+static SOFT_KEY_EVENTS: Mutex<Vec<SoftKeyEvent>> = Mutex::new(Vec::new());
+
+/// JNI 导出函数 - 由 Java MainActivity 调用 (游戏按钮)
+#[unsafe(no_mangle)]
+pub extern "C" fn Java_com_mariogame_mario_MainActivity_nativeOnButtonEvent(
+    _env: *mut std::ffi::c_void,
+    _class: *mut std::ffi::c_void,
+    button_id: i32,
+    pressed: i32,
+) {
+    if let Ok(mut queue) = NATIVE_BUTTON_EVENTS.lock() {
+        queue.push(NativeButtonEvent { button_id, pressed: pressed != 0 });
+    }
+}
+
+/// JNI 导出函数 - 由 Java MainActivity 调用 (软键盘按键)
+#[unsafe(no_mangle)]
+pub extern "C" fn Java_com_mariogame_mario_MainActivity_nativeOnKeyEvent(
+    _env: *mut std::ffi::c_void,
+    _class: *mut std::ffi::c_void,
+    key_code: i32,
+    pressed: i32,
+) {
+    log_info(&format!("[JNI KeyEvent] key_code={}, pressed={}", key_code, pressed != 0));
+    if let Ok(mut queue) = SOFT_KEY_EVENTS.lock() {
+        queue.push(SoftKeyEvent { key_code, pressed: pressed != 0 });
+    }
+}
+
+/// 从队列中取出所有待处理的软键盘事件
+pub fn take_soft_key_events() -> Vec<SoftKeyEvent> {
+    if let Ok(mut queue) = SOFT_KEY_EVENTS.lock() {
+        std::mem::take(&mut *queue)
+    } else {
+        Vec::new()
+    }
+}
+
+/// 从队列中取出所有待处理的原生按钮事件
+pub fn take_native_button_events() -> Vec<NativeButtonEvent> {
+    if let Ok(mut queue) = NATIVE_BUTTON_EVENTS.lock() {
+        std::mem::take(&mut *queue)
+    } else {
+        Vec::new()
+    }
+}
+
+/// 将原生按钮事件转换为平台按键事件
+pub fn native_button_to_key_event(event: &NativeButtonEvent) -> PlatformKeyEvent {
+    let key = match event.button_id {
+        native_button::DPAD_LEFT => PlatformKeyCode::Left,
+        native_button::DPAD_RIGHT => PlatformKeyCode::Right,
+        native_button::DPAD_UP => PlatformKeyCode::Up,
+        native_button::DPAD_DOWN => PlatformKeyCode::Down,
+        native_button::BTN_A => PlatformKeyCode::AltLeft,      // A = Jump
+        native_button::BTN_B => PlatformKeyCode::ControlLeft,  // B = Run
+        native_button::BTN_X => PlatformKeyCode::Space,        // X = Fire
+        native_button::BTN_Y => PlatformKeyCode::ShiftLeft,    // Y = Special
+        _ => PlatformKeyCode::Unknown,
+    };
+    PlatformKeyEvent {
+        key,
+        pressed: event.pressed,
+    }
+}
+
+/// 将软键盘事件转换为平台按键事件
+/// 使用 Android KeyEvent 常量值 (与 android-activity Keycode 枚举值相同)
+pub fn soft_key_to_platform_event(event: &SoftKeyEvent) -> PlatformKeyEvent {
+    // Android KeyEvent 常量 (https://developer.android.com/reference/android/view/KeyEvent)
+    const KEYCODE_TAB: i32 = 61;
+    const KEYCODE_SPACE: i32 = 62;
+    const KEYCODE_ENTER: i32 = 66;
+    const KEYCODE_DEL: i32 = 67;  // Backspace
+    const KEYCODE_GRAVE: i32 = 68;  // ` 反引号
+    const KEYCODE_SEMICOLON: i32 = 74;  // ; / : 分号/冒号
+    const KEYCODE_A: i32 = 29;
+    const KEYCODE_B: i32 = 30;
+    const KEYCODE_C: i32 = 31;
+    const KEYCODE_D: i32 = 32;
+    const KEYCODE_E: i32 = 33;
+    const KEYCODE_F: i32 = 34;
+    const KEYCODE_G: i32 = 35;
+    const KEYCODE_H: i32 = 36;
+    const KEYCODE_I: i32 = 37;
+    const KEYCODE_J: i32 = 38;
+    const KEYCODE_K: i32 = 39;
+    const KEYCODE_L: i32 = 40;
+    const KEYCODE_M: i32 = 41;
+    const KEYCODE_N: i32 = 42;
+    const KEYCODE_O: i32 = 43;
+    const KEYCODE_P: i32 = 44;
+    const KEYCODE_Q: i32 = 45;
+    const KEYCODE_R: i32 = 46;
+    const KEYCODE_S: i32 = 47;
+    const KEYCODE_T: i32 = 48;
+    const KEYCODE_U: i32 = 49;
+    const KEYCODE_V: i32 = 50;
+    const KEYCODE_W: i32 = 51;
+    const KEYCODE_X: i32 = 52;
+    const KEYCODE_Y: i32 = 53;
+    const KEYCODE_Z: i32 = 54;
+    const KEYCODE_0: i32 = 7;
+    const KEYCODE_1: i32 = 8;
+    const KEYCODE_2: i32 = 9;
+    const KEYCODE_3: i32 = 10;
+    const KEYCODE_4: i32 = 11;
+    const KEYCODE_5: i32 = 12;
+    const KEYCODE_6: i32 = 13;
+    const KEYCODE_7: i32 = 14;
+    const KEYCODE_8: i32 = 15;
+    const KEYCODE_9: i32 = 16;
+    const KEYCODE_ESCAPE: i32 = 111;
+    
+    let key = match event.key_code {
+        KEYCODE_TAB => PlatformKeyCode::Tab,
+        KEYCODE_SPACE => PlatformKeyCode::Space,
+        KEYCODE_ENTER => PlatformKeyCode::Enter,
+        KEYCODE_ESCAPE => PlatformKeyCode::Escape,
+        // 反引号和分号/冒号映射到 Tab (方便输入作弊码)
+        KEYCODE_GRAVE | KEYCODE_SEMICOLON => PlatformKeyCode::Tab,
+        KEYCODE_A => PlatformKeyCode::KeyA,
+        KEYCODE_B => PlatformKeyCode::KeyB,
+        KEYCODE_C => PlatformKeyCode::KeyC,
+        KEYCODE_D => PlatformKeyCode::KeyD,
+        KEYCODE_E => PlatformKeyCode::KeyE,
+        KEYCODE_F => PlatformKeyCode::KeyF,
+        KEYCODE_G => PlatformKeyCode::KeyG,
+        KEYCODE_H => PlatformKeyCode::KeyH,
+        KEYCODE_I => PlatformKeyCode::KeyI,
+        KEYCODE_J => PlatformKeyCode::KeyJ,
+        KEYCODE_K => PlatformKeyCode::KeyK,
+        KEYCODE_L => PlatformKeyCode::KeyL,
+        KEYCODE_M => PlatformKeyCode::KeyM,
+        KEYCODE_N => PlatformKeyCode::KeyN,
+        KEYCODE_O => PlatformKeyCode::KeyO,
+        KEYCODE_P => PlatformKeyCode::KeyP,
+        KEYCODE_Q => PlatformKeyCode::KeyQ,
+        KEYCODE_R => PlatformKeyCode::KeyR,
+        KEYCODE_S => PlatformKeyCode::KeyS,
+        KEYCODE_T => PlatformKeyCode::KeyT,
+        KEYCODE_U => PlatformKeyCode::KeyU,
+        KEYCODE_V => PlatformKeyCode::KeyV,
+        KEYCODE_W => PlatformKeyCode::KeyW,
+        KEYCODE_X => PlatformKeyCode::KeyX,
+        KEYCODE_Y => PlatformKeyCode::KeyY,
+        KEYCODE_Z => PlatformKeyCode::KeyZ,
+        KEYCODE_0 => PlatformKeyCode::Digit0,
+        KEYCODE_1 => PlatformKeyCode::Digit1,
+        KEYCODE_2 => PlatformKeyCode::Digit2,
+        KEYCODE_3 => PlatformKeyCode::Digit3,
+        KEYCODE_4 => PlatformKeyCode::Digit4,
+        KEYCODE_5 => PlatformKeyCode::Digit5,
+        KEYCODE_6 => PlatformKeyCode::Digit6,
+        KEYCODE_7 => PlatformKeyCode::Digit7,
+        KEYCODE_8 => PlatformKeyCode::Digit8,
+        KEYCODE_9 => PlatformKeyCode::Digit9,
+        _ => PlatformKeyCode::Unknown,
+    };
+    PlatformKeyEvent {
+        key,
+        pressed: event.pressed,
+    }
+}
 
 // ============================================================================
 // Android Activity 相关导入
@@ -44,12 +243,12 @@ pub type DesktopRandom = CommonRandom;
 // Android 输入后端
 // ============================================================================
 
-/// Android 输入后端 - 支持触摸和物理键盘
+/// Android 输入后端 - 支持物理键盘和原生 Java 按钮
+/// 触摸输入由 Java 原生按钮处理，通过 JNI 传递事件
 pub struct AndroidInput {
     key_states: HashSet<PlatformKeyCode>,
     pending_events: Vec<PlatformKeyEvent>,
     should_close: bool,
-    touch_panel: TouchPanelInput,
 }
 
 impl AndroidInput {
@@ -58,38 +257,7 @@ impl AndroidInput {
             key_states: HashSet::new(),
             pending_events: Vec::new(),
             should_close: false,
-            touch_panel: TouchPanelInput::new(),
         }
-    }
-
-    pub fn set_screen_size(&mut self, width: f32, height: f32) {
-        self.touch_panel.set_screen_size(width, height);
-    }
-
-    pub fn touch_panel(&self) -> &TouchPanelInput {
-        &self.touch_panel
-    }
-
-    pub fn touch_panel_mut(&mut self) -> &mut TouchPanelInput {
-        &mut self.touch_panel
-    }
-
-    /// 触摸面板始终显示（用户通过H按钮手动控制隐藏）
-    pub fn should_show_virtual_buttons(&self) -> bool {
-        true
-    }
-
-    pub fn handle_touch(&mut self, pointer_id: usize, x: f32, y: f32, action: MotionAction) {
-        let touch_action = match action {
-            MotionAction::Down | MotionAction::PointerDown => TouchAction::Down,
-            MotionAction::Move => TouchAction::Move,
-            MotionAction::Up | MotionAction::PointerUp => TouchAction::Up,
-            MotionAction::Cancel => TouchAction::Cancel,
-            _ => return,
-        };
-
-        self.touch_panel
-            .handle_touch(pointer_id, x, y, touch_action);
     }
 
     pub fn handle_key(&mut self, keycode: Keycode, action: KeyAction) {
@@ -107,6 +275,7 @@ impl AndroidInput {
             pressed,
         });
     }
+
 }
 
 impl Default for AndroidInput {
@@ -117,9 +286,7 @@ impl Default for AndroidInput {
 
 impl InputBackend for AndroidInput {
     fn poll_events(&mut self) -> Vec<PlatformKeyEvent> {
-        let mut events = std::mem::take(&mut self.pending_events);
-        events.extend(self.touch_panel.take_pending_events());
-        events
+        std::mem::take(&mut self.pending_events)
     }
 
     fn is_key_pressed(&self, key: PlatformKeyCode) -> bool {
@@ -154,8 +321,9 @@ fn android_keycode_to_platform(keycode: Keycode) -> PlatformKeyCode {
         Keycode::ShiftLeft => PlatformKeyCode::ShiftLeft,
         Keycode::ShiftRight => PlatformKeyCode::ShiftRight,
         Keycode::Tab => PlatformKeyCode::Tab,
-        // 反引号(`)映射到Tab，方便在软键盘上输入作弊码 (软键盘没有Tab键)
+        // 反引号(`)和分号(;/:)映射到Tab，方便在软键盘上输入作弊码 (软键盘没有Tab键)
         Keycode::Grave => PlatformKeyCode::Tab,
+        Keycode::Semicolon => PlatformKeyCode::Tab,
         Keycode::A => PlatformKeyCode::KeyA,
         Keycode::B => PlatformKeyCode::KeyB,
         Keycode::C => PlatformKeyCode::KeyC,
@@ -380,16 +548,11 @@ impl AndroidDisplay {
 
     /// 重新配置Surface（用于从后台恢复时）
     pub fn reconfigure_surface(&mut self) {
-        let (surface, device, config) =
-            match (&self.wgpu_surface, &self.wgpu_device, &self.wgpu_config) {
-                (Some(s), Some(d), Some(c)) => (s, d, c),
-                _ => return,
-            };
-        surface.configure(device, config);
-        log_info(&format!(
-            "[GPU] Surface reconfigured: {}x{}",
-            config.width, config.height
-        ));
+        if let (Some(surface), Some(device), Some(config)) =
+            (&self.wgpu_surface, &self.wgpu_device, &self.wgpu_config)
+        {
+            surface.configure(device, config);
+        }
     }
 }
 
@@ -585,111 +748,68 @@ use crate::platform::FrameResult;
 /// Android 应用主函数
 pub fn android_main(app: AndroidApp) {
     AndroidLog::init();
-    log_info("MarioRS Android starting...");
 
     let mut display = AndroidDisplay::new(GAME_WIDTH, GAME_HEIGHT);
     let mut input = AndroidInput::new();
-    let mut storage = AndroidStorage::with_app(&app);
+    let storage = AndroidStorage::with_app(&app);
     let mut game_state: Option<GameState> = None;
 
-    // 加载保存的触摸面板布局
-    if let Some(data) = storage.load(LAYOUT_SAVE_KEY) {
-        if let Some(layout) = ButtonLayout::from_bytes(&data) {
-            input.touch_panel_mut().apply_layout(&layout);
-            log_info("Touch panel layout loaded");
-        }
-    }
-
-    // 使用公共帧率控制器
-    let mut frame_timer = FrameTimer::new(60.0);
+    // FPS 计数器
     let mut fps_counter = FpsCounter::new();
     let mut running = true;
 
-    // 预分配overlay buffer（避免每帧分配）
-    let mut overlay_buffer: Vec<u8> = Vec::new();
-    let mut overlay_buffer_size: (u32, u32) = (0, 0);
-    // 上一帧是否显示了虚拟按钮（用于检测变化）
-    let mut last_show_buttons = false;
     // GPU资源是否需要重新上传（后台恢复后设为true）
     let mut gpu_resources_invalidated = false;
+    // 上一次渲染时间
+    let mut last_render_time = Instant::now();
+    let frame_duration = Duration::from_secs_f64(1.0 / 60.0);
 
     while running {
-        app.poll_events(Some(Duration::ZERO), |event| match event {
+        // 计算到下一帧的等待时间，用于 poll_events 超时
+        // 使用非常短的超时，确保输入事件能立即被处理
+        let elapsed = last_render_time.elapsed();
+        let wait_time = if elapsed >= frame_duration {
+            Duration::ZERO
+        } else {
+            // 最多等待 1ms，优先保证输入响应
+            (frame_duration - elapsed).min(Duration::from_millis(1))
+        };
+
+        app.poll_events(Some(wait_time), |event| match event {
             PollEvent::Main(main_event) => match main_event {
                 MainEvent::InitWindow { .. } => {
-                    log_info("=== Native window initialized ===");
                     if let Some(window) = app.native_window() {
-                        let win_width = window.width();
-                        let win_height = window.height();
-
-                        log_info(&format!(
-                            "[Screen] NativeWindow size: {}x{}",
-                            win_width, win_height
-                        ));
-                        log_info(&format!(
-                            "[Screen] NativeWindow aspect ratio: {:.3}",
-                            win_width as f32 / win_height as f32
-                        ));
-                        log_info(&format!(
-                            "[Game] Game framebuffer size: {}x{}",
-                            GAME_WIDTH, GAME_HEIGHT
-                        ));
-                        log_info(&format!(
-                            "[Game] Game aspect ratio: {:.3}",
-                            GAME_WIDTH as f32 / GAME_HEIGHT as f32
-                        ));
-
-                        input.set_screen_size(win_width as f32, win_height as f32);
+                        log_info(&format!("Window: {}x{}", window.width(), window.height()));
                         display.set_native_window(Some(window));
 
                         if game_state.is_none() {
                             game_state = Some(GameState::new());
-                            log_info("Game state initialized");
                         } else {
-                            // 从后台恢复时，game_state已存在但GPU渲染器被重建
-                            // 需要标记资源失效，强制重新上传精灵图集和调色板
-                            log_info("GPU renderer recreated, marking resources for re-upload");
                             gpu_resources_invalidated = true;
-                            // 同时标记触摸板需要重绘，因为overlay纹理也被重建了
-                            input.touch_panel_mut().renderer_mut().mark_dirty();
                         }
                     }
                 }
                 MainEvent::TerminateWindow { .. } => {
-                    log_info("Native window terminated");
                     display.set_native_window(None);
                 }
                 MainEvent::WindowResized { .. } | MainEvent::ContentRectChanged { .. } => {
                     if let Some(window) = app.native_window() {
-                        let width = window.width() as f32;
-                        let height = window.height() as f32;
-                        log_info(&format!("Window resized: {}x{}", width, height));
-                        input.set_screen_size(width, height);
                         display.resize(window.width() as u32, window.height() as u32);
                     }
                 }
                 MainEvent::Destroy => {
-                    log_info("App destroy requested");
                     running = false;
                 }
                 MainEvent::Resume { .. } => {
-                    log_info("=== App resumed ===");
-                    // 应用从后台恢复时，尝试重新配置Surface
                     if display.wgpu_surface.is_some() {
                         display.reconfigure_surface();
-                        // 标记GPU资源需要重新上传（纹理可能已失效）
                         gpu_resources_invalidated = true;
                     } else if let Some(window) = app.native_window() {
-                        // 如果Surface不存在但窗口存在，重新创建
-                        log_info("Recreating surface on resume...");
                         display.set_native_window(Some(window));
-                        // 新创建的渲染器需要重新上传所有资源
                         gpu_resources_invalidated = true;
                     }
                 }
-                MainEvent::Pause => {
-                    log_info("=== App paused ===");
-                }
+                MainEvent::Pause => {}
                 _ => {}
             },
             PollEvent::Wake => {}
@@ -697,50 +817,16 @@ pub fn android_main(app: AndroidApp) {
             _ => {}
         });
 
-        // 处理输入事件
+        // 处理输入事件 - 快速消费事件队列
         if let Ok(mut iter) = app.input_events_iter() {
             loop {
                 let read_event = iter.next(|event| {
                     match event {
                         InputEvent::KeyEvent(key_event) => {
-                            let keycode = key_event.key_code();
-                            let action = key_event.action();
-                            log_info(&format!("KeyEvent: keycode={:?} action={:?}", keycode, action));
-                            input.handle_key(keycode, action);
-                            // 软键盘模式下不修改触摸面板显示状态
+                            input.handle_key(key_event.key_code(), key_event.action());
                         }
-                        InputEvent::MotionEvent(motion_event) => {
-                            let action = motion_event.action();
-                            let pointer_count = motion_event.pointer_count();
-
-                            let action_pointer_index = match action {
-                                MotionAction::PointerDown | MotionAction::PointerUp => {
-                                    Some(motion_event.pointer_index())
-                                }
-                                _ => None,
-                            };
-
-                            for i in 0..pointer_count {
-                                let pointer = motion_event.pointer_at_index(i);
-
-                                let pointer_action = if let Some(action_idx) = action_pointer_index
-                                {
-                                    if i == action_idx {
-                                        action
-                                    } else {
-                                        MotionAction::Move
-                                    }
-                                } else {
-                                    action
-                                };
-
-                                input.handle_touch(
-                                    pointer.pointer_id() as usize,
-                                    pointer.x(),
-                                    pointer.y(),
-                                    pointer_action,
-                                );
-                            }
+                        InputEvent::MotionEvent(_) => {
+                            // 触摸事件由 Java 原生按钮处理
                         }
                         _ => {}
                     }
@@ -752,25 +838,47 @@ pub fn android_main(app: AndroidApp) {
             }
         }
 
-        // 立即处理输入事件 - 确保触摸响应及时，不受帧率限制影响
+        // 处理原生按钮事件 (来自 Java UI 线程)
+        if let Some(state) = &mut game_state {
+            for native_event in take_native_button_events() {
+                let key_event = native_button_to_key_event(&native_event);
+                if key_event.key != PlatformKeyCode::Unknown {
+                    state.handle_key_event(&key_event);
+                }
+            }
+        }
+        
+        // 处理软键盘事件 (来自 Java dispatchKeyEvent)
+        if let Some(state) = &mut game_state {
+            for soft_event in take_soft_key_events() {
+                let key_event = soft_key_to_platform_event(&soft_event);
+                log_info(&format!("[SoftKey] android_code={}, platform_key={:?}, pressed={}", 
+                    soft_event.key_code, key_event.key, key_event.pressed));
+                if key_event.key != PlatformKeyCode::Unknown {
+                    state.handle_key_event(&key_event);
+                }
+            }
+        }
+        
+        // 处理物理键盘事件
         if let Some(state) = &mut game_state {
             for event in input.poll_events() {
                 state.handle_key_event(&event);
             }
         }
 
-        // 帧率限制
-        if !frame_timer.should_render() {
-            frame_timer.wait_if_needed();
+        // 帧率限制 - 不使用 thread::sleep，而是依赖 poll_events 的超时
+        // 这样在等待期间也能响应输入事件
+        let now = Instant::now();
+        if now.duration_since(last_render_time) < frame_duration {
+            // 时间未到，继续循环处理事件
             continue;
         }
-        frame_timer.advance();
+        last_render_time = now;
 
         // 游戏帧更新
         if let Some(state) = &mut game_state {
-            // 检查是否需要重新上传GPU资源（从后台恢复后）
             if gpu_resources_invalidated {
-                log_info("Invalidating GPU resources for re-upload...");
                 state.invalidate_gpu_resources();
                 gpu_resources_invalidated = false;
             }
@@ -782,68 +890,16 @@ pub fn android_main(app: AndroidApp) {
 
             let result = state.frame_update();
 
-            let (ow, oh) = match display.wgpu_config.as_ref() {
-                Some(c) => (c.width, c.height),
-                None => (0, 0),
-            };
-
-            // 优化: overlay只用于触摸面板按钮，FPS已内置到游戏
-            let mut needs_overlay_upload = false;
-            if ow > 0 && oh > 0 {
-                let required_size = (ow * oh * 4) as usize;
-                let show_buttons = input.should_show_virtual_buttons();
-
-                // 检查buffer尺寸是否需要重新分配
-                if overlay_buffer_size != (ow, oh) {
-                    overlay_buffer.resize(required_size, 0);
-                    overlay_buffer_size = (ow, oh);
-                    // 尺寸变化时需要重新渲染
-                    input.touch_panel_mut().renderer_mut().mark_dirty();
-                    needs_overlay_upload = true;
-                }
-
-                // 只有在需要显示虚拟按钮或状态变化时才更新overlay
-                if show_buttons {
-                    // 从不显示切换到显示时，强制重绘
-                    if !last_show_buttons {
-                        input.touch_panel_mut().renderer_mut().mark_dirty();
-                    }
-
-                    let button_states = input.touch_panel().button_states();
-                    if let Some(rendered) = input
-                        .touch_panel_mut()
-                        .renderer_mut()
-                        .render(&button_states)
-                    {
-                        // 只有在渲染器返回新数据时才复制和上传
-                        overlay_buffer.copy_from_slice(rendered);
-                        needs_overlay_upload = true;
-                    }
-                } else if last_show_buttons {
-                    // 从显示切换到不显示，清空buffer
-                    overlay_buffer.fill(0);
-                    needs_overlay_upload = true;
-                }
-
-                last_show_buttons = show_buttons;
-            }
-
-            // 使用合并渲染：一次GPU提交完成所有渲染
-            // 先获取需要的配置信息，避免借用冲突
+            // 获取 surface 配置信息
             let surface_config = display.wgpu_config.as_ref().map(|c| (c.width, c.height));
 
             if let Some((width, height)) = surface_config {
                 if let Some(gpu_renderer) = display.gpu_renderer_mut() {
                     // 准备渲染数据
                     state.submit_to_gpu(gpu_renderer);
-
-                    // 只在需要时上传overlay（仅触摸面板按钮）
-                    if needs_overlay_upload && !overlay_buffer.is_empty() {
-                        gpu_renderer.upload_overlay_rgba(ow, oh, &overlay_buffer);
-                    }
                 }
 
-                // 获取surface纹理并渲染
+                // 获取 surface 纹理并渲染
                 if let Some(surface) = &display.wgpu_surface {
                     match surface.get_current_texture() {
                         Ok(output) => {
@@ -862,17 +918,9 @@ pub fn android_main(app: AndroidApp) {
                             output.present();
                         }
                         Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
-                            // Surface丢失或过期，需要重新配置
-                            log_info("[GPU] Surface lost/outdated, reconfiguring...");
                             display.reconfigure_surface();
                         }
-                        Err(wgpu::SurfaceError::Timeout) => {
-                            // 超时，跳过这一帧
-                            log_warn("[GPU] Surface timeout, skipping frame");
-                        }
-                        Err(e) => {
-                            log_error(&format!("[GPU] Surface error: {:?}", e));
-                        }
+                        Err(_) => {}
                     }
                 }
             }
@@ -881,23 +929,12 @@ pub fn android_main(app: AndroidApp) {
             let frame_time_ms = frame_start.elapsed().as_secs_f32() * 1000.0;
             fps_counter.record_frame(frame_time_ms);
 
-            // 保存触摸面板布局
-            if input.touch_panel_mut().take_layout_changed() {
-                let layout = input.touch_panel().get_layout();
-                let data = layout.to_bytes();
-                if storage.save(LAYOUT_SAVE_KEY, &data).is_ok() {
-                    log_info("Touch panel layout saved");
-                }
-            }
-
             if result == FrameResult::Exit {
                 state.shutdown();
                 running = false;
             }
         }
     }
-
-    log_info("MarioRS Android exiting...");
 }
 
 /// 游戏运行入口

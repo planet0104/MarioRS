@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 虚拟键盘面板布局 (与 touch_panel.rs 中 VKBD_KEYS 一致) -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/vkbd_panel"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:background="@drawable/vkbd_panel_bg"
+    android:padding="8dp">
+
+    <!-- 标题 -->
+    <TextView
+        android:id="@+id/vkbd_title"
+        android:layout_width="match_parent"
+        android:layout_height="20dp"
+        android:gravity="center"
+        android:text="KEYBOARD"
+        android:textColor="#C8C8FF"
+        android:textSize="10sp"
+        android:textStyle="bold" />
+
+    <!-- 按键容器 (使用 GridLayout 更方便) -->
+    <GridLayout
+        android:id="@+id/vkbd_keys"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="22dp"
+        android:columnCount="6"
+        android:rowCount="4">
+
+        <!-- Row 1: P, TAB, 0, 1, 2, 3 -->
+        <TextView android:id="@+id/vkbd_key_p" style="@style/VkbdKeyBlue" android:text="P" />
+        <TextView android:id="@+id/vkbd_key_tab" style="@style/VkbdKeyRed" android:text="TAB" />
+        <TextView android:id="@+id/vkbd_key_0" style="@style/VkbdKey" android:text="0" />
+        <TextView android:id="@+id/vkbd_key_1" style="@style/VkbdKey" android:text="1" />
+        <TextView android:id="@+id/vkbd_key_2" style="@style/VkbdKey" android:text="2" />
+        <TextView android:id="@+id/vkbd_key_3" style="@style/VkbdKey" android:text="3" />
+
+        <!-- Row 2: 4, 5, 6, 7, 8, 9 -->
+        <TextView android:id="@+id/vkbd_key_4" style="@style/VkbdKey" android:text="4" />
+        <TextView android:id="@+id/vkbd_key_5" style="@style/VkbdKey" android:text="5" />
+        <TextView android:id="@+id/vkbd_key_6" style="@style/VkbdKey" android:text="6" />
+        <TextView android:id="@+id/vkbd_key_7" style="@style/VkbdKey" android:text="7" />
+        <TextView android:id="@+id/vkbd_key_8" style="@style/VkbdKey" android:text="8" />
+        <TextView android:id="@+id/vkbd_key_9" style="@style/VkbdKey" android:text="9" />
+
+        <!-- Row 3: A, B, C, D, E, F -->
+        <TextView android:id="@+id/vkbd_key_a" style="@style/VkbdKey" android:text="A" />
+        <TextView android:id="@+id/vkbd_key_b" style="@style/VkbdKey" android:text="B" />
+        <TextView android:id="@+id/vkbd_key_c" style="@style/VkbdKey" android:text="C" />
+        <TextView android:id="@+id/vkbd_key_d" style="@style/VkbdKey" android:text="D" />
+        <TextView android:id="@+id/vkbd_key_e" style="@style/VkbdKey" android:text="E" />
+        <TextView android:id="@+id/vkbd_key_f" style="@style/VkbdKey" android:text="F" />
+
+        <!-- Row 4: ENT (占一格) -->
+        <TextView android:id="@+id/vkbd_key_ent" style="@style/VkbdKeyGreen" android:text="ENT" />
+
+    </GridLayout>
+
+</FrameLayout>

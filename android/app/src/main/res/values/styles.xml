@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- MarioRS 主题配置 -->
+<resources>
+    <!-- GameActivity 需要 AppCompat 主题 -->
+    <style name="GameActivityTheme" parent="Theme.AppCompat.NoActionBar">
+        <!-- 全屏模式 -->
+        <item name="android:windowFullscreen">true</item>
+        <!-- 隐藏状态栏 -->
+        <item name="android:windowNoTitle">true</item>
+        <!-- 黑色背景 -->
+        <item name="android:windowBackground">@android:color/black</item>
+        <!-- 保持屏幕常亮 -->
+        <item name="android:keepScreenOn">true</item>
+    </style>
+    
+    <!-- 虚拟键盘按键基础样式 -->
+    <style name="VkbdKeyBase">
+        <item name="android:layout_width">42dp</item>
+        <item name="android:layout_height">32dp</item>
+        <item name="android:layout_margin">2dp</item>
+        <item name="android:gravity">center</item>
+        <item name="android:textColor">#FFFFFF</item>
+        <item name="android:textSize">11sp</item>
+        <item name="android:textStyle">bold</item>
+    </style>
+    
+    <!-- 普通按键 (深灰) -->
+    <style name="VkbdKey" parent="VkbdKeyBase">
+        <item name="android:background">@drawable/vkbd_key_normal</item>
+    </style>
+    
+    <!-- P键 (蓝色) -->
+    <style name="VkbdKeyBlue" parent="VkbdKeyBase">
+        <item name="android:background">@drawable/vkbd_key_blue</item>
+    </style>
+    
+    <!-- TAB键 (红色) -->
+    <style name="VkbdKeyRed" parent="VkbdKeyBase">
+        <item name="android:background">@drawable/vkbd_key_red</item>
+    </style>
+    
+    <!-- ENT键 (绿色) -->
+    <style name="VkbdKeyGreen" parent="VkbdKeyBase">
+        <item name="android:background">@drawable/vkbd_key_green</item>
+    </style>
+</resources>
