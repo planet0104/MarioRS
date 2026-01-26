@@ -45,25 +45,33 @@
 
 ### Android 触摸控制
 
-Android 版本提供虚拟按键界面：
+Android 版本使用原生 Android 按钮实现虚拟控制界面，解决了多点触摸延迟问题：
+
+**游戏控制按钮（屏幕下方）**：
 
 | 控件 | 功能 | 对应按键 |
 |------|------|----------|
-| D-Pad (左侧) | 方向控制 (上下左右)；左键可返回上级菜单 | 方向键 |
-| A 按钮 | 跳跃 (按住可控制高度)；菜单确认 | Alt |
+| D-Pad (左下角) | 方向控制 (上下左右)；左键可返回上级菜单 | 方向键 |
+| A 按钮 (右下角) | 跳跃 (按住可控制高度)；菜单确认 | Alt |
 | B 按钮 | 加速/跑步 | Ctrl |
 | X 按钮 | 发射火球 (火焰马里奥状态) | Space |
 | Y 按钮 | 备用功能 | Shift |
-| E 按钮 (右上角) | 进入/退出布局编辑模式 | - |
-| P 按钮 (E下方) | 暂停/继续游戏 | P |
-| R 按钮 (编辑模式) | 重置按钮布局为默认位置 | - |
+
+**功能按钮（右上角，从左到右）**：
+
+| 按钮 | 功能 |
+|------|------|
+| H | 隐藏/显示游戏控制按钮 |
+| E | 进入/退出布局编辑模式 |
+| KB | 打开/关闭虚拟键盘（用于输入作弊码） |
 
 **菜单操作**：
 - **确认选择**: 点击 A 按钮
 - **返回上级**: 点击 D-Pad 左键
-- **暂停游戏**: 点击 P 按钮
 
 **布局编辑模式**：点击右上角 E 按钮进入编辑模式，可拖拽调整虚拟按键位置。调整完成后再次点击 E 按钮退出并保存布局。
+
+**虚拟键盘**：点击 KB 按钮打开虚拟键盘面板，用于输入作弊码。键盘面板可拖动调整位置。
 
 ### 菜单结构
 
@@ -266,8 +274,7 @@ MarioRS/
 │       ├── windows.rs    # Windows wgpu + GDI 后端
 │       ├── windows_cpu.rs # Windows CPU 软件渲染后端 (XP 兼容)
 │       ├── desktop.rs    # 跨平台 wgpu 后端 (Linux/macOS)
-│       ├── android.rs    # Android 原生后端
-│       ├── touch_panel.rs # 触摸屏虚拟按键
+│       ├── android.rs    # Android 原生后端 (JNI 按钮事件)
 │       ├── common/       # 公共平台实现
 │       │   ├── frame_timer.rs # 帧率控制
 │       │   ├── input.rs      # 输入处理
@@ -282,14 +289,18 @@ MarioRS/
 ├── android/              # Android 项目
 │   ├── app/
 │   │   ├── src/main/
-│   │   │   ├── java/         # Java/Kotlin 代码
+│   │   │   ├── java/com/mariogame/mario/
+│   │   │   │   └── MainActivity.java  # 原生按钮覆盖层
+│   │   │   ├── res/
+│   │   │   │   ├── layout/       # 按钮布局 XML
+│   │   │   │   ├── drawable/     # 按钮背景资源
+│   │   │   │   └── values/       # 样式和尺寸
 │   │   │   ├── jniLibs/      # 编译生成的 .so 文件
 │   │   │   └── AndroidManifest.xml
 │   │   └── build.gradle.kts
 │   └── build.gradle.kts
 ├── assets/
 │   ├── sprites/          # 精灵数据文件
-│   ├── onscreen_controls/ # 触摸按键图片资源
 │   ├── *.BK              # 背景数据
 │   └── mario.ico         # 应用图标
 ├── examples/
@@ -324,8 +335,7 @@ MarioRS 采用双渲染后端架构，支持现代 GPU 加速渲染和传统 CPU
 | `wgpu-backend` | wgpu GPU 硬件加速渲染 | Windows/Linux/macOS/Android |
 | `cpu-backend` | CPU 软件渲染（XP 兼容） | Windows |
 | `gdi-backend` | Windows GDI 窗口创建 | Windows |
-| `android` | Android 原生渲染 | Android |
-| `touch-panel` | 触摸屏虚拟按键 | Android |
+| `android` | Android 原生渲染（含原生按钮） | Android |
 | `dark-theme` | 暗黑主题适配 | Windows 10+ |
 
 **默认**: `wgpu-backend` + `dark-theme`
@@ -337,7 +347,7 @@ MarioRS 采用双渲染后端架构，支持现代 GPU 加速渲染和传统 CPU
 | Windows 现代版（推荐） | `wgpu-backend`, `gdi-backend`, `dark-theme` | GPU 渲染 + GDI 窗口 |
 | Windows XP 兼容 | `cpu-backend` | CPU 软件渲染 + GDI 窗口 |
 | Linux/macOS | `wgpu-backend` | GPU 渲染 + winit 窗口 |
-| Android | `android` | 自动启用 `wgpu-backend` + `touch-panel` |
+| Android | `android` | 自动启用 `wgpu-backend` + 原生按钮覆盖层 |
 
 ## 平台支持
 
