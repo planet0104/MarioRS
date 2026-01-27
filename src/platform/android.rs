@@ -486,7 +486,7 @@ impl AndroidDisplay {
 
         let adapter = match futures::executor::block_on(instance.request_adapter(
             &wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::HighPerformance,
+                power_preference: wgpu::PowerPreference::LowPower, // 兼容老旧设备
                 compatible_surface: Some(&surface),
                 force_fallback_adapter: false,
             },
@@ -498,12 +498,20 @@ impl AndroidDisplay {
             }
         };
 
+        // 输出后端类型日志
+        let backend = adapter.get_info().backend;
+        log_info(&format!("[GPU] Using backend: {:?}", backend));
+
+        // 使用兼容 GLES 3.0 的 Limits 设置
+        let limits = wgpu::Limits::downlevel_webgl2_defaults()
+            .using_resolution(adapter.limits());
+
         let (device, queue) =
             match futures::executor::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
                 label: Some("Mario Android Device"),
                 required_features: wgpu::Features::empty(),
-                required_limits: wgpu::Limits::default(),
-                memory_hints: wgpu::MemoryHints::Performance,
+                required_limits: limits,
+                memory_hints: wgpu::MemoryHints::MemoryUsage, // 内存优先，兼容老设备
                 experimental_features: wgpu::ExperimentalFeatures::disabled(),
                 trace: wgpu::Trace::Off,
             })) {

@@ -16,7 +16,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 # GPU 渲染核心依赖 (wgpu-backend feature 启用)
-wgpu = { version = "28.0.0", default-features = false, features = ["wgsl", "vulkan"], optional = true }
+wgpu = { version = "28.0.0", default-features = false, features = ["wgsl", "vulkan", "gles"], optional = true }
 bytemuck = { version = "1.21", features = ["derive"], optional = true }
 futures = { version = "0.3", optional = true }
 
@@ -118,7 +118,8 @@ gdi-backend = ["dep:windows-sys"]         # Windows GDI（仅用于窗口创建�
 cpu-backend = ["gdi-backend"]             # CPU软件渲染后端（XP兼容，使用GDI显示）
 dark-theme = []                           # 暗黑主题适配（需要 Vista+ dwmapi.dll）
 touch-panel = []           # 触摸控制面板 (2D绘图)
-android = ["touch-panel", "wgpu-backend"]  # Android 平台后端 (自动启用 touch-panel 和 wgpu)
+android = ["touch-panel", "wgpu-backend"]  # Android 平台后端 (GPU加速，自动启用 touch-panel)
+android-cpu = ["touch-panel"]              # Android CPU软件渲染后端 (老旧设备兼容)
 
 # ============================================================================
 # Release 编译优化 - 最小体积
@@ -136,7 +137,7 @@ embed-resource = "3.0"
 image = "0.25"
 png = "0.17"
 winit = "0.30"
-wgpu = { version = "28.0.0", default-features = false, features = ["wgsl", "vulkan"] }
+wgpu = { version = "28.0.0", default-features = false, features = ["wgsl", "vulkan", "gles"] }
 bytemuck = { version = "1.21", features = ["derive"] }
 futures = "0.3"
 
