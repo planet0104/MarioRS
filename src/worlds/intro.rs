@@ -1048,8 +1048,8 @@ impl Intro {
 
         let _ = cur_player;
         match scan_code {
-            1 | 75 => {
-                // ESC 或 Left Arrow - 返回上一级菜单
+            1 => {
+                // ESC - 返回上一级菜单或退出
                 if self.status == IntroStatus::Menu {
                     self.intro_done = true;
                     *quit_game = true;
@@ -1074,6 +1074,18 @@ impl Intro {
                     self.status = self.last_status;
                 }
                 self.macro_key = 'D';
+            }
+            75 | 203 => {
+                // Left Arrow - 在子菜单中返回上一级，在主菜单中不退出游戏
+                if self.status != IntroStatus::Menu {
+                    self.status = self.last_status;
+                    self.macro_key = '\x1B';
+                }
+                // 在主菜单中，Left Arrow 不触发任何操作，避免误触退出
+            }
+            77 | 205 => {
+                // Right Arrow - 相当于 Enter，进入子菜单
+                // 不做任何处理，让用户用 Enter/OK 键确认
             }
             28 | 56 | 57 => {
                 // Enter, Alt 或 Space - 菜单确认

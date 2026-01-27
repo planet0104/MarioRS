@@ -5,8 +5,10 @@
 // - 提供易于测试的 API
 // - 支持未来的输入系统整合
 //
-// 手柄支持：
+// 手柄/遥控器支持：
 // - Windows: 使用 winmm.dll (Multimedia Joystick API)
+// - Android TV: 遥控器按键由 Java 层处理 (MainActivity.mapKeyToGameButton)
+//               转换为按钮事件后通过 JNI 传递，无需 Rust 端后端
 // - 其他平台: 占位实现 (可扩展)
 
 // Windows 手柄后端
@@ -152,7 +154,7 @@ impl JoystickState {
 
         #[cfg(not(target_os = "windows"))]
         {
-            // 非 Windows 平台: 占位实现
+            // 其他平台: 占位实现
             // 可以在这里添加其他平台的手柄支持 (如 gilrs for Linux/macOS)
         }
     }
@@ -187,6 +189,8 @@ impl JoystickState {
 
         #[cfg(not(target_os = "windows"))]
         {
+            // 其他平台 (包括 Android): 无需校准
+            // Android TV 遥控器按键由 Java 层处理
             self.calibrated = true;
         }
     }
@@ -200,6 +204,8 @@ impl JoystickState {
 
         #[cfg(not(target_os = "windows"))]
         {
+            // 其他平台 (包括 Android): 返回 false
+            // Android TV 遥控器输入通过键盘/按钮事件处理，不使用手柄后端
             false
         }
     }

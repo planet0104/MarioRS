@@ -4,6 +4,10 @@
 // 使用: android-activity + wgpu + cpal + ndk
 //
 // 重要: 这个模块依赖 android-activity, 其他游戏模块通过 platform.rs 抽象访问
+//
+// Android TV 遥控器支持:
+// TV遥控器按键映射在 Java 层 (MainActivity.java) 实现
+// Java 层将遥控器按键转换为游戏按钮事件后通过 JNI 传递到 Rust
 
 use super::common::{CommonRandom, CommonTime, FileStorage, FpsCounter};
 use super::{
@@ -121,6 +125,7 @@ pub fn native_button_to_key_event(event: &NativeButtonEvent) -> PlatformKeyEvent
 /// 使用 Android KeyEvent 常量值 (与 android-activity Keycode 枚举值相同)
 pub fn soft_key_to_platform_event(event: &SoftKeyEvent) -> PlatformKeyEvent {
     // Android KeyEvent 常量 (https://developer.android.com/reference/android/view/KeyEvent)
+    const KEYCODE_BACK: i32 = 4;      // 返回键 -> Escape
     const KEYCODE_TAB: i32 = 61;
     const KEYCODE_SPACE: i32 = 62;
     const KEYCODE_ENTER: i32 = 66;
@@ -166,6 +171,8 @@ pub fn soft_key_to_platform_event(event: &SoftKeyEvent) -> PlatformKeyEvent {
     const KEYCODE_ESCAPE: i32 = 111;
     
     let key = match event.key_code {
+        // 返回键 -> Escape (用于Intro界面返回菜单、结束Demo等)
+        KEYCODE_BACK => PlatformKeyCode::Escape,
         KEYCODE_TAB => PlatformKeyCode::Tab,
         KEYCODE_SPACE => PlatformKeyCode::Space,
         KEYCODE_ENTER => PlatformKeyCode::Enter,
@@ -363,6 +370,8 @@ fn android_keycode_to_platform(keycode: Keycode) -> PlatformKeyCode {
         Keycode::F1 => PlatformKeyCode::F1,
         Keycode::F2 => PlatformKeyCode::F2,
         Keycode::F11 => PlatformKeyCode::F11,
+        // TV遥控器 OK/Select 键 (DpadCenter) 映射为 Enter
+        Keycode::DpadCenter => PlatformKeyCode::Enter,
         _ => PlatformKeyCode::Unknown,
     }
 }
@@ -849,6 +858,8 @@ pub fn android_main(app: AndroidApp) {
         }
         
         // 处理软键盘事件 (来自 Java dispatchKeyEvent)
+        // 注意: TV遥控器按键已在 Java 层 (MainActivity.mapKeyToGameButton) 转换为游戏按钮事件
+        // 通过 nativeOnButtonEvent 传递，因此这里只需处理普通键盘事件
         if let Some(state) = &mut game_state {
             for soft_event in take_soft_key_events() {
                 let key_event = soft_key_to_platform_event(&soft_event);

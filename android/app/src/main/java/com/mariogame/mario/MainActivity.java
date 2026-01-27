@@ -22,6 +22,11 @@ import com.mariogame.R;
  * 自定义 MainActivity
  * 继承 GameActivity, 添加原生按钮覆盖层解决多点触摸延迟问题
  * 自定义虚拟键盘面板用于输入作弊码
+ * 支持 Android TV 遥控器控制游戏
+ * 
+ * TV遥控器横向握持模式：
+ * - D-Pad方向已反转（上下->左右，左右->上下）
+ * - 音量键保留给系统控制音量
  */
 public class MainActivity extends GameActivity {
     private static final String TAG = "MarioRS";
@@ -36,6 +41,46 @@ public class MainActivity extends GameActivity {
     public static final int BTN_B = 6;
     public static final int BTN_X = 7;
     public static final int BTN_Y = 8;
+    
+    // ============================================================================
+    // Android TV 遥控器按键码常量
+    // ============================================================================
+    
+    // TV遥控器彩色按键
+    private static final int KEYCODE_PROG_RED = 183;
+    private static final int KEYCODE_PROG_GREEN = 184;
+    private static final int KEYCODE_PROG_YELLOW = 185;
+    private static final int KEYCODE_PROG_BLUE = 186;
+    
+    // TV遥控器媒体控制键
+    private static final int KEYCODE_MEDIA_PLAY_PAUSE = 85;
+    private static final int KEYCODE_MEDIA_PLAY = 126;
+    private static final int KEYCODE_MEDIA_FAST_FORWARD = 90;
+    private static final int KEYCODE_MEDIA_REWIND = 89;
+    
+    // TV遥控器频道键
+    private static final int KEYCODE_CHANNEL_UP = 166;
+    private static final int KEYCODE_CHANNEL_DOWN = 167;
+    
+    // 游戏手柄按钮 (Fire TV等)
+    private static final int KEYCODE_BUTTON_A = 96;
+    private static final int KEYCODE_BUTTON_B = 97;
+    private static final int KEYCODE_BUTTON_X = 99;
+    private static final int KEYCODE_BUTTON_Y = 100;
+    
+    // ============================================================================
+    // 遥控器方向模式配置
+    // ============================================================================
+    
+    // 是否启用横向遥控器模式 (D-pad方向反转: 上下<->左右)
+    // true: 横向握持遥控器，上=左，下=右，左=下，右=上
+    // false: 正常模式
+    private static final boolean HORIZONTAL_REMOTE_MODE = true;
+    
+    // 通用遥控器功能键
+    private static final int KEYCODE_PAGE_UP = 92;    // 小箭头上键
+    private static final int KEYCODE_PAGE_DOWN = 93;  // 小箭头下键
+    private static final int KEYCODE_MENU = 82;       // Menu键
     
     // 虚拟键盘按键映射 (View ID -> KeyCode)
     private static final int[][] VKBD_KEY_MAP = {
@@ -92,6 +137,14 @@ public class MainActivity extends GameActivity {
     
     // 编辑模式
     private boolean editMode = false;
+    
+    // ============================================================================
+    // 遥控器加速模式切换 (Toggle模式)
+    // ============================================================================
+    
+    // 加速模式状态 (true=加速中, false=正常速度)
+    // 通过 MENU 键或其他加速按钮切换
+    private boolean accelerateMode = false;
     
     // Native 方法声明 - 由 Rust 实现
     public static native void nativeOnButtonEvent(int buttonId, boolean pressed);
@@ -559,6 +612,7 @@ public class MainActivity extends GameActivity {
     
     /**
      * 拦截物理键盘事件并转发到 Rust
+     * 包含 Android TV 遥控器按键映射
      */
     @Override
     public boolean dispatchKeyEvent(KeyEvent event) {
@@ -574,10 +628,45 @@ public class MainActivity extends GameActivity {
                 return true;
             }
             
+            // 音量键不拦截，交给系统处理
+            if (keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
+                return super.dispatchKeyEvent(event);
+            }
+            
+            // 返回键特殊处理: 传递给Rust作为Escape键 (用于Intro界面返回菜单)
+            if (keyCode == KeyEvent.KEYCODE_BACK) {
+                Log.i(TAG, "[TV Remote] BACK -> Escape, pressed=" + pressed);
+                nativeOnKeyEvent(keyCode, pressed);
+                return true;
+            }
+            
+            // ================================================================
+            // 加速切换键处理 (Toggle模式)
+            // MENU键/数字1键等: 点击切换加速状态，而不是按住
+            // ================================================================
+            if (isAccelerateToggleKey(keyCode)) {
+                // 只在按下时切换状态，忽略抬起事件
+                if (pressed) {
+                    accelerateMode = !accelerateMode;
+                    Log.i(TAG, "[TV Remote] Accelerate toggle: " + (accelerateMode ? "ON" : "OFF"));
+                    // 发送加速按钮状态
+                    nativeOnButtonEvent(BTN_B, accelerateMode);
+                }
+                return true;
+            }
+            
+            // 尝试将按键映射为游戏按钮 (TV遥控器/手柄支持)
+            int buttonId = mapKeyToGameButton(keyCode);
+            if (buttonId != 0) {
+                Log.i(TAG, "[TV Remote] keyCode=" + keyCode + " -> button=" + buttonId + ", pressed=" + pressed);
+                nativeOnButtonEvent(buttonId, pressed);
+                return true;
+            }
+            
             // 调试日志
             Log.i(TAG, "[dispatchKeyEvent] keyCode=" + keyCode + ", pressed=" + pressed);
             
-            // 转发到 Rust
+            // 转发到 Rust 作为键盘事件
             nativeOnKeyEvent(keyCode, pressed);
             
             // 返回 true 表示已处理, 防止事件继续传递
@@ -585,5 +674,121 @@ public class MainActivity extends GameActivity {
         }
         
         return super.dispatchKeyEvent(event);
+    }
+    
+    /**
+     * 检查按键是否为加速切换键
+     * 这些按键使用Toggle模式: 点击一次开启加速，再点击一次关闭
+     * 
+     * @param keyCode Android KeyEvent 按键码
+     * @return true 如果是加速切换键
+     */
+    private boolean isAccelerateToggleKey(int keyCode) {
+        switch (keyCode) {
+            case KeyEvent.KEYCODE_MENU:     // Menu键 (keyCode=82) - 主加速切换键
+            case KeyEvent.KEYCODE_1:        // 数字1键
+            case KEYCODE_BUTTON_B:          // 游戏手柄B按钮
+            case KEYCODE_BUTTON_Y:          // 游戏手柄Y按钮
+                return true;
+            default:
+                return false;
+        }
+    }
+    
+    /**
+     * 将按键码映射为游戏按钮ID
+     * 
+     * 映射方案 (针对用户遥控器优化):
+     * 
+     * 方向键 (支持横向模式):
+     * - 正常模式: D-Pad直接映射
+     * - 横向模式: 上=左, 下=右, 左=下, 右=上
+     * 
+     * 功能按键:
+     * - 跳跃: OK键(主) / Page Down键(遥控器小箭头下) / 红色键 / 播放键 / A按钮
+     * - 发射: Page Up键(遥控器小箭头上) / 绿色键 / 快退键 / X按钮
+     * - 加速(Toggle): Menu键 / 数字1键 / B按钮 / Y按钮 (点击切换，见isAccelerateToggleKey)
+     * 
+     * 系统按键 (不拦截):
+     * - 音量键: 交给系统处理
+     * - 返回键: 在dispatchKeyEvent中单独处理为Escape
+     * 
+     * @param keyCode Android KeyEvent 按键码
+     * @return 游戏按钮ID, 0表示非游戏按钮
+     */
+    private int mapKeyToGameButton(int keyCode) {
+        switch (keyCode) {
+            // ================================================================
+            // 方向键 (D-Pad) - 支持横向遥控器模式
+            // ================================================================
+            case KeyEvent.KEYCODE_DPAD_UP:
+                // 横向模式: 上 -> 左
+                return HORIZONTAL_REMOTE_MODE ? BTN_DPAD_LEFT : BTN_DPAD_UP;
+            case KeyEvent.KEYCODE_DPAD_DOWN:
+                // 横向模式: 下 -> 右
+                return HORIZONTAL_REMOTE_MODE ? BTN_DPAD_RIGHT : BTN_DPAD_DOWN;
+            case KeyEvent.KEYCODE_DPAD_LEFT:
+                // 横向模式: 左 -> 下
+                return HORIZONTAL_REMOTE_MODE ? BTN_DPAD_DOWN : BTN_DPAD_LEFT;
+            case KeyEvent.KEYCODE_DPAD_RIGHT:
+                // 横向模式: 右 -> 上
+                return HORIZONTAL_REMOTE_MODE ? BTN_DPAD_UP : BTN_DPAD_RIGHT;
+            
+            // ================================================================
+            // 跳跃按键 -> A按钮
+            // OK键(主) / 红色键 / 播放键 / A按钮
+            // 注: Menu键已改为加速切换键 (见isAccelerateToggleKey)
+            // ================================================================
+            case KeyEvent.KEYCODE_DPAD_CENTER:  // OK键 - 主跳跃键
+            case KeyEvent.KEYCODE_ENTER:        // Enter键
+            case KEYCODE_PROG_RED:              // 红色键
+            case KEYCODE_MEDIA_PLAY_PAUSE:      // 播放/暂停键
+            case KEYCODE_MEDIA_PLAY:            // 播放键
+            case KEYCODE_MEDIA_FAST_FORWARD:    // 快进键
+            case KEYCODE_BUTTON_A:              // 游戏手柄A按钮
+                return BTN_A;
+            
+            // ================================================================
+            // 发射按键 -> X按钮
+            // Page Up键(主) / 绿色键 / 快退键 / X按钮
+            // ================================================================
+            case KeyEvent.KEYCODE_PAGE_UP:      // 遥控器小箭头上键 (keyCode=92) - 发射子弹
+            case KEYCODE_PROG_GREEN:            // 绿色键
+            case KEYCODE_MEDIA_REWIND:          // 快退键
+            case KEYCODE_BUTTON_X:              // 游戏手柄X按钮
+                return BTN_X;
+            
+            // ================================================================
+            // 跳跃备选按键 -> A按钮
+            // Page Down键 用于遥控器跳跃
+            // ================================================================
+            case KeyEvent.KEYCODE_PAGE_DOWN:    // 遥控器小箭头下键 (keyCode=93) - 跳跃
+                return BTN_A;
+            
+            // ================================================================
+            // 加速按键 -> 已移至Toggle模式处理
+            // Menu键/数字1键/B按钮/Y按钮 现在通过 isAccelerateToggleKey() 处理
+            // 点击一次开启加速，再点击一次关闭加速
+            // ================================================================
+            
+            // ================================================================
+            // 其他按键
+            // ================================================================
+            case KEYCODE_PROG_YELLOW:           // 黄色键 -> Y按钮 (可自定义)
+                return BTN_Y;
+            
+            // 蓝色键 -> 不映射 (保留)
+            case KEYCODE_PROG_BLUE:
+                return 0;
+            
+            // 频道键可作为备选
+            case KEYCODE_CHANNEL_UP:            // 频道上 -> 跳跃
+                return BTN_A;
+            case KEYCODE_CHANNEL_DOWN:          // 频道下 -> 发射
+                return BTN_X;
+            
+            default:
+                return 0;
+        }
     }
 }

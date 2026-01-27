@@ -22,6 +22,10 @@ pub mod common;
 #[cfg(target_os = "windows")]
 pub mod joystick_win;
 
+// Android TV 遥控器支持
+#[cfg(target_os = "android")]
+pub mod joystick_android_tv;
+
 // Windows GDI + wgpu 后端（需要同时启用 gdi-backend 和 wgpu-backend）
 #[cfg(all(target_os = "windows", feature = "gdi-backend", feature = "wgpu-backend", not(feature = "cpu-backend")))]
 mod windows;
