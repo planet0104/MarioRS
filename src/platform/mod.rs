@@ -18,6 +18,10 @@
 pub mod audio;
 pub mod common;
 
+// Windows 手柄支持 (使用 winmm.dll)
+#[cfg(target_os = "windows")]
+pub mod joystick_win;
+
 // Windows GDI + wgpu 后端（需要同时启用 gdi-backend 和 wgpu-backend）
 #[cfg(all(target_os = "windows", feature = "gdi-backend", feature = "wgpu-backend", not(feature = "cpu-backend")))]
 mod windows;

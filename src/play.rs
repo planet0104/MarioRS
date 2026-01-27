@@ -992,16 +992,25 @@ impl Play {
                 players.key_right = keyboard.kb_right() || joystick.right;
                 players.key_up = keyboard.kb_up() || joystick.up;
                 players.key_down = keyboard.kb_down() || joystick.down;
+                // 跳跃: Alt 或 手柄 A/B 按钮
                 players.key_alt = keyboard.kb_alt() || joystick.button1;
 
                 if players.status == crate::players::ST_ON_THE_GROUND {
                     players.alt_pressed_once |= keyboard.take_alt_pressed_once();
+                    // 手柄跳跃按钮也触发 alt_pressed_once
+                    if joystick.button1 {
+                        players.alt_pressed_once = true;
+                    }
                 } else {
                     let _ = keyboard.take_alt_pressed_once();
                 }
 
+                // 加速: Ctrl 或 手柄 LB/RB (肩键)
+                // 注意: 加速和发射必须分开映射，否则按加速时会触发发射动画
+                // - key_ctrl: 加速功能，使用 LB/RB 肩键
+                // - key_space: 发射功能，使用 X/Y 按钮
                 players.key_ctrl = keyboard.kb_ctrl() || joystick.button2;
-                players.key_space = keyboard.kb_space() || joystick.button2;
+                players.key_space = keyboard.kb_space() || joystick.button_x || joystick.button_y;
                 players.key_left_shift = keyboard.kb_left_shift();
                 players.key_right_shift = keyboard.kb_right_shift();
 

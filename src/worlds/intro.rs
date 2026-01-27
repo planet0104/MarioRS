@@ -141,6 +141,11 @@ pub struct Intro {
     intro_map: Option<MapBuffer>,
     intro_opt: WorldOptions,
     started: bool,
+
+    // 手柄菜单导航状态 (防抖动)
+    js_last_up: bool,
+    js_last_down: bool,
+    js_last_button: bool,
 }
 
 use crate::mario::{ConfigData, IntroResult};
@@ -187,6 +192,10 @@ impl Intro {
             intro_map: None,
             intro_opt: INTRO_0_OPTIONS,
             started: false,
+            // 手柄防抖状态
+            js_last_up: false,
+            js_last_down: false,
+            js_last_button: false,
         }
     }
 
@@ -259,7 +268,7 @@ impl Intro {
         sprites: &mut SpriteDataManager,
         atlas: &mut crate::sprites::SpriteAtlas,
         keyboard: &mut Keyboard,
-        _joystick: &mut crate::joystick::JoystickState,
+        joystick: &mut crate::joystick::JoystickState,
         play: &mut Play,
         config: &mut ConfigData,
         game_number: &mut i32,
@@ -600,6 +609,46 @@ impl Intro {
                         );
                     }
                     keyboard.clear_key();
+                }
+
+                // 处理手柄输入 (菜单导航)
+                joystick.read();
+                if joystick.detected {
+                    // 方向上 (边沿触发，防止连续触发)
+                    if joystick.up && !self.js_last_up {
+                        self.up();
+                        if self.macro_key == '\x1B' {
+                            self.status = self.last_status;
+                        }
+                        self.macro_key = 'U';
+                    }
+                    // 方向下
+                    if joystick.down && !self.js_last_down {
+                        self.down();
+                        if self.macro_key == '\x1B' {
+                            self.status = self.last_status;
+                        }
+                        self.macro_key = 'D';
+                    }
+                    // 按钮确认 (button1 = 跳跃/确认)
+                    let button_pressed = joystick.button1 || joystick.button2;
+                    if button_pressed && !self.js_last_button {
+                        // 模拟 Enter 键 (scan_code = 28)
+                        self.handle_keyboard_input(
+                            28,
+                            buffers,
+                            game_number,
+                            &mut quit_game,
+                            play,
+                            music,
+                            config,
+                            cur_player as usize,
+                        );
+                    }
+                    // 更新防抖状态
+                    self.js_last_up = joystick.up;
+                    self.js_last_down = joystick.down;
+                    self.js_last_button = button_pressed;
                 }
 
                 if self.macro_key != '\0' {
