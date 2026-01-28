@@ -4,10 +4,13 @@ import android.os.Bundle;
 import android.util.DisplayMetrics;
 import android.util.Log;
 import android.view.KeyEvent;
+import android.view.View;
 import android.view.ViewGroup;
 import android.widget.FrameLayout;
 
 import com.google.androidgamesdk.GameActivity;
+
+import com.mariogame.R;
 
 /**
  * 自定义 MainActivity
@@ -57,9 +60,15 @@ public class MainActivity extends GameActivity {
         remoteController.setInputCallback(new RemoteController.InputCallback() {
             @Override
             public void onPhysicalInputDetected() {
-                if (virtualController != null) {
-                    virtualController.hideGameButtons();
-                }
+                // Log.i(TAG, "检测到物理输入, 隐藏虚拟按钮");
+                // 确保在UI线程执行
+                runOnUiThread(() -> {
+                    if (virtualController != null) {
+                        virtualController.hideGameButtons();
+                    } else {
+                        Log.w(TAG, "虚拟控制器未初始化!");
+                    }
+                });
             }
         });
         
@@ -76,11 +85,18 @@ public class MainActivity extends GameActivity {
             Log.e(TAG, "Content view not found");
             return;
         }
-        
+
+        // 防止重复添加覆盖层（例如 Activity 重建或多次 post 调用）
+        View existing = contentView.findViewById(R.id.button_layer);
+        if (existing != null) {
+            Log.i(TAG, "Button overlay already present, skip adding");
+            return;
+        }
+
         // 使用VirtualController创建按钮覆盖层
         FrameLayout buttonLayer = virtualController.createButtonOverlay(contentView);
         contentView.addView(buttonLayer);
-        
+
         Log.i(TAG, "Button overlay added");
     }
     

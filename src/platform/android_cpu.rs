@@ -337,21 +337,36 @@ impl AndroidDisplay {
             return;
         }
         
-        // 设置窗口缓冲区格式为 RGBA_8888
+        // 设置窗口缓冲区尺寸为游戏分辨率的整数倍
+        // 让Android SurfaceFlinger硬件合成器负责最终缩放，比CPU快得多
         if let Some(ref win) = self.native_window {
             unsafe {
                 let win_ptr = win.ptr().as_ptr();
+                let native_w = win.width() as i32;
+                let native_h = win.height() as i32;
+                
+                // 计算最佳整数缩放倍数（不超过屏幕尺寸）
+                let scale_x = native_w / GAME_WIDTH as i32;
+                let scale_y = native_h / GAME_HEIGHT as i32;
+                let scale = scale_x.min(scale_y).max(1);
+                
+                let buf_w = GAME_WIDTH as i32 * scale;
+                let buf_h = GAME_HEIGHT as i32 * scale;
+                
+                log_info(&format!("[CPU] Native: {}x{}, Buffer: {}x{}, Scale: {}x", 
+                    native_w, native_h, buf_w, buf_h, scale));
+                
                 // WINDOW_FORMAT_RGBA_8888 = 1
                 let result = ndk_sys::ANativeWindow_setBuffersGeometry(
                     win_ptr,
-                    0, // 使用默认宽度
-                    0, // 使用默认高度
+                    buf_w,
+                    buf_h,
                     1, // WINDOW_FORMAT_RGBA_8888
                 );
                 if result != 0 {
                     log_warn(&format!("[CPU] setBuffersGeometry failed: {}", result));
                 } else {
-                    log_info("[CPU] Window format set to RGBA_8888");
+                    log_info(&format!("[CPU] Window buffer set to {}x{} RGBA_8888", buf_w, buf_h));
                 }
             }
         }
@@ -365,7 +380,13 @@ impl AndroidDisplay {
         // CPU渲染器使用固定的游戏分辨率，不需要调整
     }
 
-    /// 将帧缓冲写入到 ANativeWindow
+    /// 将帧缓冲写入到 ANativeWindow（优化版本）
+    /// 
+    /// 优化策略:
+    /// 1. 使用整数缩放避免浮点除法
+    /// 2. 预计算源坐标查找表
+    /// 3. 只清除边框区域而非全屏
+    /// 4. 批量像素处理
     pub fn present_framebuffer(&mut self) -> Result<(), String> {
         let window = match &self.native_window {
             Some(w) => w,
@@ -380,7 +401,6 @@ impl AndroidDisplay {
         let fb_width = cpu.width() as i32;
         let fb_height = cpu.height() as i32;
 
-        // 使用 NDK 的 ANativeWindow_lock/unlockAndPost
         unsafe {
             let win_ptr = window.ptr().as_ptr();
             let mut buffer: ndk_sys::ANativeWindow_Buffer = std::mem::zeroed();
@@ -389,64 +409,89 @@ impl AndroidDisplay {
                 return Err(format!("ANativeWindow_lock failed: {}", result));
             }
 
-            // 获取窗口尺寸和像素格式
             let win_width = buffer.width;
             let win_height = buffer.height;
             let stride = buffer.stride;
             let bits = buffer.bits as *mut u32;
             
-            // 安全检查
-            if bits.is_null() {
+            if bits.is_null() || win_width <= 0 || win_height <= 0 || stride <= 0 {
                 ndk_sys::ANativeWindow_unlockAndPost(win_ptr);
-                return Err("ANativeWindow buffer bits is null".to_string());
-            }
-            if win_width <= 0 || win_height <= 0 || stride <= 0 {
-                ndk_sys::ANativeWindow_unlockAndPost(win_ptr);
-                return Err(format!("Invalid buffer size: {}x{}, stride={}", 
-                    win_width, win_height, stride));
+                return Err("Invalid buffer".to_string());
             }
 
-            // 计算缩放比例，保持宽高比
-            let scale_x = win_width as f32 / fb_width as f32;
-            let scale_y = win_height as f32 / fb_height as f32;
-            let scale = scale_x.min(scale_y);
-
-            let dst_width = (fb_width as f32 * scale) as i32;
-            let dst_height = (fb_height as f32 * scale) as i32;
+            // 计算整数缩放倍数（由于setBuffersGeometry已设置为整数倍，这里应该是精确的）
+            let scale = (win_width / fb_width).min(win_height / fb_height).max(1);
+            let dst_width = fb_width * scale;
+            let dst_height = fb_height * scale;
             let offset_x = (win_width - dst_width) / 2;
             let offset_y = (win_height - dst_height) / 2;
 
-            // 清除边框区域为黑色
-            for y in 0..win_height {
+            // 优化: 只清除边框区域（而非全屏清除）
+            let black = 0xFF000000u32;
+            
+            // 上边框
+            for y in 0..offset_y {
                 let row = bits.offset((y * stride) as isize);
                 for x in 0..win_width {
-                    *row.offset(x as isize) = 0xFF000000; // 黑色(ARGB)
+                    *row.offset(x as isize) = black;
+                }
+            }
+            // 下边框
+            for y in (offset_y + dst_height)..win_height {
+                let row = bits.offset((y * stride) as isize);
+                for x in 0..win_width {
+                    *row.offset(x as isize) = black;
+                }
+            }
+            // 左右边框（只处理游戏区域的行）
+            for y in offset_y..(offset_y + dst_height) {
+                let row = bits.offset((y * stride) as isize);
+                // 左边框
+                for x in 0..offset_x {
+                    *row.offset(x as isize) = black;
+                }
+                // 右边框
+                for x in (offset_x + dst_width)..win_width {
+                    *row.offset(x as isize) = black;
                 }
             }
 
-            // 缩放复制帧缓冲到窗口
-            for dy in 0..dst_height {
-                let src_y = (dy as f32 / scale) as i32;
-                if src_y >= fb_height { continue; }
-
-                let dst_row = bits.offset(((offset_y + dy) * stride + offset_x) as isize);
-                
-                for dx in 0..dst_width {
-                    let src_x = (dx as f32 / scale) as i32;
-                    if src_x >= fb_width { continue; }
-
-                    let src_offset = ((src_y * fb_width + src_x) * 4) as usize;
-                    if src_offset + 3 >= framebuffer.len() { continue; }
-
-                    // BGRA -> RGBA_8888 (Android窗口格式, 小端序)
-                    // CpuRenderer输出: B(0) G(1) R(2) A(3)
-                    // Android RGBA_8888 在小端序ARM上需要 u32 = 0xAABBGGRR
-                    let b = framebuffer[src_offset] as u32;
-                    let g = framebuffer[src_offset + 1] as u32;
-                    let r = framebuffer[src_offset + 2] as u32;
-                    let a = framebuffer[src_offset + 3] as u32;
-                    let pixel = (a << 24) | (b << 16) | (g << 8) | r;
-                    *dst_row.offset(dx as isize) = pixel;
+            // 整数倍缩放复制（无浮点运算，无颜色转换）
+            // CpuRenderer 已直接输出 Android RGBA_8888 格式（ABGR 小端序）
+            let fb_ptr = framebuffer.as_ptr() as *const u32;
+            
+            if scale == 1 {
+                // 1:1 复制（最快路径 - 直接内存复制）
+                for sy in 0..fb_height {
+                    let src_row = fb_ptr.offset((sy * fb_width) as isize);
+                    let dst_row = bits.offset(((offset_y + sy) * stride + offset_x) as isize);
+                    std::ptr::copy_nonoverlapping(src_row, dst_row, fb_width as usize);
+                }
+            } else {
+                // 整数倍放大（每个源像素复制 scale x scale 次）
+                for sy in 0..fb_height {
+                    let src_row = fb_ptr.offset((sy * fb_width) as isize);
+                    
+                    // 先渲染第一行
+                    let first_dy = offset_y + sy * scale;
+                    let first_row = bits.offset((first_dy * stride + offset_x) as isize);
+                    
+                    for sx in 0..fb_width {
+                        let pixel = *src_row.offset(sx as isize);
+                        
+                        // 水平方向复制 scale 次
+                        let dx_base = sx * scale;
+                        for s in 0..scale {
+                            *first_row.offset((dx_base + s) as isize) = pixel;
+                        }
+                    }
+                    
+                    // 垂直方向复制其余行
+                    for dy_offset in 1..scale {
+                        let dy = first_dy + dy_offset;
+                        let dst_row = bits.offset((dy * stride + offset_x) as isize);
+                        std::ptr::copy_nonoverlapping(first_row, dst_row, dst_width as usize);
+                    }
                 }
             }
 

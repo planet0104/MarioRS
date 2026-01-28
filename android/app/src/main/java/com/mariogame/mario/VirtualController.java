@@ -7,6 +7,7 @@ import android.view.LayoutInflater;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
+import android.app.Activity;
 import android.widget.FrameLayout;
 import android.widget.TextView;
 import android.graphics.Color;
@@ -94,8 +95,18 @@ public class VirtualController {
     // 编辑模式
     private boolean editMode = false;
     
-    // 游戏按钮是否可见
+    // 游戏按钮是否可见 (D-pad和A/B/X/Y按钮)
+    // 由用户手动控制，持久化到 SharedPreferences
     private boolean gameButtonsVisible = true;
+    
+    // 整个控制器是否可见 (包括右上角功能按钮)
+    // false: 整个控制器隐藏 (检测到遥控器时使用)
+    // true: 控制器可见 (可以单独隐藏游戏按钮，但右上角按钮可见)
+    // 注意: 此状态不持久化，每次启动默认可见，检测到遥控器时隐藏
+    private boolean controllerVisible = true;
+    
+    // 是否已经检测到遥控器输入 (用于在 createButtonOverlay 中判断是否需要隐藏)
+    private boolean remoteDetected = false;
     
     // 编辑模式拖动相关
     private float dragStartX, dragStartY;
@@ -223,6 +234,8 @@ public class VirtualController {
         
         // 创建虚拟键盘按钮 (增加右侧边距, 使用 TextView 显示文字)
         btnKeyboard = new TextView(context);
+        // 设置 id 以便在遍历视图树时能找到这个程序创建的控件
+        btnKeyboard.setId(R.id.btn_keyboard);
         btnKeyboard.setBackgroundResource(R.drawable.button_keyboard);
         btnKeyboard.setText("KB");
         btnKeyboard.setTextColor(Color.WHITE);
@@ -237,6 +250,8 @@ public class VirtualController {
         
         // 创建隐藏/显示游戏按钮的按钮 (放在 E 按钮左边)
         btnHide = new TextView(context);
+        // 设置 id 以便在遍历视图树时能找到这个程序创建的控件
+        btnHide.setId(R.id.btn_hide);
         btnHide.setBackgroundResource(R.drawable.button_edit);
         btnHide.setText("H");
         btnHide.setTextColor(Color.WHITE);
@@ -249,8 +264,18 @@ public class VirtualController {
         btnHide.setOnClickListener(v -> toggleGameButtons());
         buttonLayer.addView(btnHide);
         
-        // 加载游戏按钮可见状态
+        // 加载游戏按钮可见状态 (不加载controllerVisible，因为遥控器检测应该每次都重新判断)
         gameButtonsVisible = prefs.getBoolean("game_buttons_visible", true);
+        
+        // 如果之前已经检测到遥控器输入，保持隐藏状态；否则默认可见
+        if (!remoteDetected) {
+            controllerVisible = true;
+        }
+        // 注意: 如果 remoteDetected = true，controllerVisible 已经在 hideGameButtons() 中被设置为 false
+        
+        Log.i(TAG, "[createButtonOverlay] remoteDetected=" + remoteDetected + 
+            ", controllerVisible=" + controllerVisible + ", gameButtonsVisible=" + gameButtonsVisible);
+        
         updateGameButtonsVisibility();
         
         // 创建虚拟键盘面板 (必须使用 WRAP_CONTENT 避免填充整个屏幕)
@@ -409,6 +434,12 @@ public class VirtualController {
      * 切换虚拟键盘面板显示/隐藏
      */
     private void toggleVirtualKeyboard() {
+        // 如果控制器不可见，不允许显示虚拟键盘
+        if (!controllerVisible) {
+            Log.w(TAG, "[toggleVirtualKeyboard] Controller is hidden, cannot show keyboard");
+            return;
+        }
+        
         vkbdVisible = !vkbdVisible;
         vkbdPanel.setVisibility(vkbdVisible ? View.VISIBLE : View.GONE);
         btnKeyboard.setAlpha(vkbdVisible ? 0.5f : 1.0f);
@@ -421,9 +452,12 @@ public class VirtualController {
     }
     
     /**
-     * 切换游戏按钮显示/隐藏
+     * 切换游戏按钮显示/隐藏 (触摸板单独隐藏，右上角按钮保持可见)
      */
     public void toggleGameButtons() {
+        // 用户手动操作，重置遥控器检测状态，确保控制器可见
+        remoteDetected = false;
+        controllerVisible = true;
         gameButtonsVisible = !gameButtonsVisible;
         updateGameButtonsVisibility();
         
@@ -431,37 +465,72 @@ public class VirtualController {
         SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
         prefs.edit().putBoolean("game_buttons_visible", gameButtonsVisible).apply();
         
-        Log.i(TAG, "[toggleGameButtons] visible=" + gameButtonsVisible);
+        Log.i(TAG, "[toggleGameButtons] gameButtonsVisible=" + gameButtonsVisible + ", controllerVisible=" + controllerVisible);
     }
     
     /**
-     * 隐藏所有虚拟游戏按钮 (当检测到物理输入设备时调用)
+     * 隐藏整个虚拟控制器 (当检测到物理输入设备时调用)
+     * 彻底隐藏整个VirtualController，包括右上角功能按钮
      */
     public void hideGameButtons() {
-        if (gameButtonsVisible) {
-            gameButtonsVisible = false;
+        // 标记已检测到遥控器，即使 buttonLayer 还没创建也要记住这个状态
+        remoteDetected = true;
+        controllerVisible = false;
+        
+        // 如果 buttonLayer 已创建，立即更新可见性
+        if (buttonLayer != null) {
             updateGameButtonsVisibility();
-            
-            // 保存状态
-            SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-            prefs.edit().putBoolean("game_buttons_visible", gameButtonsVisible).apply();
-            
-            Log.i(TAG, "[hideGameButtons] Hidden due to physical input detected");
+            Log.i(TAG, "[hideGameButtons] Controller hidden due to physical input detected");
+        } else {
+            Log.i(TAG, "[hideGameButtons] Remote detected, will hide when buttonLayer is created");
         }
     }
     
     /**
      * 更新游戏按钮可见性
+     * 根据controllerVisible和gameButtonsVisible两个状态更新所有按钮的可见性
      */
     private void updateGameButtonsVisibility() {
-        int visibility = gameButtonsVisible ? View.VISIBLE : View.GONE;
+        Log.i(TAG, "[updateGameButtonsVisibility] controllerVisible=" + controllerVisible + 
+            ", gameButtonsVisible=" + gameButtonsVisible + ", buttonLayer=" + (buttonLayer != null));
+        
+        // 如果整个控制器隐藏，隐藏整个buttonLayer
+        if (buttonLayer != null) {
+            int layerVisibility = controllerVisible ? View.VISIBLE : View.GONE;
+            buttonLayer.setVisibility(layerVisibility);
+            Log.i(TAG, "[updateGameButtonsVisibility] buttonLayer.setVisibility(" + 
+                (layerVisibility == View.VISIBLE ? "VISIBLE" : "GONE") + ")");
+        }
+        
+        // 如果控制器不可见，隐藏虚拟键盘面板并返回
+        if (!controllerVisible) {
+            if (vkbdPanel != null) {
+                vkbdPanel.setVisibility(View.GONE);
+            }
+            vkbdVisible = false;
+            Log.i(TAG, "[updateGameButtonsVisibility] Controller hidden, returning early");
+            return;
+        }
+        
+        // 控制器可见时，根据gameButtonsVisible更新游戏按钮
+        int gameButtonsVisibility = gameButtonsVisible ? View.VISIBLE : View.GONE;
         for (ButtonInfo info : gameButtons) {
             if (info.view != null) {
-                info.view.setVisibility(visibility);
+                info.view.setVisibility(gameButtonsVisibility);
             }
         }
-        // 更新 H 按钮透明度表示当前状态
+        
+        // 右上角功能按钮始终可见（当控制器可见时）
+        if (btnEdit != null) {
+            btnEdit.setVisibility(View.VISIBLE);
+            btnEdit.setAlpha(gameButtonsVisible ? 1.0f : 0.5f);
+        }
+        if (btnKeyboard != null) {
+            btnKeyboard.setVisibility(View.VISIBLE);
+            btnKeyboard.setAlpha(gameButtonsVisible ? 1.0f : 0.5f);
+        }
         if (btnHide != null) {
+            btnHide.setVisibility(View.VISIBLE);
             btnHide.setAlpha(gameButtonsVisible ? 1.0f : 0.5f);
         }
     }
@@ -536,17 +605,27 @@ public class VirtualController {
      * 切换编辑模式
      */
     private void toggleEditMode() {
+        // 如果控制器不可见，不允许进入编辑模式
+        if (!controllerVisible) {
+            Log.w(TAG, "[toggleEditMode] Controller is hidden, cannot enter edit mode");
+            return;
+        }
+        
         editMode = !editMode;
         
         if (editMode) {
             btnEdit.setAlpha(0.5f);
             for (ButtonInfo info : gameButtons) {
-                info.view.setBackgroundResource(R.drawable.button_edit_highlight);
+                if (info.view != null) {
+                    info.view.setBackgroundResource(R.drawable.button_edit_highlight);
+                }
             }
         } else {
             btnEdit.setAlpha(1.0f);
             for (ButtonInfo info : gameButtons) {
-                info.view.setBackgroundResource(info.backgroundResId);
+                if (info.view != null) {
+                    info.view.setBackgroundResource(info.backgroundResId);
+                }
             }
         }
     }
@@ -570,6 +649,13 @@ public class VirtualController {
      * 检查游戏按钮是否可见
      */
     public boolean isGameButtonsVisible() {
-        return gameButtonsVisible;
+        return gameButtonsVisible && controllerVisible;
+    }
+    
+    /**
+     * 检查整个控制器是否可见
+     */
+    public boolean isControllerVisible() {
+        return controllerVisible;
     }
 }
