@@ -993,7 +993,20 @@ impl Play {
                 players.key_up = keyboard.kb_up() || joystick.up;
                 players.key_down = keyboard.kb_down() || joystick.down;
                 // 跳跃: Alt 或 手柄 A/B 按钮
-                players.key_alt = keyboard.kb_alt() || joystick.button1;
+                // Android TV: 方向上键也作为跳跃键(不影响其他平台/手柄)
+                let mut tv_jump_hold = false;
+                #[cfg(target_os = "android")]
+                {
+                    let tv = crate::platform::joystick_android_tv::read_tv_remote_state();
+                    tv_jump_hold = tv.up || tv.ok;
+                    if players.status == crate::players::ST_ON_THE_GROUND {
+                        if tv.up_pressed_once || tv.ok_pressed_once {
+                            players.alt_pressed_once = true;
+                        }
+                    }
+                }
+
+                players.key_alt = keyboard.kb_alt() || joystick.button1 || tv_jump_hold;
 
                 if players.status == crate::players::ST_ON_THE_GROUND {
                     players.alt_pressed_once |= keyboard.take_alt_pressed_once();

@@ -6,10 +6,12 @@
 // 重要: 这个模块依赖 android-activity, 其他游戏模块通过 platform.rs 抽象访问
 //
 // Android TV 遥控器支持:
-// TV遥控器按键映射在 Java 层 (MainActivity.java) 实现
-// Java 层将遥控器按键转换为游戏按钮事件后通过 JNI 传递到 Rust
+// TV遥控器按键通过 nativeOnKeyEvent 传递原始 Android KeyCode
+// Rust 端的 joystick_android_tv 模块处理遥控器状态管理
+// 与手柄逻辑完全分离，互不影响
 
 use super::common::{CommonRandom, CommonTime, FileStorage, FpsCounter};
+use super::joystick_android_tv;
 use super::{
     DisplayBackend, InputBackend, KeyCode as PlatformKeyCode, KeyEvent as PlatformKeyEvent,
     LogBackend, LogLevel, StorageBackend,
@@ -502,45 +504,103 @@ impl AndroidDisplay {
         let backend = adapter.get_info().backend;
         log_info(&format!("[GPU] Using backend: {:?}", backend));
 
-        // 使用兼容 GLES 3.0 的 Limits 设置
-        let limits = wgpu::Limits::downlevel_webgl2_defaults()
-            .using_resolution(adapter.limits());
+        // 直接使用 adapter 的 limits（设备实际支持的值）
+        log_info("[GPU] Requesting device...");
+        let adapter_limits = adapter.limits();
+        log_info(&format!("[GPU] Adapter max_texture_dimension_2d: {}", adapter_limits.max_texture_dimension_2d));
 
-        let (device, queue) =
-            match futures::executor::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-                label: Some("Mario Android Device"),
-                required_features: wgpu::Features::empty(),
-                required_limits: limits,
-                memory_hints: wgpu::MemoryHints::MemoryUsage, // 内存优先，兼容老设备
-                experimental_features: wgpu::ExperimentalFeatures::disabled(),
-                trace: wgpu::Trace::Off,
-            })) {
-                Ok(v) => v,
-                Err(e) => {
-                    log_error(&format!("[GPU] request_device_failed {:?}", e));
-                    return;
+        // 尝试使用 adapter 的 limits 创建设备
+        let device_result = futures::executor::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+            label: Some("Mario Android Device"),
+            required_features: wgpu::Features::empty(),
+            required_limits: adapter_limits.clone(),
+            memory_hints: wgpu::MemoryHints::MemoryUsage,
+            experimental_features: wgpu::ExperimentalFeatures::disabled(),
+            trace: wgpu::Trace::Off,
+        }));
+
+        let (device, queue) = match device_result {
+            Ok(v) => {
+                log_info("[GPU] Device created successfully with adapter limits");
+                v
+            },
+            Err(e) => {
+                log_warn(&format!("[GPU] Failed with adapter limits: {:?}", e));
+                // 回退：尝试使用 downlevel_webgl2_defaults
+                log_info("[GPU] Trying downlevel_webgl2_defaults...");
+                match futures::executor::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+                    label: Some("Mario Android Device Fallback"),
+                    required_features: wgpu::Features::empty(),
+                    required_limits: wgpu::Limits::downlevel_webgl2_defaults(),
+                    memory_hints: wgpu::MemoryHints::MemoryUsage,
+                    experimental_features: wgpu::ExperimentalFeatures::disabled(),
+                    trace: wgpu::Trace::Off,
+                })) {
+                    Ok(v) => {
+                        log_info("[GPU] Device created with downlevel defaults");
+                        v
+                    },
+                    Err(e2) => {
+                        log_error(&format!("[GPU] All attempts failed: {:?}", e2));
+                        return;
+                    }
                 }
-            };
+            }
+        };
+
+        log_info("[GPU] Device created successfully");
 
         let device = std::sync::Arc::new(device);
         let queue: std::sync::Arc<wgpu::Queue> = std::sync::Arc::new(queue);
 
         let caps = surface.get_capabilities(&adapter);
-        let surface_format = caps.formats[0];
+        log_info(&format!("[GPU] Surface formats: {:?}", caps.formats));
+        log_info(&format!("[GPU] Alpha modes: {:?}", caps.alpha_modes));
+        log_info(&format!("[GPU] Present modes: {:?}", caps.present_modes));
+
+        // 安全获取 surface format
+        let surface_format = match caps.formats.first() {
+            Some(f) => *f,
+            None => {
+                log_error("[GPU] No surface formats available");
+                return;
+            }
+        };
+
+        // 安全获取 alpha mode
+        let alpha_mode = caps.alpha_modes.first()
+            .copied()
+            .unwrap_or(wgpu::CompositeAlphaMode::Auto);
+
+        // 选择兼容的 present mode
+        let present_mode = if caps.present_modes.contains(&wgpu::PresentMode::Fifo) {
+            wgpu::PresentMode::Fifo
+        } else {
+            caps.present_modes.first().copied().unwrap_or(wgpu::PresentMode::Fifo)
+        };
+
+        log_info(&format!("[GPU] Using format: {:?}, alpha: {:?}, present: {:?}", 
+            surface_format, alpha_mode, present_mode));
+
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format: surface_format,
             width: win_width,
             height: win_height,
-            present_mode: wgpu::PresentMode::Fifo,
-            alpha_mode: caps.alpha_modes[0],
+            present_mode,
+            alpha_mode,
             view_formats: vec![],
             desired_maximum_frame_latency: 2,
         };
+        
+        log_info("[GPU] Configuring surface...");
         surface.configure(&device, &config);
+        log_info("[GPU] Surface configured successfully");
 
+        log_info("[GPU] Creating GpuRenderer...");
         let mut gpu_renderer = GpuRenderer::new(device.clone(), queue.clone(), config.format);
         gpu_renderer.update_scale(config.width, config.height);
+        log_info("[GPU] GpuRenderer created successfully");
 
         self.wgpu_surface = Some(unsafe { std::mem::transmute(surface) });
         self.wgpu_device = Some(device);
@@ -865,11 +925,15 @@ pub fn android_main(app: AndroidApp) {
             }
         }
         
-        // 处理软键盘事件 (来自 Java dispatchKeyEvent)
-        // 注意: TV遥控器按键已在 Java 层 (MainActivity.mapKeyToGameButton) 转换为游戏按钮事件
-        // 通过 nativeOnButtonEvent 传递，因此这里只需处理普通键盘事件
+        // 处理软键盘事件 (来自 Java dispatchKeyEvent / RemoteController)
+        // TV遥控器按键通过 nativeOnKeyEvent 传递原始 Android KeyCode
+        // 同时更新 joystick_android_tv 模块的遥控器状态
         if let Some(state) = &mut game_state {
             for soft_event in take_soft_key_events() {
+                // 更新 TV 遥控器状态 (独立于手柄逻辑)
+                joystick_android_tv::on_tv_remote_key(soft_event.key_code, soft_event.pressed);
+                
+                // 转换为平台按键事件并处理
                 let key_event = soft_key_to_platform_event(&soft_event);
                 log_info(&format!("[SoftKey] android_code={}, platform_key={:?}, pressed={}", 
                     soft_event.key_code, key_event.key, key_event.pressed));

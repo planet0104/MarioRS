@@ -7,13 +7,17 @@
 //
 // 手柄/遥控器支持：
 // - Windows: 使用 winmm.dll (Multimedia Joystick API)
-// - Android TV: 遥控器按键由 Java 层处理 (MainActivity.mapKeyToGameButton)
-//               转换为按钮事件后通过 JNI 传递，无需 Rust 端后端
+// - Android TV: 遥控器按键由 Java 层通过 nativeOnKeyEvent 传入
+//               Rust 端使用 platform::joystick_android_tv 维护遥控器状态
 // - 其他平台: 占位实现 (可扩展)
 
 // Windows 手柄后端
 #[cfg(target_os = "windows")]
 use crate::platform::joystick_win::WinJoystick;
+
+// Android TV 遥控器后端
+#[cfg(target_os = "android")]
+use crate::platform::joystick_android_tv;
 
 // JOYSTICK.PAS interface 结构体 - 手柄校准数据
 #[derive(Debug, Clone, Copy, Default)]
@@ -152,7 +156,37 @@ impl JoystickState {
             self.rec.y = input.raw_y;
         }
 
-        #[cfg(not(target_os = "windows"))]
+        #[cfg(target_os = "android")]
+        {
+            let tv = joystick_android_tv::peek_tv_remote_state();
+
+            self.detected = tv.detected;
+            self.enabled = tv.detected;
+
+            // 方向
+            self.left = tv.left;
+            self.right = tv.right;
+            self.up = tv.up;
+            self.down = tv.down;
+
+            // TV遥控器: OK键作为确认/跳跃(button1)，下键同时作为发射(button_x)
+            self.button1 = tv.ok;
+            self.button_x = tv.down;
+
+            // 其他按钮保持关闭，由虚拟按键或其他输入链路处理
+            self.button2 = false;
+            self.button_a = false;
+            self.button_b = false;
+            self.button_y = false;
+            self.button_lb = false;
+            self.button_rb = false;
+            self.button_select = false;
+            self.button_start = false;
+
+            self.button_pressed = self.button1 || self.button_x;
+        }
+
+        #[cfg(all(not(target_os = "windows"), not(target_os = "android")))]
         {
             // 其他平台: 占位实现
             // 可以在这里添加其他平台的手柄支持 (如 gilrs for Linux/macOS)

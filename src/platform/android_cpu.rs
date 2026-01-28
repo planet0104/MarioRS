@@ -7,6 +7,7 @@
 // 游戏逻辑 -> RenderCommand -> CpuRenderer -> RGBA帧缓冲 -> ANativeWindow
 
 use super::common::{CommonRandom, CommonTime, FileStorage, FpsCounter};
+use super::joystick_android_tv;
 use super::{
     DisplayBackend, InputBackend, KeyCode as PlatformKeyCode, KeyEvent as PlatformKeyEvent,
     LogBackend, LogLevel, StorageBackend,
@@ -335,6 +336,26 @@ impl AndroidDisplay {
             self.cpu_renderer = None;
             return;
         }
+        
+        // 设置窗口缓冲区格式为 RGBA_8888
+        if let Some(ref win) = self.native_window {
+            unsafe {
+                let win_ptr = win.ptr().as_ptr();
+                // WINDOW_FORMAT_RGBA_8888 = 1
+                let result = ndk_sys::ANativeWindow_setBuffersGeometry(
+                    win_ptr,
+                    0, // 使用默认宽度
+                    0, // 使用默认高度
+                    1, // WINDOW_FORMAT_RGBA_8888
+                );
+                if result != 0 {
+                    log_warn(&format!("[CPU] setBuffersGeometry failed: {}", result));
+                } else {
+                    log_info("[CPU] Window format set to RGBA_8888");
+                }
+            }
+        }
+        
         // 创建CPU渲染器
         self.cpu_renderer = Some(CpuRenderer::new(GAME_WIDTH, GAME_HEIGHT));
         log_info("[CPU] CpuRenderer created");
@@ -373,6 +394,17 @@ impl AndroidDisplay {
             let win_height = buffer.height;
             let stride = buffer.stride;
             let bits = buffer.bits as *mut u32;
+            
+            // 安全检查
+            if bits.is_null() {
+                ndk_sys::ANativeWindow_unlockAndPost(win_ptr);
+                return Err("ANativeWindow buffer bits is null".to_string());
+            }
+            if win_width <= 0 || win_height <= 0 || stride <= 0 {
+                ndk_sys::ANativeWindow_unlockAndPost(win_ptr);
+                return Err(format!("Invalid buffer size: {}x{}, stride={}", 
+                    win_width, win_height, stride));
+            }
 
             // 计算缩放比例，保持宽高比
             let scale_x = win_width as f32 / fb_width as f32;
@@ -406,12 +438,14 @@ impl AndroidDisplay {
                     let src_offset = ((src_y * fb_width + src_x) * 4) as usize;
                     if src_offset + 3 >= framebuffer.len() { continue; }
 
-                    // BGRA -> ARGB (Android窗口格式)
+                    // BGRA -> RGBA_8888 (Android窗口格式, 小端序)
+                    // CpuRenderer输出: B(0) G(1) R(2) A(3)
+                    // Android RGBA_8888 在小端序ARM上需要 u32 = 0xAABBGGRR
                     let b = framebuffer[src_offset] as u32;
                     let g = framebuffer[src_offset + 1] as u32;
                     let r = framebuffer[src_offset + 2] as u32;
                     let a = framebuffer[src_offset + 3] as u32;
-                    let pixel = (a << 24) | (r << 16) | (g << 8) | b;
+                    let pixel = (a << 24) | (b << 16) | (g << 8) | r;
                     *dst_row.offset(dx as isize) = pixel;
                 }
             }
@@ -554,14 +588,20 @@ pub fn android_main(app: AndroidApp) {
     log_info("[CPU] Android CPU backend starting...");
 
     let mut display = AndroidDisplay::new(GAME_WIDTH, GAME_HEIGHT);
+    log_info("[CPU] Display created");
     let mut input = AndroidInput::new();
-    let storage = AndroidStorage::with_app(&app);
+    log_info("[CPU] Input created");
+    let _storage = AndroidStorage::with_app(&app);
+    log_info("[CPU] Storage created");
     let mut game_state: Option<GameState> = None;
 
     let mut fps_counter = FpsCounter::new();
     let mut running = true;
     let mut last_render_time = Instant::now();
     let frame_duration = Duration::from_secs_f64(1.0 / 60.0);
+    let mut frame_count: u64 = 0;
+
+    log_info("[CPU] Entering main loop...");
 
     while running {
         let elapsed = last_render_time.elapsed();
@@ -574,12 +614,13 @@ pub fn android_main(app: AndroidApp) {
         app.poll_events(Some(wait_time), |event| match event {
             PollEvent::Main(main_event) => match main_event {
                 MainEvent::InitWindow { .. } => {
+                    log_info("[CPU] InitWindow event received");
                     if let Some(window) = app.native_window() {
-                        log_info(&format!("[CPU] Window: {}x{}", window.width(), window.height()));
+                        let w = window.width();
+                        let h = window.height();
+                        log_info(&format!("[CPU] Window: {}x{}", w, h));
                         display.set_native_window(Some(window));
-                        if game_state.is_none() {
-                            game_state = Some(GameState::new());
-                        }
+                        // 延迟创建游戏状态到主循环中
                     }
                 }
                 MainEvent::TerminateWindow { .. } => {
@@ -630,9 +671,12 @@ pub fn android_main(app: AndroidApp) {
             }
         }
 
-        // 处理软键盘事件
+        // 处理软键盘事件 (来自 Java dispatchKeyEvent / RemoteController)
+        // TV遥控器按键通过 nativeOnKeyEvent 传递原始 Android KeyCode
+        // 同时更新 joystick_android_tv 模块的遥控器状态
         if let Some(state) = &mut game_state {
             for soft_event in take_soft_key_events() {
+                joystick_android_tv::on_tv_remote_key(soft_event.key_code, soft_event.pressed);
                 let key_event = soft_key_to_platform_event(&soft_event);
                 if key_event.key != PlatformKeyCode::Unknown {
                     state.handle_key_event(&key_event);
@@ -654,20 +698,56 @@ pub fn android_main(app: AndroidApp) {
         }
         last_render_time = now;
 
+        // 延迟创建游戏状态（在主循环中创建，避免在事件回调中创建）
+        if game_state.is_none() && display.cpu_renderer().is_some() {
+            log_info("[CPU] Creating GameState in main loop...");
+            game_state = Some(GameState::new());
+            log_info("[CPU] GameState created successfully");
+        }
+
         // 游戏帧更新
         if let Some(state) = &mut game_state {
+            frame_count += 1;
+            if frame_count <= 3 {
+                log_info(&format!("[CPU] Frame {} starting...", frame_count));
+            }
+            
             let frame_start = Instant::now();
             state.set_fps_display(fps_counter.fps(), fps_counter.frame_time_ms());
+            
+            // 帧更新
+            if frame_count <= 3 {
+                log_info(&format!("[CPU] Frame {} calling frame_update...", frame_count));
+            }
             let result = state.frame_update();
+            if frame_count <= 3 {
+                log_info(&format!("[CPU] Frame {} frame_update done", frame_count));
+            }
 
             // CPU渲染
             if let Some(cpu_renderer) = display.cpu_renderer_mut() {
+                if frame_count <= 3 {
+                    log_info(&format!("[CPU] Frame {} calling submit_to_cpu...", frame_count));
+                }
                 state.submit_to_cpu(cpu_renderer);
+                if frame_count <= 3 {
+                    log_info(&format!("[CPU] Frame {} submit_to_cpu done", frame_count));
+                }
             }
 
             // 显示帧缓冲
-            if let Err(e) = display.present_framebuffer() {
-                log_warn(&format!("[CPU] present failed: {}", e));
+            if frame_count <= 3 {
+                log_info(&format!("[CPU] Frame {} calling present...", frame_count));
+            }
+            match display.present_framebuffer() {
+                Ok(_) => {
+                    if frame_count <= 3 {
+                        log_info(&format!("[CPU] Frame {} present done", frame_count));
+                    }
+                },
+                Err(e) => {
+                    log_warn(&format!("[CPU] Frame {} present failed: {}", frame_count, e));
+                }
             }
 
             let frame_time_ms = frame_start.elapsed().as_secs_f32() * 1000.0;

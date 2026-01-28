@@ -5,7 +5,7 @@
 
 #[cfg(feature = "wgpu-backend")]
 use crate::gpu::GpuRenderer;
-#[cfg(feature = "cpu-backend")]
+#[cfg(any(feature = "cpu-backend", feature = "android-cpu"))]
 use crate::cpu::CpuRenderer;
 use crate::mario::MarioGame;
 use crate::platform::FrameResult;
@@ -171,8 +171,8 @@ impl GameState {
     /// 准备渲染数据（不执行渲染）- CPU后端
     ///
     /// 将渲染命令提交到CPU渲染器，渲染到BGRA帧缓冲
-    /// 调用此方法后，平台层应使用GDI显示帧缓冲
-    #[cfg(feature = "cpu-backend")]
+    /// 调用此方法后，平台层应使用GDI或ANativeWindow显示帧缓冲
+    #[cfg(any(feature = "cpu-backend", feature = "android-cpu"))]
     pub fn submit_to_cpu(&mut self, cpu: &mut CpuRenderer) {
         // 检查图集版本是否变化
         let current_atlas_version = self.game.atlas.version();

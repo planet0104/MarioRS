@@ -38,8 +38,12 @@ mod windows_cpu;
 mod desktop;
 
 // Android 后端（需要 wgpu-backend）
-#[cfg(all(target_os = "android", feature = "wgpu-backend"))]
+#[cfg(all(target_os = "android", feature = "wgpu-backend", not(feature = "android-cpu")))]
 mod android;
+
+// Android CPU 软件渲染后端（老旧设备兼容）
+#[cfg(all(target_os = "android", feature = "android-cpu"))]
+mod android_cpu;
 
 // ============================================================================
 // 显示后端 - 最底层的渲染抽象
@@ -372,9 +376,17 @@ pub use self::desktop::{
     random_u8, random_u32, random_usize, run_game,
 };
 
-// Android 后端（需要 wgpu-backend）
-#[cfg(all(target_os = "android", feature = "wgpu-backend"))]
+// Android 后端（需要 wgpu-backend，且未启用 android-cpu）
+#[cfg(all(target_os = "android", feature = "wgpu-backend", not(feature = "android-cpu")))]
 pub use self::android::{
+    DesktopAudio, DesktopDisplay, DesktopInput, DesktopLog, DesktopRandom, DesktopStorage,
+    DesktopTime, android_main, log_debug, log_error, log_info, log_warn, now_ms, random_f32,
+    random_i32, random_u8, random_u32, random_usize, run_game,
+};
+
+// Android CPU 软件渲染后端（老旧设备）
+#[cfg(all(target_os = "android", feature = "android-cpu"))]
+pub use self::android_cpu::{
     DesktopAudio, DesktopDisplay, DesktopInput, DesktopLog, DesktopRandom, DesktopStorage,
     DesktopTime, android_main, log_debug, log_error, log_info, log_warn, now_ms, random_f32,
     random_i32, random_u8, random_u32, random_usize, run_game,
