@@ -9,9 +9,9 @@
 // - 支持索引色精灵和调色板
 // - 支持翻转、透明、调色板偏移等效果
 //
-// 像素格式（条件编译）:
-// - Windows (cpu-backend): BGRA格式，用于GDI StretchDIBits
-// - Android (android-cpu): ABGR格式（小端序），用于ANativeWindow RGBA_8888
+// 像素格式（按平台）:
+// - Windows: BGRA格式，用于GDI StretchDIBits
+// - Android: ABGR格式（小端序），用于ANativeWindow RGBA_8888
 //
 // ============================================================================
 
@@ -89,7 +89,7 @@ impl CpuRenderer {
         }
         let offset = ((y as u32 * self.width + x as u32) * 4) as usize;
         if offset + 3 < self.framebuffer.len() {
-            #[cfg(feature = "android-cpu")]
+            #[cfg(target_os = "android")]
             {
                 // ABGR格式 (Android RGBA_8888 小端序)
                 self.framebuffer[offset] = color[0];     // R
@@ -98,7 +98,7 @@ impl CpuRenderer {
                 self.framebuffer[offset + 3] = 0xFF;     // A
             }
             
-            #[cfg(not(feature = "android-cpu"))]
+            #[cfg(not(target_os = "android"))]
             {
                 // BGRA格式（Windows GDI原生格式）
                 self.framebuffer[offset] = color[2];     // B
@@ -133,10 +133,10 @@ impl CpuRenderer {
         }
 
         // 平台特定像素格式
-        #[cfg(feature = "android-cpu")]
+        #[cfg(target_os = "android")]
         let pixel_bytes = [color[0], color[1], color[2], 0xFF]; // ABGR (Android RGBA_8888 小端序: R G B A)
         
-        #[cfg(not(feature = "android-cpu"))]
+        #[cfg(not(target_os = "android"))]
         let pixel_bytes = [color[2], color[1], color[0], color[3]]; // BGRA (Windows GDI)
         
         let fb_stride = self.width * 4;
@@ -241,7 +241,7 @@ impl CpuRenderer {
                 let offset = fb_row_offset + (px * 4) as usize;
                 
                 // 平台特定像素格式
-                #[cfg(feature = "android-cpu")]
+                #[cfg(target_os = "android")]
                 {
                     // ABGR格式 (Android RGBA_8888 小端序: R G B A)
                     self.framebuffer[offset] = color[0];     // R
@@ -250,7 +250,7 @@ impl CpuRenderer {
                     self.framebuffer[offset + 3] = 0xFF;     // A
                 }
                 
-                #[cfg(not(feature = "android-cpu"))]
+                #[cfg(not(target_os = "android"))]
                 {
                     // BGRA格式 (Windows GDI)
                     self.framebuffer[offset] = color[2];     // B

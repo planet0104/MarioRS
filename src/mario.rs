@@ -659,9 +659,15 @@ impl MarioGame {
     }
 
     /// 设置FPS显示数据
-    /// 由平台层调用，FPS将显示在游戏状态栏中
+    /// 由平台层调用，FPS仅在Intro界面显示
     pub fn set_fps_display(&mut self, fps: u32, frame_time_ms: f32) {
-        self.status.set_fps(fps, frame_time_ms);
+        self.intro.set_fps(fps, frame_time_ms);
+    }
+
+    /// 设置渲染模式显示（GPU/CPU）
+    /// 由平台层调用，用于Intro界面显示当前渲染模式
+    pub fn set_render_mode(&mut self, mode: crate::status::RenderMode) {
+        self.intro.set_render_mode(mode);
     }
 
     /// 关闭游戏

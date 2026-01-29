@@ -153,6 +153,11 @@ pub struct Intro {
     tv_last_down: bool,
     tv_last_ok: bool,
     tv_last_back: bool,
+
+    // FPS显示数据（仅Intro界面显示）
+    fps: u32,
+    frame_time_ms: f32,
+    render_mode: crate::status::RenderMode,
 }
 
 use crate::mario::{ConfigData, IntroResult};
@@ -209,7 +214,22 @@ impl Intro {
             tv_last_down: false,
             tv_last_ok: false,
             tv_last_back: false,
+            // FPS显示数据
+            fps: 0,
+            frame_time_ms: 0.0,
+            render_mode: crate::status::RenderMode::GPU,
         }
+    }
+
+    /// 设置FPS显示数据（由平台层调用）
+    pub fn set_fps(&mut self, fps: u32, frame_time_ms: f32) {
+        self.fps = fps;
+        self.frame_time_ms = frame_time_ms;
+    }
+
+    /// 设置渲染模式
+    pub fn set_render_mode(&mut self, mode: crate::status::RenderMode) {
+        self.render_mode = mode;
     }
 
     /// 启动Intro（由mario.rs调用）
@@ -962,6 +982,43 @@ impl Intro {
         commands
     }
 
+    /// 渲染FPS信息（仅Intro界面显示）
+    fn collect_fps_commands(
+        &self,
+        txt: &mut Txt,
+        palette_index: u32,
+    ) -> Vec<crate::gpu::RenderCommand> {
+        use crate::txt::FontStyle;
+
+        let mut commands = Vec::new();
+        if self.fps > 0 {
+            // 使用粗体+阴影，在浅色砖块上更清晰
+            txt.set_font(0, FontStyle::BOLD | FontStyle::SHADOW);
+            // 显示格式: "GPU 60FPS 1.5MS" 或 "CPU 30FPS 5.2MS"
+            let render_mode_text = if self.render_mode == crate::status::RenderMode::CPU {
+                "CPU"
+            } else {
+                "GPU"
+            };
+            let fps_text = format!(
+                "{} {}FPS {:.1}MS",
+                render_mode_text,
+                self.fps,
+                self.frame_time_ms
+            );
+            let text_width = txt.text_width(&fps_text) as i32;
+            txt.write_text_ui_gpu(
+                &mut commands,
+                345 - text_width,
+                171,
+                &fps_text,
+                31,
+                palette_index,
+            );
+        }
+        commands
+    }
+
     fn draw_intro_screen(
         &mut self,
         render_state: &mut RenderState,
@@ -1015,6 +1072,21 @@ impl Intro {
         // 原版 最后 DrawPlayer，GPU 这里再绘制一次以保证层级一致
         for p in players.collect_player_sprites_gpu(buffers, atlas, palette_index, enemies.star) {
             batch.push_sprite(p);
+        }
+
+        // Intro界面显示FPS信息（右下角）
+        for cmd in self.collect_fps_commands(txt, palette_index) {
+            if let crate::gpu::RenderCommand::UIFillRect(r) = cmd {
+                let fill = crate::gpu::sprite_batch::FillCommand {
+                    x: r.position[0],
+                    y: r.position[1],
+                    width: r.size[0],
+                    height: r.size[1],
+                    color_index: r.color_index as u8,
+                    palette_index: r.palette_index as u32,
+                };
+                batch.push_ui_fill(fill);
+            }
         }
     }
 
@@ -1335,6 +1407,21 @@ impl Intro {
             for p in players.collect_player_sprites_gpu(buffers, atlas, palette_index, enemies.star)
             {
                 batch.push_sprite(p);
+            }
+
+            // Intro界面显示FPS信息（右下角）
+            for cmd in self.collect_fps_commands(txt, palette_index) {
+                if let crate::gpu::RenderCommand::UIFillRect(r) = cmd {
+                    let fill = crate::gpu::sprite_batch::FillCommand {
+                        x: r.position[0],
+                        y: r.position[1],
+                        width: r.size[0],
+                        height: r.size[1],
+                        color_index: r.color_index as u8,
+                        palette_index: r.palette_index as u32,
+                    };
+                    batch.push_ui_fill(fill);
+                }
             }
         }
 

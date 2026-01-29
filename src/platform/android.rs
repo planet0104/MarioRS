@@ -18,6 +18,7 @@ use super::{
     LogBackend, LogLevel, StorageBackend,
 };
 use crate::gpu::GpuRenderer;
+use crate::status::RenderMode;
 
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -534,7 +535,9 @@ impl AndroidDisplay {
         self.gpu_renderer.as_mut()
     }
 
-    pub fn set_native_window(&mut self, window: Option<NativeWindow>) {
+    /// 设置原生窗口并初始化 GPU 渲染
+    /// 返回 true 表示 GPU 初始化成功，false 表示失败（需要 fallback 到 CPU）
+    pub fn set_native_window(&mut self, window: Option<NativeWindow>) -> bool {
         self.native_window = window.clone();
         if window.is_none() {
             self.wgpu_surface = None;
@@ -542,17 +545,22 @@ impl AndroidDisplay {
             self.wgpu_queue = None;
             self.wgpu_config = None;
             self.gpu_renderer = None;
-            return;
+            return true; // 清理成功
         }
 
         let window = window.expect("window is Some");
         let win_width = window.width().max(1) as u32;
         let win_height = window.height().max(1) as u32;
 
+        // 优先使用 Vulkan 后端
+        // GLES 后端在某些模拟器上与 GameActivity 存在兼容性问题
+        // (eglCreateWindowSurface 失败: NativeWindow already connected to another API)
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::VULKAN | wgpu::Backends::GL,
+            backends: wgpu::Backends::VULKAN,
             ..Default::default()
         });
+        
+        log_info("[GPU] Trying Vulkan backend first...");
 
         use std::ffi::c_void;
         use std::ptr::NonNull;
@@ -591,7 +599,7 @@ impl AndroidDisplay {
             Some(ptr) => ptr,
             None => {
                 log_error("[GPU] native_window_ptr_is_null");
-                return;
+                return false;
             }
         };
 
@@ -601,7 +609,7 @@ impl AndroidDisplay {
             Ok(s) => s,
             Err(e) => {
                 log_error(&format!("[GPU] create_surface_failed {:?}", e));
-                return;
+                return false;
             }
         };
 
@@ -614,8 +622,10 @@ impl AndroidDisplay {
         )) {
             Ok(a) => a,
             Err(e) => {
-                log_error(&format!("[GPU] request_adapter_failed {:?}", e));
-                return;
+                log_warn(&format!("[GPU] Vulkan adapter not available: {:?}", e));
+                log_warn("[GPU] This device may not support Vulkan, or this is an emulator.");
+                log_warn("[GPU] Will fallback to CPU software rendering.");
+                return false;
             }
         };
 
@@ -661,7 +671,7 @@ impl AndroidDisplay {
                     },
                     Err(e2) => {
                         log_error(&format!("[GPU] All attempts failed: {:?}", e2));
-                        return;
+                        return false;
                     }
                 }
             }
@@ -682,7 +692,7 @@ impl AndroidDisplay {
             Some(f) => *f,
             None => {
                 log_error("[GPU] No surface formats available");
-                return;
+                return false;
             }
         };
 
@@ -713,7 +723,12 @@ impl AndroidDisplay {
         };
         
         log_info("[GPU] Configuring surface...");
+        
+        // 配置 surface
+        // 注意: 使用 Vulkan 后端可以避免 GLES 在某些模拟器上的兼容性问题
+        // (GLES 后端可能因为 NativeWindow 已被 GameActivity 连接而失败)
         surface.configure(&device, &config);
+        
         log_info("[GPU] Surface configured successfully");
 
         log_info("[GPU] Creating GpuRenderer...");
@@ -726,6 +741,9 @@ impl AndroidDisplay {
         self.wgpu_queue = Some(queue);
         self.wgpu_config = Some(config);
         self.gpu_renderer = Some(gpu_renderer);
+        
+        log_info("[GPU] GPU initialization completed successfully");
+        true
     }
 
     pub fn resize(&mut self, new_width: u32, new_height: u32) {
@@ -944,23 +962,27 @@ use crate::platform::FrameResult;
 /// Android 应用主函数
 pub fn android_main(app: AndroidApp) {
     AndroidLog::init();
+    log_info("[GPU] Android GPU backend starting...");
 
     let mut display = AndroidDisplay::new(GAME_WIDTH, GAME_HEIGHT);
     let mut input = AndroidInput::new();
-    let storage = AndroidStorage::with_app(&app);
+    let _storage = AndroidStorage::with_app(&app);
     let mut game_state: Option<GameState> = None;
 
     // FPS 计数器
     let mut fps_counter = FpsCounter::new();
     let mut running = true;
 
+    // GPU 初始化失败标志 - 需要 fallback 到 CPU
+    let mut need_cpu_fallback = false;
+    
     // GPU资源是否需要重新上传（后台恢复后设为true）
     let mut gpu_resources_invalidated = false;
     // 上一次渲染时间
     let mut last_render_time = Instant::now();
     let frame_duration = Duration::from_secs_f64(1.0 / 60.0);
 
-    while running {
+    while running && !need_cpu_fallback {
         // 计算到下一帧的等待时间，用于 poll_events 超时
         // 使用非常短的超时，确保输入事件能立即被处理
         let elapsed = last_render_time.elapsed();
@@ -975,13 +997,21 @@ pub fn android_main(app: AndroidApp) {
             PollEvent::Main(main_event) => match main_event {
                 MainEvent::InitWindow { .. } => {
                     if let Some(window) = app.native_window() {
-                        log_info(&format!("Window: {}x{}", window.width(), window.height()));
-                        display.set_native_window(Some(window));
-
-                        if game_state.is_none() {
-                            game_state = Some(GameState::new());
+                        log_info(&format!("[GPU] Window: {}x{}", window.width(), window.height()));
+                        
+                        // 尝试初始化 GPU 渲染
+                        let gpu_ok = display.set_native_window(Some(window));
+                        
+                        if gpu_ok {
+                            log_info("[GPU] GPU rendering initialized successfully");
+                            if game_state.is_none() {
+                                game_state = Some(GameState::new());
+                            } else {
+                                gpu_resources_invalidated = true;
+                            }
                         } else {
-                            gpu_resources_invalidated = true;
+                            log_warn("[GPU] GPU initialization failed, will fallback to CPU rendering");
+                            need_cpu_fallback = true;
                         }
                     }
                 }
@@ -1001,8 +1031,13 @@ pub fn android_main(app: AndroidApp) {
                         display.reconfigure_surface();
                         gpu_resources_invalidated = true;
                     } else if let Some(window) = app.native_window() {
-                        display.set_native_window(Some(window));
-                        gpu_resources_invalidated = true;
+                        let gpu_ok = display.set_native_window(Some(window));
+                        if gpu_ok {
+                            gpu_resources_invalidated = true;
+                        } else {
+                            log_warn("[GPU] GPU re-initialization failed on Resume, fallback to CPU");
+                            need_cpu_fallback = true;
+                        }
                     }
                 }
                 MainEvent::Pause => {}
@@ -1012,6 +1047,11 @@ pub fn android_main(app: AndroidApp) {
             PollEvent::Timeout => {}
             _ => {}
         });
+        
+        // 检查是否需要 CPU fallback
+        if need_cpu_fallback {
+            break;
+        }
 
         // 处理 native 层输入事件
         // 注意: 手柄和遥控器输入已由 Java 层分离处理，通过专用 JNI 接口转发
@@ -1104,8 +1144,9 @@ pub fn android_main(app: AndroidApp) {
 
             let frame_start = Instant::now();
 
-            // FPS显示内置到游戏状态栏（使用GPU渲染，无需overlay）
+            // FPS和渲染模式显示
             state.set_fps_display(fps_counter.fps(), fps_counter.frame_time_ms());
+            state.set_render_mode(RenderMode::GPU);
 
             let result = state.frame_update();
 
@@ -1154,9 +1195,342 @@ pub fn android_main(app: AndroidApp) {
             }
         }
     }
+    
+    // GPU 初始化失败，fallback 到 CPU 软件渲染
+    if need_cpu_fallback {
+        log_info("[GPU->CPU] Switching to CPU software rendering...");
+        run_cpu_fallback(app);
+    }
 }
 
 /// 游戏运行入口
 pub fn run_game() -> Result<(), Box<dyn std::error::Error>> {
     Err("Android platform should use android_main entry point".into())
+}
+
+// ============================================================================
+// CPU 软件渲染 Fallback
+// 当 GPU 初始化失败时使用
+// ============================================================================
+
+use crate::cpu::CpuRenderer;
+
+/// CPU 渲染显示后端
+struct CpuDisplay {
+    native_window: Option<NativeWindow>,
+    cpu_renderer: Option<CpuRenderer>,
+}
+
+impl CpuDisplay {
+    fn new() -> Self {
+        Self {
+            native_window: None,
+            cpu_renderer: None,
+        }
+    }
+
+    fn cpu_renderer(&self) -> Option<&CpuRenderer> {
+        self.cpu_renderer.as_ref()
+    }
+
+    fn cpu_renderer_mut(&mut self) -> Option<&mut CpuRenderer> {
+        self.cpu_renderer.as_mut()
+    }
+
+    fn set_native_window(&mut self, window: Option<NativeWindow>) {
+        self.native_window = window.clone();
+        if window.is_none() {
+            self.cpu_renderer = None;
+            return;
+        }
+        
+        // 设置窗口缓冲区尺寸为游戏分辨率的整数倍
+        if let Some(ref win) = self.native_window {
+            unsafe {
+                let win_ptr = win.ptr().as_ptr();
+                let native_w = win.width() as i32;
+                let native_h = win.height() as i32;
+                
+                // 计算最佳整数缩放倍数
+                let scale_x = native_w / GAME_WIDTH as i32;
+                let scale_y = native_h / GAME_HEIGHT as i32;
+                let scale = scale_x.min(scale_y).max(1);
+                
+                let buf_w = GAME_WIDTH as i32 * scale;
+                let buf_h = GAME_HEIGHT as i32 * scale;
+                
+                log_info(&format!("[CPU] Native: {}x{}, Buffer: {}x{}, Scale: {}x", 
+                    native_w, native_h, buf_w, buf_h, scale));
+                
+                // WINDOW_FORMAT_RGBA_8888 = 1
+                let result = ndk_sys::ANativeWindow_setBuffersGeometry(
+                    win_ptr, buf_w, buf_h, 1,
+                );
+                if result != 0 {
+                    log_warn(&format!("[CPU] setBuffersGeometry failed: {}", result));
+                } else {
+                    log_info(&format!("[CPU] Window buffer set to {}x{} RGBA_8888", buf_w, buf_h));
+                }
+            }
+        }
+        
+        // 创建 CPU 渲染器
+        self.cpu_renderer = Some(CpuRenderer::new(GAME_WIDTH, GAME_HEIGHT));
+        log_info("[CPU] CpuRenderer created");
+    }
+
+    /// 将帧缓冲写入到 ANativeWindow
+    fn present_framebuffer(&self) -> Result<(), String> {
+        let window = match &self.native_window {
+            Some(w) => w,
+            None => return Ok(()),
+        };
+        let cpu = match &self.cpu_renderer {
+            Some(c) => c,
+            None => return Ok(()),
+        };
+
+        let framebuffer = cpu.framebuffer();
+        let fb_width = cpu.width() as i32;
+        let fb_height = cpu.height() as i32;
+
+        unsafe {
+            let win_ptr = window.ptr().as_ptr();
+            let mut buffer: ndk_sys::ANativeWindow_Buffer = std::mem::zeroed();
+            let result = ndk_sys::ANativeWindow_lock(win_ptr, &mut buffer, std::ptr::null_mut());
+            if result != 0 {
+                return Err(format!("ANativeWindow_lock failed: {}", result));
+            }
+
+            let win_width = buffer.width;
+            let win_height = buffer.height;
+            let stride = buffer.stride;
+            let bits = buffer.bits as *mut u32;
+            
+            if bits.is_null() || win_width <= 0 || win_height <= 0 || stride <= 0 {
+                ndk_sys::ANativeWindow_unlockAndPost(win_ptr);
+                return Err("Invalid buffer".to_string());
+            }
+
+            // 计算整数缩放倍数
+            let scale = (win_width / fb_width).min(win_height / fb_height).max(1);
+            let dst_width = fb_width * scale;
+            let dst_height = fb_height * scale;
+            let offset_x = (win_width - dst_width) / 2;
+            let offset_y = (win_height - dst_height) / 2;
+
+            let black = 0xFF000000u32;
+            
+            // 上边框
+            for y in 0..offset_y {
+                let row = bits.offset((y * stride) as isize);
+                for x in 0..win_width {
+                    *row.offset(x as isize) = black;
+                }
+            }
+            // 下边框
+            for y in (offset_y + dst_height)..win_height {
+                let row = bits.offset((y * stride) as isize);
+                for x in 0..win_width {
+                    *row.offset(x as isize) = black;
+                }
+            }
+            // 左右边框
+            for y in offset_y..(offset_y + dst_height) {
+                let row = bits.offset((y * stride) as isize);
+                for x in 0..offset_x {
+                    *row.offset(x as isize) = black;
+                }
+                for x in (offset_x + dst_width)..win_width {
+                    *row.offset(x as isize) = black;
+                }
+            }
+
+            // 整数缩放渲染
+            // framebuffer 是 &[u8]，每像素4字节 (ABGR 格式用于 Android RGBA_8888)
+            let bytes_per_pixel = 4;
+            for src_y in 0..fb_height {
+                let row_start = (src_y * fb_width * bytes_per_pixel) as usize;
+                for dy in 0..scale {
+                    let dst_y = offset_y + src_y * scale + dy;
+                    let dst_row = bits.offset((dst_y * stride + offset_x) as isize);
+                    
+                    for src_x in 0..fb_width {
+                        // 读取 4 字节像素 (ABGR -> u32)
+                        let px_offset = row_start + (src_x as usize) * 4;
+                        let pixel = u32::from_le_bytes([
+                            framebuffer[px_offset],
+                            framebuffer[px_offset + 1],
+                            framebuffer[px_offset + 2],
+                            framebuffer[px_offset + 3],
+                        ]);
+                        for dx in 0..scale {
+                            *dst_row.offset((src_x * scale + dx) as isize) = pixel;
+                        }
+                    }
+                }
+            }
+
+            ndk_sys::ANativeWindow_unlockAndPost(win_ptr);
+        }
+
+        Ok(())
+    }
+}
+
+/// CPU fallback 主循环
+/// GPU 初始化失败时由 android_main 调用
+fn run_cpu_fallback(app: AndroidApp) {
+    log_info("[CPU] Starting CPU fallback rendering...");
+
+    let mut display = CpuDisplay::new();
+    let mut input = AndroidInput::new();
+    let mut game_state: Option<GameState> = None;
+
+    let mut fps_counter = FpsCounter::new();
+    let mut running = true;
+    let mut last_render_time = Instant::now();
+    let frame_duration = Duration::from_secs_f64(1.0 / 60.0);
+
+    // 检查是否已经有窗口（InitWindow 事件可能在 GPU 初始化期间已触发）
+    if let Some(window) = app.native_window() {
+        log_info(&format!("[CPU] Window already available: {}x{}", window.width(), window.height()));
+        display.set_native_window(Some(window));
+    }
+
+    log_info("[CPU] Entering CPU main loop...");
+
+    while running {
+        let elapsed = last_render_time.elapsed();
+        let wait_time = if elapsed >= frame_duration {
+            Duration::ZERO
+        } else {
+            (frame_duration - elapsed).min(Duration::from_millis(1))
+        };
+
+        app.poll_events(Some(wait_time), |event| match event {
+            PollEvent::Main(main_event) => match main_event {
+                MainEvent::InitWindow { .. } => {
+                    log_info("[CPU] InitWindow event received");
+                    if let Some(window) = app.native_window() {
+                        log_info(&format!("[CPU] Window: {}x{}", window.width(), window.height()));
+                        display.set_native_window(Some(window));
+                    }
+                }
+                MainEvent::TerminateWindow { .. } => {
+                    display.set_native_window(None);
+                }
+                MainEvent::Destroy => { running = false; }
+                MainEvent::Resume { .. } => {
+                    if let Some(window) = app.native_window() {
+                        display.set_native_window(Some(window));
+                    }
+                }
+                _ => {}
+            },
+            _ => {}
+        });
+
+        // 处理输入事件 (复用现有的输入处理逻辑)
+        if let Ok(mut iter) = app.input_events_iter() {
+            loop {
+                let read_event = iter.next(|event| {
+                    match event {
+                        InputEvent::KeyEvent(key_event) => {
+                            let keycode = key_event.key_code();
+                            let action = key_event.action();
+                            let android_keycode = u32::from(keycode) as i32;
+                            let pressed = action == KeyAction::Down;
+                            
+                            if is_gamepad_only_keycode(keycode) {
+                                joystick_android::on_gamepad_connected();
+                                joystick_android::on_gamepad_button(android_keycode, pressed);
+                            } else {
+                                input.handle_key(keycode, action);
+                            }
+                        }
+                        InputEvent::MotionEvent(motion_event) => {
+                            if is_gamepad_motion_source(motion_event.source()) {
+                                joystick_android::on_gamepad_connected();
+                            }
+                        }
+                        _ => {}
+                    }
+                    InputStatus::Handled
+                });
+                if !read_event { break; }
+            }
+        }
+
+        // 处理原生按钮事件
+        if let Some(state) = &mut game_state {
+            for native_event in take_native_button_events() {
+                let key_event = native_button_to_key_event(&native_event);
+                if key_event.key != PlatformKeyCode::Unknown {
+                    state.handle_key_event(&key_event);
+                }
+            }
+        }
+
+        // 处理软键盘/遥控器事件
+        if let Some(state) = &mut game_state {
+            for soft_event in take_soft_key_events() {
+                let key_event = soft_key_to_platform_event(&soft_event);
+                if key_event.key != PlatformKeyCode::Unknown {
+                    state.handle_key_event(&key_event);
+                }
+            }
+        }
+
+        // 处理物理键盘事件
+        if let Some(state) = &mut game_state {
+            for event in input.poll_events() {
+                state.handle_key_event(&event);
+            }
+        }
+
+        // 帧率限制
+        let now = Instant::now();
+        if now.duration_since(last_render_time) < frame_duration {
+            continue;
+        }
+        last_render_time = now;
+
+        // 延迟创建游戏状态
+        if game_state.is_none() && display.cpu_renderer().is_some() {
+            log_info("[CPU] Creating GameState...");
+            game_state = Some(GameState::new());
+            log_info("[CPU] GameState created successfully");
+        }
+
+        // 游戏帧更新
+        if let Some(state) = &mut game_state {
+            let frame_start = Instant::now();
+            // FPS和渲染模式显示
+            state.set_fps_display(fps_counter.fps(), fps_counter.frame_time_ms());
+            state.set_render_mode(RenderMode::CPU);
+            
+            let result = state.frame_update();
+
+            // CPU 渲染
+            if let Some(cpu_renderer) = display.cpu_renderer_mut() {
+                state.submit_to_cpu(cpu_renderer);
+            }
+
+            // 显示帧缓冲
+            if let Err(e) = display.present_framebuffer() {
+                log_warn(&format!("[CPU] Present failed: {}", e));
+            }
+
+            let frame_time_ms = frame_start.elapsed().as_secs_f32() * 1000.0;
+            fps_counter.record_frame(frame_time_ms);
+
+            if result == FrameResult::Exit {
+                state.shutdown();
+                running = false;
+            }
+        }
+    }
+    
+    log_info("[CPU] CPU fallback loop ended");
 }

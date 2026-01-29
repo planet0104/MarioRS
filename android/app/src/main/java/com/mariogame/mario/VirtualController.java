@@ -189,6 +189,10 @@ public class VirtualController {
             ButtonInfo info = gameButtons[i];
             info.view = buttonLayer.findViewById(info.viewId);
             
+            // 禁用焦点，防止键盘/遥控器Enter键触发按钮
+            info.view.setFocusable(false);
+            info.view.setFocusableInTouchMode(false);
+            
             // 设置默认尺寸和位置
             info.width = defaultPositions[i][2];
             info.height = defaultPositions[i][3];
@@ -226,6 +230,9 @@ public class VirtualController {
         
         // 设置编辑按钮 (增加右侧边距)
         btnEdit = buttonLayer.findViewById(R.id.btn_edit);
+        // 禁用焦点，防止键盘/遥控器Enter键触发按钮
+        btnEdit.setFocusable(false);
+        btnEdit.setFocusableInTouchMode(false);
         FrameLayout.LayoutParams editParams = new FrameLayout.LayoutParams(smallBtnSize, smallBtnSize);
         editParams.leftMargin = screenWidth - margin - smallBtnSize * 2 - spacing - rightExtraMargin;
         editParams.topMargin = margin;
@@ -236,6 +243,9 @@ public class VirtualController {
         btnKeyboard = new TextView(context);
         // 设置 id 以便在遍历视图树时能找到这个程序创建的控件
         btnKeyboard.setId(R.id.btn_keyboard);
+        // 禁用焦点，防止键盘/遥控器Enter键触发按钮
+        btnKeyboard.setFocusable(false);
+        btnKeyboard.setFocusableInTouchMode(false);
         btnKeyboard.setBackgroundResource(R.drawable.button_keyboard);
         btnKeyboard.setText("KB");
         btnKeyboard.setTextColor(Color.WHITE);
@@ -252,6 +262,9 @@ public class VirtualController {
         btnHide = new TextView(context);
         // 设置 id 以便在遍历视图树时能找到这个程序创建的控件
         btnHide.setId(R.id.btn_hide);
+        // 禁用焦点，防止键盘/遥控器Enter键触发按钮
+        btnHide.setFocusable(false);
+        btnHide.setFocusableInTouchMode(false);
         btnHide.setBackgroundResource(R.drawable.button_edit);
         btnHide.setText("H");
         btnHide.setTextColor(Color.WHITE);
@@ -305,6 +318,9 @@ public class VirtualController {
             
             View keyView = panel.findViewById(viewId);
             if (keyView != null) {
+                // 禁用焦点，防止键盘/遥控器Enter键触发按钮
+                keyView.setFocusable(false);
+                keyView.setFocusableInTouchMode(false);
                 setupKeyTouchListener(keyView, keyCode);
             }
         }

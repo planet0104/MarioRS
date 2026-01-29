@@ -42,12 +42,9 @@ mod windows_cpu;
 mod desktop;
 
 // Android 后端（需要 wgpu-backend）
-#[cfg(all(target_os = "android", feature = "wgpu-backend", not(feature = "android-cpu")))]
+// GPU 渲染 + CPU 自动 fallback (全部在 android.rs 中实现)
+#[cfg(all(target_os = "android", feature = "wgpu-backend"))]
 mod android;
-
-// Android CPU 软件渲染后端（老旧设备兼容）
-#[cfg(all(target_os = "android", feature = "android-cpu"))]
-mod android_cpu;
 
 // ============================================================================
 // 显示后端 - 最底层的渲染抽象
@@ -380,17 +377,11 @@ pub use self::desktop::{
     random_u8, random_u32, random_usize, run_game,
 };
 
-// Android 后端（需要 wgpu-backend，且未启用 android-cpu）
-#[cfg(all(target_os = "android", feature = "wgpu-backend", not(feature = "android-cpu")))]
+// Android 后端 (GPU + CPU 自动 fallback)
+// 主入口从 android.rs 导出
+// GPU 初始化失败时自动切换到 android_cpu.rs 的 CPU 渲染
+#[cfg(all(target_os = "android", feature = "wgpu-backend"))]
 pub use self::android::{
-    DesktopAudio, DesktopDisplay, DesktopInput, DesktopLog, DesktopRandom, DesktopStorage,
-    DesktopTime, android_main, log_debug, log_error, log_info, log_warn, now_ms, random_f32,
-    random_i32, random_u8, random_u32, random_usize, run_game,
-};
-
-// Android CPU 软件渲染后端（老旧设备）
-#[cfg(all(target_os = "android", feature = "android-cpu"))]
-pub use self::android_cpu::{
     DesktopAudio, DesktopDisplay, DesktopInput, DesktopLog, DesktopRandom, DesktopStorage,
     DesktopTime, android_main, log_debug, log_error, log_info, log_warn, now_ms, random_f32,
     random_i32, random_u8, random_u32, random_usize, run_game,

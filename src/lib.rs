@@ -20,8 +20,10 @@ pub extern "C" fn android_main(app: AndroidApp) {
 // wgpu特定的渲染器在模块内部条件编译
 pub mod gpu;
 
-// CPU软件渲染模块（用于XP兼容和Android老旧设备）
-#[cfg(any(feature = "cpu-backend", feature = "android-cpu"))]
+// CPU软件渲染模块
+// - Windows: 用于XP兼容 (cpu-backend feature)
+// - Android: 始终编译，作为 GPU 失败时的 fallback
+#[cfg(any(feature = "cpu-backend", target_os = "android"))]
 pub mod cpu;
 
 // 游戏核心模块

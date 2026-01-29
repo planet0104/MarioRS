@@ -5,7 +5,8 @@
 
 #[cfg(feature = "wgpu-backend")]
 use crate::gpu::GpuRenderer;
-#[cfg(any(feature = "cpu-backend", feature = "android-cpu"))]
+// CPU渲染器: Windows cpu-backend 或 Android (用于 GPU fallback)
+#[cfg(any(feature = "cpu-backend", target_os = "android"))]
 use crate::cpu::CpuRenderer;
 use crate::mario::MarioGame;
 use crate::platform::FrameResult;
@@ -58,9 +59,14 @@ impl GameState {
     }
 
     /// 设置FPS显示数据（由平台层调用）
-    /// FPS将显示在游戏状态栏中，使用GPU渲染
+    /// FPS仅在Intro界面显示
     pub fn set_fps_display(&mut self, fps: u32, frame_time_ms: f32) {
         self.game.set_fps_display(fps, frame_time_ms);
+    }
+
+    /// 设置渲染模式显示（由平台层调用）
+    pub fn set_render_mode(&mut self, mode: crate::status::RenderMode) {
+        self.game.set_render_mode(mode);
     }
 
     /// 使GPU资源缓存失效，强制下次submit_to_gpu时重新上传所有资源
@@ -172,7 +178,7 @@ impl GameState {
     ///
     /// 将渲染命令提交到CPU渲染器，渲染到BGRA帧缓冲
     /// 调用此方法后，平台层应使用GDI或ANativeWindow显示帧缓冲
-    #[cfg(any(feature = "cpu-backend", feature = "android-cpu"))]
+    #[cfg(any(feature = "cpu-backend", target_os = "android"))]
     pub fn submit_to_cpu(&mut self, cpu: &mut CpuRenderer) {
         // 检查图集版本是否变化
         let current_atlas_version = self.game.atlas.version();

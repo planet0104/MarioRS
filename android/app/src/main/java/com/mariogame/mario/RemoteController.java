@@ -7,6 +7,12 @@ import android.view.KeyEvent;
  * 遥控器控制器类
  * 专门处理TV遥控器和键盘按键，与手柄逻辑完全分离
  * 
+ * 遥控器检测说明:
+ * - 只有按下 DPAD_CENTER (OK键) 才确认是真正的TV遥控器
+ * - DPAD_CENTER 在PC键盘上不存在，是遥控器特有的按键
+ * - 键盘用户会使用 Enter 键确认，不触发遥控器模式
+ * - 只有真正的遥控器才会启用空中慢动作模式
+ * 
  * 支持6个按键:
  * - 上键: 菜单向上/游戏中跳跃
  * - 下键: 菜单向下/游戏中向下(钻管道)/发射子弹
@@ -27,7 +33,8 @@ public class RemoteController {
     
     // 回调接口
     public interface InputCallback {
-        // 检测到遥控器输入时回调 (用于隐藏虚拟按钮)
+        // 检测到物理输入时回调 (用于隐藏虚拟按钮)
+        // 注意: 任何物理输入(键盘/遥控器)都会触发，不只是遥控器
         void onRemoteInputDetected();
     }
     
@@ -41,8 +48,12 @@ public class RemoteController {
     private boolean accelerateMode = false;
     private boolean accelerateSent = false;
     
-    // 是否检测到遥控器输入
+    // 是否检测到真正的TV遥控器 (非键盘)
+    // 只有按下 DPAD_CENTER (OK键) 才确认是遥控器，因为这个键在PC键盘上不存在
     private boolean remoteDetected = false;
+    
+    // 是否已经隐藏虚拟按钮 (任何物理输入都会触发)
+    private boolean virtualButtonsHidden = false;
     
     // 输入回调
     private InputCallback inputCallback;
@@ -83,36 +94,47 @@ public class RemoteController {
             return false;
         }
         
+        // 检测到物理输入（键盘/遥控器），隐藏虚拟按钮
+        if (pressed && !virtualButtonsHidden) {
+            virtualButtonsHidden = true;
+            Log.i(TAG, "[Remote] 检测到物理输入，隐藏虚拟按钮");
+            notifyRemoteDetected();
+        }
+        
         // 处理遥控器核心按键
         switch (keyCode) {
             case KeyEvent.KEYCODE_DPAD_UP:
-                handleRemoteDetected();
                 handleUpKey(pressed);
                 return true;
             
             case KeyEvent.KEYCODE_DPAD_DOWN:
-                handleRemoteDetected();
                 handleDownKey(pressed);
                 return true;
             
             case KeyEvent.KEYCODE_DPAD_LEFT:
-                handleRemoteDetected();
                 handleLeftKey(pressed);
                 return true;
             
             case KeyEvent.KEYCODE_DPAD_RIGHT:
-                handleRemoteDetected();
                 handleRightKey(pressed);
                 return true;
             
             case KeyEvent.KEYCODE_DPAD_CENTER:
+                // DPAD_CENTER (OK键) 是遥控器特有的，PC键盘上没有这个键
+                // 只有按下这个键才确认是真正的TV遥控器
+                if (pressed && !remoteDetected) {
+                    Log.i(TAG, "[Remote] 检测到 DPAD_CENTER (OK键)，确认是TV遥控器");
+                    setAsRealRemote();
+                }
+                handleOkKey(pressed);
+                return true;
+            
             case KeyEvent.KEYCODE_ENTER:
-                handleRemoteDetected();
+                // Enter键是键盘按键，不触发遥控器模式
                 handleOkKey(pressed);
                 return true;
             
             case KeyEvent.KEYCODE_BACK:
-                handleRemoteDetected();
                 handleBackKey(pressed);
                 return true;
             
@@ -123,14 +145,14 @@ public class RemoteController {
     }
     
     /**
-     * 检测到遥控器输入
+     * 设置为真正的TV遥控器模式
+     * 只有按下 DPAD_CENTER (OK键) 才会调用此方法
+     * 
+     * 注意: 隐藏虚拟按钮已在 handleKeyEvent 中统一处理，这里不需要再调用
      */
-    private void handleRemoteDetected() {
-        if (!remoteDetected) {
-            remoteDetected = true;
-            Log.i(TAG, "[Remote  遥控器!!] 检测到遥控器输入");
-            notifyRemoteDetected();
-        }
+    private void setAsRealRemote() {
+        remoteDetected = true;
+        Log.i(TAG, "[Remote 遥控器!!] 启用TV遥控器模式 (空中慢动作)");
         
         // 遥控器自动开启加速模式
         if (!accelerateMode) {
@@ -160,11 +182,18 @@ public class RemoteController {
     // ========================================================================
     
     /**
+     * 获取日志前缀，区分遥控器和键盘
+     */
+    private String getLogPrefix() {
+        return remoteDetected ? "[Remote 遥控器]" : "[DPAD 键盘]";
+    }
+    
+    /**
      * 处理上键
      */
     private void handleUpKey(boolean pressed) {
         upPressed = pressed;
-        Log.d(TAG, "[Remote 遥控器!!] UP pressed=" + pressed);
+        Log.d(TAG, getLogPrefix() + " UP pressed=" + pressed);
         MainActivity.nativeOnRemoteKey(KeyEvent.KEYCODE_DPAD_UP, pressed);
     }
     
@@ -173,7 +202,7 @@ public class RemoteController {
      */
     private void handleDownKey(boolean pressed) {
         downPressed = pressed;
-        Log.d(TAG, "[Remote 遥控器!!] DOWN pressed=" + pressed);
+        Log.d(TAG, getLogPrefix() + " DOWN pressed=" + pressed);
         MainActivity.nativeOnRemoteKey(KeyEvent.KEYCODE_DPAD_DOWN, pressed);
     }
     
@@ -184,7 +213,7 @@ public class RemoteController {
         if (pressed) {
             if (!leftPressed) {
                 leftPressed = true;
-                Log.d(TAG, "[Remote 遥控器!!] LEFT pressed");
+                Log.d(TAG, getLogPrefix() + " LEFT pressed");
                 MainActivity.nativeOnRemoteKey(KeyEvent.KEYCODE_DPAD_LEFT, true);
             }
             
@@ -192,13 +221,13 @@ public class RemoteController {
             if (rightPressed) {
                 rightPressed = false;
                 MainActivity.nativeOnRemoteKey(KeyEvent.KEYCODE_DPAD_RIGHT, false);
-                Log.d(TAG, "[Remote 遥控器!!] RIGHT cancelled by LEFT");
+                Log.d(TAG, getLogPrefix() + " RIGHT cancelled by LEFT");
             }
         } else {
             // 立即释放，不再延迟
             if (leftPressed) {
                 leftPressed = false;
-                Log.d(TAG, "[Remote 遥控器!!] LEFT released");
+                Log.d(TAG, getLogPrefix() + " LEFT released");
                 MainActivity.nativeOnRemoteKey(KeyEvent.KEYCODE_DPAD_LEFT, false);
             }
         }
@@ -211,7 +240,7 @@ public class RemoteController {
         if (pressed) {
             if (!rightPressed) {
                 rightPressed = true;
-                Log.d(TAG, "[Remote 遥控器!!] RIGHT pressed");
+                Log.d(TAG, getLogPrefix() + " RIGHT pressed");
                 MainActivity.nativeOnRemoteKey(KeyEvent.KEYCODE_DPAD_RIGHT, true);
             }
             
@@ -219,13 +248,13 @@ public class RemoteController {
             if (leftPressed) {
                 leftPressed = false;
                 MainActivity.nativeOnRemoteKey(KeyEvent.KEYCODE_DPAD_LEFT, false);
-                Log.d(TAG, "[Remote 遥控器!!] LEFT cancelled by RIGHT");
+                Log.d(TAG, getLogPrefix() + " LEFT cancelled by RIGHT");
             }
         } else {
             // 立即释放，不再延迟
             if (rightPressed) {
                 rightPressed = false;
-                Log.d(TAG, "[Remote 遥控器!!] RIGHT released");
+                Log.d(TAG, getLogPrefix() + " RIGHT released");
                 MainActivity.nativeOnRemoteKey(KeyEvent.KEYCODE_DPAD_RIGHT, false);
             }
         }
@@ -235,7 +264,7 @@ public class RemoteController {
      * 处理OK键
      */
     private void handleOkKey(boolean pressed) {
-        Log.d(TAG, "[Remote 遥控器!!] OK pressed=" + pressed);
+        Log.d(TAG, getLogPrefix() + " OK pressed=" + pressed);
         MainActivity.nativeOnRemoteKey(KeyEvent.KEYCODE_DPAD_CENTER, pressed);
     }
     
@@ -243,7 +272,7 @@ public class RemoteController {
      * 处理返回键
      */
     private void handleBackKey(boolean pressed) {
-        Log.d(TAG, "[Remote 遥控器!!] BACK pressed=" + pressed);
+        Log.d(TAG, getLogPrefix() + " BACK pressed=" + pressed);
         MainActivity.nativeOnRemoteKey(KeyEvent.KEYCODE_BACK, pressed);
     }
     
@@ -300,6 +329,6 @@ public class RemoteController {
             MainActivity.nativeOnRemoteKey(KeyEvent.KEYCODE_BUTTON_B, false);
         }
         
-        Log.i(TAG, "[Remote 遥控器!!] 所有按键已释放");
+        Log.i(TAG, getLogPrefix() + " 所有按键已释放");
     }
 }

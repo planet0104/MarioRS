@@ -8,39 +8,22 @@ MarioRS Android 构建脚本
   4. 调用 Gradle 生成 APK
 
 渲染模式:
-  GPU版本 (默认):
-    - 使用 wgpu 进行 GPU 加速渲染
-    - 需要 Vulkan 或 OpenGL ES 3.0+ 支持
-    - 适用于 Android 7.0+ 设备
-    - 性能更好，画面更流畅
-
-  CPU版本 (-Cpu):
-    - 使用软件渲染，通过 ANativeWindow 直接写入像素
-    - 无需 GPU 支持，兼容老旧设备
-    - 适用于 Android 5.0+ 的老旧设备
-    - 适用于不支持 Vulkan/OpenGL ES 3.0 的设备
+  自动模式 (GPU + CPU fallback):
+    - 优先使用 Vulkan GPU 加速渲染
+    - GPU 不可用时自动切换到 CPU 软件渲染
+    - 兼容所有 Android 5.0+ 设备
 
 使用方法:
-  GPU版本 (默认，需要现代 GPU):
     .\build_android.ps1                       # Debug APK (仅 arm64)
     .\build_android.ps1 -Release              # Release APK (仅 arm64)
     .\build_android.ps1 -Release -AllArch     # Release APK (全架构)
-
-  CPU版本 (老旧设备兼容):
-    .\build_android.ps1 -Cpu                  # Debug APK (仅 arm64, CPU软件渲染)
-    .\build_android.ps1 -Release -Cpu         # Release APK (仅 arm64, CPU软件渲染)
-    .\build_android.ps1 -Release -Cpu -AllArch  # Release APK (全架构, CPU软件渲染)
-
-  其他选项:
     .\build_android.ps1 -Release -SeparateApks  # 构建三个独立 APK (每个架构一个)
-    .\build_android.ps1 -SkipRust               # 仅构建 APK (跳过 Rust 编译)
-    .\build_android.ps1 -Help                   # 显示帮助信息
+    .\build_android.ps1 -SkipRust             # 仅构建 APK (跳过 Rust 编译)
+    .\build_android.ps1 -Help                 # 显示帮助信息
 
 输出文件:
-  dist\android\app-release-arm64.apk        # GPU版本 (arm64)
-  dist\android\app-release-arm64-cpu.apk    # CPU版本 (arm64)
-  dist\android\app-release-universal.apk    # GPU版本 (全架构)
-  dist\android\app-release-universal-cpu.apk  # CPU版本 (全架构)
+  dist\android\app-release-arm64.apk        # arm64 版本
+  dist\android\app-release-universal.apk    # 全架构版本
 
 环境要求:
   - Rust 工具链
@@ -54,7 +37,6 @@ param(
     [switch]$AllArch,
     [switch]$SeparateApks,
     [switch]$SkipRust,
-    [switch]$Cpu,       # 使用CPU软件渲染（老旧设备兼容）
     [switch]$Help
 )
 
@@ -69,13 +51,7 @@ if ($Help) {
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  MarioRS Android Build Script" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
-
-# 显示渲染模式
-if ($Cpu) {
-    Write-Host "  Render Mode: CPU Software (老旧设备兼容)" -ForegroundColor Yellow
-} else {
-    Write-Host "  Render Mode: GPU Accelerated (wgpu)" -ForegroundColor Green
-}
+Write-Host "  Render Mode: GPU + CPU auto-fallback" -ForegroundColor Green
 
 # ============================================================================
 # 环境检查
@@ -220,15 +196,12 @@ $libcppMappings = @{
 }
 $sysroot = "$ndkHome\toolchains\llvm\prebuilt\windows-x86_64\sysroot\usr\lib"
 
-# 根据 -Cpu 参数选择 feature
-$androidFeature = if ($Cpu) { "android-cpu" } else { "android" }
-
 # 编译单个架构的 Rust 代码
 function Build-RustArch {
     param([string]$arch)
     
-    Write-Host "  Compiling for $arch (feature: $androidFeature)..." -ForegroundColor Gray
-    cargo ndk -t $arch -o $jniLibsDir build --no-default-features --features $androidFeature $buildType
+    Write-Host "  Compiling for $arch (feature: android)..." -ForegroundColor Gray
+    cargo ndk -t $arch -o $jniLibsDir build --no-default-features --features android $buildType
     if ($LASTEXITCODE -ne 0) {
         Write-Host "  Error: $arch build failed" -ForegroundColor Red
         return $false
@@ -406,11 +379,10 @@ if ($SeparateApks) {
     $srcApk = Join-Path $gradleApkDir "$apkBaseName.apk"
     
     # 确定输出文件名
-    $cpuSuffix = if ($Cpu) { "-cpu" } else { "" }
     if ($AllArch) {
-        $dstApkName = "$apkBaseName-universal$cpuSuffix.apk"
+        $dstApkName = "$apkBaseName-universal.apk"
     } else {
-        $dstApkName = "$apkBaseName-arm64$cpuSuffix.apk"
+        $dstApkName = "$apkBaseName-arm64.apk"
     }
     $dstApk = Join-Path $distDir $dstApkName
 
@@ -423,6 +395,10 @@ if ($SeparateApks) {
         Write-Host "========================================" -ForegroundColor Green
         Write-Host "  Output: $dstApk"
         Write-Host "  Size: $sizeMB MB"
+        Write-Host ""
+        Write-Host "  Render mode: GPU (Vulkan) with CPU auto-fallback" -ForegroundColor Cyan
+        Write-Host "  - Uses Vulkan GPU acceleration when available"
+        Write-Host "  - Automatically falls back to CPU rendering if GPU fails"
         Write-Host ""
         Write-Host "  To install on device:" -ForegroundColor Cyan
         Write-Host "    adb install -r `"$dstApk`"" -ForegroundColor Gray
