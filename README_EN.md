@@ -16,6 +16,9 @@ A Rust port of Mike Wiering's Turbo Pascal Mario clone game.
 - **Dual rendering backend architecture**:
   - **wgpu GPU rendering** (default): Cross-platform hardware acceleration with Vulkan/Metal/DirectX 12
   - **CPU software rendering**: Pure software rendering for legacy systems like Windows XP
+- **Gamepad Support**: USB/Bluetooth gamepad support on Windows and Android platforms
+- **Android TV Remote Support**: Control the game using Android TV remote
+- **Android GPU Auto-Fallback**: Automatic fallback to CPU rendering when GPU initialization fails
 - Windows 7/XP compatible version (using CPU backend + YY-Thunks)
 - Android native support (touch screen virtual buttons)
 - Window scaling and fullscreen support
@@ -23,7 +26,7 @@ A Rust port of Mike Wiering's Turbo Pascal Mario clone game.
 
 ## Controls
 
-### Game Keys
+### Keyboard Controls
 
 | Key | Action |
 |-----|--------|
@@ -42,6 +45,41 @@ A Rust port of Mike Wiering's Turbo Pascal Mario clone game.
 | `S` | Toggle status bar |
 | `F11` | Toggle fullscreen/windowed mode |
 | `ESC` | Exit fullscreen / Quit game / Back to menu |
+
+### Gamepad Controls
+
+Supports USB/Bluetooth gamepads on Windows and Android. Gamepad is auto-detected when connected.
+
+| Button | Action |
+|--------|--------|
+| Left Stick/D-Pad | Direction movement |
+| A / B | Jump |
+| LB / RB | Run/Accelerate |
+| X | Shoot fireball |
+| START | Start/Pause |
+| SELECT | Back |
+
+**Button Mapping:**
+- **Jump**: A or B button
+- **Run/Sprint**: LB or RB shoulder button
+- **Fire**: X button
+
+### Android TV Remote Controls
+
+Supports Android TV remote control for playing on TV.
+
+| Key | Action |
+|-----|--------|
+| Up | Menu up / Jump |
+| Down | Menu down / Enter pipe / Fire |
+| Left | Move left |
+| Right | Move right |
+| OK (Center) | Menu confirm / Jump |
+| Back | Return to previous menu |
+
+**Remote Features:**
+- **Auto-Sprint Mode**: Automatically enables running when remote is detected
+- **Extended Air Time**: Longer hang time in the air for easier single-button control
 
 ### Android Touch Controls
 
@@ -72,6 +110,10 @@ The Android version uses native Android buttons for the virtual control interfac
 **Layout Edit Mode**: Tap the E button in the top right corner to enter edit mode. You can drag virtual buttons to adjust their positions. Tap the E button again to exit and save the layout.
 
 **Virtual Keyboard**: Tap the KB button to open the virtual keyboard panel for entering cheat codes. The keyboard panel can be dragged to adjust its position.
+
+**Input Device Auto-Switch**:
+- Virtual buttons are automatically hidden when gamepad or remote input is detected
+- Gamepad and remote can be used simultaneously with touch controls
 
 ### Menu Structure
 
@@ -233,6 +275,7 @@ MarioRS/
 │   ├── players.rs        # Player behavior (Mario/Luigi)
 │   ├── enemies.rs        # Enemy system
 │   ├── figures.rs        # Game object behavior
+│   ├── joystick.rs       # Joystick/gamepad state manager
 │   ├── renderer.rs       # Unified rendering pipeline
 │   ├── render_state.rs   # Render state management
 │   ├── backgr.rs         # Background drawing
@@ -274,7 +317,10 @@ MarioRS/
 │       ├── windows.rs    # Windows wgpu + GDI backend
 │       ├── windows_cpu.rs # Windows CPU software rendering backend (XP compatible)
 │       ├── desktop.rs    # Cross-platform wgpu backend (Linux/macOS)
-│       ├── android.rs    # Android native backend (JNI button events)
+│       ├── android.rs    # Android native backend (JNI + GPU/CPU auto-fallback)
+│       ├── joystick_win.rs     # Windows gamepad backend (winmm.dll)
+│       ├── joystick_android.rs # Android gamepad backend (USB/Bluetooth)
+│       ├── joystick_android_tv.rs # Android TV remote backend
 │       ├── common/       # Common platform implementations
 │       │   ├── frame_timer.rs # Frame rate control
 │       │   ├── input.rs      # Input handling
@@ -290,7 +336,10 @@ MarioRS/
 │   ├── app/
 │   │   ├── src/main/
 │   │   │   ├── java/com/mariogame/mario/
-│   │   │   │   └── MainActivity.java  # Native button overlay
+│   │   │   │   ├── MainActivity.java     # Main activity + JNI interface
+│   │   │   │   ├── GamepadController.java # Gamepad controller
+│   │   │   │   ├── RemoteController.java  # TV remote controller
+│   │   │   │   └── VirtualController.java # Virtual button controller
 │   │   │   ├── res/
 │   │   │   │   ├── layout/       # Button layout XML
 │   │   │   │   ├── drawable/     # Button background resources
@@ -324,9 +373,19 @@ MarioRS uses a dual rendering backend architecture, supporting both modern GPU-a
 ### CPU Software Rendering Backend
 
 - Pure CPU software rendering with no GPU dependencies
-- Displays framebuffer via Windows GDI StretchDIBits
-- Compatible with legacy systems like Windows XP that don't support modern graphics APIs
+- Windows: Displays framebuffer via GDI StretchDIBits
+- Android: Direct framebuffer write via ANativeWindow API
+- Compatible with legacy systems (Windows XP, Android devices without Vulkan)
 - Supports indexed color sprites, palettes, flipping, transparency, and other effects
+
+### Android GPU Auto-Fallback
+
+Android platform uses a smart rendering strategy:
+
+- Prioritizes Vulkan GPU rendering
+- Automatically falls back to CPU software rendering when GPU initialization fails
+- Ensures compatibility across various Android devices
+- Integer scaling for pixel-perfect display
 
 ## Build Options
 
@@ -335,7 +394,8 @@ MarioRS uses a dual rendering backend architecture, supporting both modern GPU-a
 | `wgpu-backend` | wgpu GPU hardware-accelerated rendering | Windows/Linux/macOS/Android |
 | `cpu-backend` | CPU software rendering (XP compatible) | Windows |
 | `gdi-backend` | Windows GDI window creation | Windows |
-| `android` | Android native rendering (with native buttons) | Android |
+| `android` | Android native rendering (GPU + CPU auto-fallback) | Android |
+| `touch-panel` | Touch control panel | Android |
 | `dark-theme` | Dark theme adaptation | Windows 10+ |
 
 **Default**: `wgpu-backend` + `dark-theme`
@@ -347,18 +407,33 @@ MarioRS uses a dual rendering backend architecture, supporting both modern GPU-a
 | Windows Modern (Recommended) | `wgpu-backend`, `gdi-backend`, `dark-theme` | GPU rendering + GDI window |
 | Windows XP Compatible | `cpu-backend` | CPU software rendering + GDI window |
 | Linux/macOS | `wgpu-backend` | GPU rendering + winit window |
-| Android | `android` | Auto-enables `wgpu-backend` + native button overlay |
+| Android | `android` | GPU rendering + CPU fallback + Gamepad/Remote support |
 
 ## Platform Support
 
-| Platform | Rendering Backend | Audio Backend | Minimum Version |
-|----------|-------------------|---------------|-----------------|
-| Windows 10/11 | wgpu (GPU) | WaveOut | Default support |
-| Windows 7/8 | CPU software rendering + YY-Thunks | WaveOut | Use compatible version |
-| Windows XP | CPU software rendering + YY-Thunks | WaveOut | Use compatible version |
-| Linux | wgpu (GPU) | cpal | Default support |
-| macOS | wgpu (GPU) | cpal | Default support |
-| Android | wgpu (GPU) | cpal | Requires android feature |
+| Platform | Rendering Backend | Audio Backend | Input Devices | Minimum Version |
+|----------|-------------------|---------------|---------------|-----------------|
+| Windows 10/11 | wgpu (GPU) | WaveOut | Keyboard + Gamepad | Default support |
+| Windows 7/8 | CPU software rendering + YY-Thunks | WaveOut | Keyboard + Gamepad | Use compatible version |
+| Windows XP | CPU software rendering + YY-Thunks | WaveOut | Keyboard + Gamepad | Use compatible version |
+| Linux | wgpu (GPU) | cpal | Keyboard | Default support |
+| macOS | wgpu (GPU) | cpal | Keyboard | Default support |
+| Android | wgpu (GPU) + CPU Fallback | cpal | Touch + Gamepad + Remote | API 24+ |
+| Android TV | wgpu (GPU) + CPU Fallback | cpal | Remote + Gamepad | API 24+ |
+
+### Gamepad Support Details
+
+| Platform | Backend | Supported Gamepads |
+|----------|---------|-------------------|
+| Windows | winmm.dll (Multimedia API) | Any USB/Bluetooth gamepad visible in joy.cpl |
+| Android | Java InputDevice API | USB/Bluetooth gamepads |
+
+### Android TV Remote Support Details
+
+- Separate remote handling module, isolated from gamepad logic
+- Detects real TV remote via DPAD_CENTER (OK key)
+- Auto-sprint mode for single-hand operation
+- Extended air time for precise control
 
 ## Levels
 

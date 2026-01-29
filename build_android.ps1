@@ -7,12 +7,23 @@ MarioRS Android 构建脚本
   3. 复制 .so 文件到 android/app/src/main/jniLibs/
   4. 调用 Gradle 生成 APK
 
+渲染模式:
+  自动模式 (GPU + CPU fallback):
+    - 优先使用 Vulkan GPU 加速渲染
+    - GPU 不可用时自动切换到 CPU 软件渲染
+    - 兼容所有 Android 5.0+ 设备
+
 使用方法:
-  .\build_android.ps1              # 构建 Debug APK (仅 arm64)
-  .\build_android.ps1 -Release     # 构建 Release APK (仅 arm64)
-  .\build_android.ps1 -Release -AllArch     # 构建所有架构合并的 APK (arm64, armv7, x86_64)
-  .\build_android.ps1 -Release -SeparateApks # 构建三个独立 APK (每个架构一个)
-  .\build_android.ps1 -SkipRust    # 仅构建 APK (跳过 Rust 编译)
+    .\build_android.ps1                       # Debug APK (仅 arm64)
+    .\build_android.ps1 -Release              # Release APK (仅 arm64)
+    .\build_android.ps1 -Release -AllArch     # Release APK (全架构)
+    .\build_android.ps1 -Release -SeparateApks  # 构建三个独立 APK (每个架构一个)
+    .\build_android.ps1 -SkipRust             # 仅构建 APK (跳过 Rust 编译)
+    .\build_android.ps1 -Help                 # 显示帮助信息
+
+输出文件:
+  dist\android\app-release-arm64.apk        # arm64 版本
+  dist\android\app-release-universal.apk    # 全架构版本
 
 环境要求:
   - Rust 工具链
@@ -40,6 +51,7 @@ if ($Help) {
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  MarioRS Android Build Script" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
+Write-Host "  Render Mode: GPU + CPU auto-fallback" -ForegroundColor Green
 
 # ============================================================================
 # 环境检查
@@ -188,7 +200,7 @@ $sysroot = "$ndkHome\toolchains\llvm\prebuilt\windows-x86_64\sysroot\usr\lib"
 function Build-RustArch {
     param([string]$arch)
     
-    Write-Host "  Compiling for $arch..." -ForegroundColor Gray
+    Write-Host "  Compiling for $arch (feature: android)..." -ForegroundColor Gray
     cargo ndk -t $arch -o $jniLibsDir build --no-default-features --features android $buildType
     if ($LASTEXITCODE -ne 0) {
         Write-Host "  Error: $arch build failed" -ForegroundColor Red
@@ -383,6 +395,10 @@ if ($SeparateApks) {
         Write-Host "========================================" -ForegroundColor Green
         Write-Host "  Output: $dstApk"
         Write-Host "  Size: $sizeMB MB"
+        Write-Host ""
+        Write-Host "  Render mode: GPU (Vulkan) with CPU auto-fallback" -ForegroundColor Cyan
+        Write-Host "  - Uses Vulkan GPU acceleration when available"
+        Write-Host "  - Automatically falls back to CPU rendering if GPU fails"
         Write-Host ""
         Write-Host "  To install on device:" -ForegroundColor Cyan
         Write-Host "    adb install -r `"$dstApk`"" -ForegroundColor Gray

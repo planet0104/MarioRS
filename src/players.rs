@@ -34,6 +34,8 @@ pub const SCROLL_AT: i32 = 112;
 pub const JUMP_VEL: i32 = 4;
 pub const JUMP_DELAY: i32 = 6;
 pub const MAX_Y_VEL: i32 = JUMP_VEL * 2;
+/// TV遥控器模式下的跳跃延迟(增加空中停留时间)
+pub const TV_REMOTE_JUMP_DELAY: i32 = 14;
 pub const SLIP: i32 = 6;
 pub const BLINK_TIME: i32 = 125;
 pub const STAR_TIME: i32 = 750;
@@ -103,8 +105,10 @@ pub struct Players {
     pub below2: u8,
     /// Alt 按下边沿锁存（避免快速点击发生在两帧之间被轮询错过）
     pub alt_pressed_once: bool,
-    /// 跳跃按住锁：一旦在跳跃过程中松开跳跃键，则本次跳跃不再允许重新按住恢复大跳效�?
+    /// 跳跃按住锁：一旦在跳跃过程中松开跳跃键，则本次跳跃不再允许重新按住恢复大跳效果
     pub jump_hold_cancelled: bool,
+    /// TV遥控器模式：降低重力增加空中停留时间，便于单键操作
+    pub tv_remote_mode: bool,
 }
 
 impl Players {
@@ -159,6 +163,7 @@ impl Players {
             below2: 0,
             alt_pressed_once: false,
             jump_hold_cancelled: false,
+            tv_remote_mode: false,
         }
     }
 
@@ -928,7 +933,9 @@ impl Players {
                 ),
                 _ => {}
             }
-            if (self.counter as i32 % JUMP_DELAY) == 0 {
+            // TV遥控器模式下降低重力，增加空中停留时间
+            let fall_delay = if self.tv_remote_mode { TV_REMOTE_JUMP_DELAY } else { JUMP_DELAY };
+            if (self.counter as i32 % fall_delay) == 0 {
                 self.y_vel += 1;
             }
             if self.y_vel > MAX_Y_VEL {
@@ -1235,7 +1242,9 @@ impl Players {
                         ),
                         _ => {}
                     }
-                    if (self.counter as i32 % (JUMP_DELAY + if self.high_jump { 1 } else { 0 })
+                    // TV遥控器模式下降低重力，增加空中停留时间
+                    let base_delay = if self.tv_remote_mode { TV_REMOTE_JUMP_DELAY } else { JUMP_DELAY };
+                    if (self.counter as i32 % (base_delay + if self.high_jump { 1 } else { 0 })
                         == 0)
                         || (!key_hold && !self.hit_enemy)
                     {

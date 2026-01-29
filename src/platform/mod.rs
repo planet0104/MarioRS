@@ -18,6 +18,18 @@
 pub mod audio;
 pub mod common;
 
+// Windows 手柄支持 (使用 winmm.dll)
+#[cfg(target_os = "windows")]
+pub mod joystick_win;
+
+// Android TV 遥控器支持
+#[cfg(target_os = "android")]
+pub mod joystick_android_tv;
+
+// Android 手柄支持 (USB/蓝牙手柄)
+#[cfg(target_os = "android")]
+pub mod joystick_android;
+
 // Windows GDI + wgpu 后端（需要同时启用 gdi-backend 和 wgpu-backend）
 #[cfg(all(target_os = "windows", feature = "gdi-backend", feature = "wgpu-backend", not(feature = "cpu-backend")))]
 mod windows;
@@ -30,6 +42,7 @@ mod windows_cpu;
 mod desktop;
 
 // Android 后端（需要 wgpu-backend）
+// GPU 渲染 + CPU 自动 fallback (全部在 android.rs 中实现)
 #[cfg(all(target_os = "android", feature = "wgpu-backend"))]
 mod android;
 
@@ -364,7 +377,9 @@ pub use self::desktop::{
     random_u8, random_u32, random_usize, run_game,
 };
 
-// Android 后端（需要 wgpu-backend）
+// Android 后端 (GPU + CPU 自动 fallback)
+// 主入口从 android.rs 导出
+// GPU 初始化失败时自动切换到 android_cpu.rs 的 CPU 渲染
 #[cfg(all(target_os = "android", feature = "wgpu-backend"))]
 pub use self::android::{
     DesktopAudio, DesktopDisplay, DesktopInput, DesktopLog, DesktopRandom, DesktopStorage,

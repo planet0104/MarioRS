@@ -11,6 +11,7 @@ use super::{
     LogBackend, LogLevel,
 };
 use crate::gpu::GpuRenderer;
+use crate::status::RenderMode;
 
 use std::sync::Arc;
 
@@ -590,8 +591,9 @@ impl ApplicationHandler for GameApp {
                 let frame_start = std::time::Instant::now();
 
                 if let Some(state) = &mut self.game_state {
-                    // 设置FPS显示数据（内置到游戏状态栏）
+                    // 设置FPS和渲染模式显示
                     state.set_fps_display(self.fps_counter.fps(), self.fps_counter.frame_time_ms());
+                    state.set_render_mode(RenderMode::GPU);
 
                     let result = state.frame_update();
 

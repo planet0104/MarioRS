@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- IDs for programmatically created controls -->
+    <item type="id" name="btn_keyboard" />
+    <item type="id" name="btn_hide" />
+</resources>

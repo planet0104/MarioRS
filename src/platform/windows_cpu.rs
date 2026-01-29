@@ -15,6 +15,7 @@ use super::common::{CommonTime, FileStorage, FpsCounter, FrameTimer};
 use super::{DisplayBackend, FrameResult, InputBackend, KeyCode, KeyEvent, LogBackend, LogLevel};
 use crate::cpu::CpuRenderer;
 use crate::game_runner::{GAME_HEIGHT, GAME_WIDTH, GameState};
+use crate::status::RenderMode;
 
 use std::mem::zeroed;
 use std::ptr::null_mut;
@@ -590,8 +591,9 @@ pub fn run_game() -> std::result::Result<(), Box<dyn std::error::Error>> {
             let frame_start = std::time::Instant::now();
 
             if let Some(state) = GAME_STATE.as_mut() {
-                // 设置FPS显示数据
+                // 设置FPS和渲染模式显示
                 state.set_fps_display(fps_counter.fps(), fps_counter.frame_time_ms());
+                state.set_render_mode(RenderMode::CPU);
 
                 let result = state.frame_update();
 

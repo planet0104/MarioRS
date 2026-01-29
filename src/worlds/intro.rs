@@ -141,6 +141,23 @@ pub struct Intro {
     intro_map: Option<MapBuffer>,
     intro_opt: WorldOptions,
     started: bool,
+
+    // 手柄菜单导航状态 (防抖动)
+    js_last_up: bool,
+    js_last_down: bool,
+    js_last_button: bool,
+    js_last_back: bool,
+
+    // TV遥控器菜单导航状态 (防抖动)
+    tv_last_up: bool,
+    tv_last_down: bool,
+    tv_last_ok: bool,
+    tv_last_back: bool,
+
+    // FPS显示数据（仅Intro界面显示）
+    fps: u32,
+    frame_time_ms: f32,
+    render_mode: crate::status::RenderMode,
 }
 
 use crate::mario::{ConfigData, IntroResult};
@@ -187,7 +204,32 @@ impl Intro {
             intro_map: None,
             intro_opt: INTRO_0_OPTIONS,
             started: false,
+            // 手柄防抖状态
+            js_last_up: false,
+            js_last_down: false,
+            js_last_button: false,
+            js_last_back: false,
+            // TV遥控器防抖状态
+            tv_last_up: false,
+            tv_last_down: false,
+            tv_last_ok: false,
+            tv_last_back: false,
+            // FPS显示数据
+            fps: 0,
+            frame_time_ms: 0.0,
+            render_mode: crate::status::RenderMode::GPU,
         }
+    }
+
+    /// 设置FPS显示数据（由平台层调用）
+    pub fn set_fps(&mut self, fps: u32, frame_time_ms: f32) {
+        self.fps = fps;
+        self.frame_time_ms = frame_time_ms;
+    }
+
+    /// 设置渲染模式
+    pub fn set_render_mode(&mut self, mode: crate::status::RenderMode) {
+        self.render_mode = mode;
     }
 
     /// 启动Intro（由mario.rs调用）
@@ -259,7 +301,7 @@ impl Intro {
         sprites: &mut SpriteDataManager,
         atlas: &mut crate::sprites::SpriteAtlas,
         keyboard: &mut Keyboard,
-        _joystick: &mut crate::joystick::JoystickState,
+        joystick: &mut crate::joystick::JoystickState,
         play: &mut Play,
         config: &mut ConfigData,
         game_number: &mut i32,
@@ -602,6 +644,132 @@ impl Intro {
                     keyboard.clear_key();
                 }
 
+                // 处理手柄输入 (菜单导航)
+                // 按钮映射 (与 Windows 手柄一致):
+                // - A/START: 确认 (Enter)
+                // - SELECT/B: 返回 (ESC) - B键在子菜单中作为返回
+                // - 方向键: 菜单导航
+                joystick.read();
+                if joystick.detected {
+                    // 方向上 (边沿触发，防止连续触发)
+                    if joystick.up && !self.js_last_up {
+                        self.up();
+                        if self.macro_key == '\x1B' {
+                            self.status = self.last_status;
+                        }
+                        self.macro_key = 'U';
+                    }
+                    // 方向下
+                    if joystick.down && !self.js_last_down {
+                        self.down();
+                        if self.macro_key == '\x1B' {
+                            self.status = self.last_status;
+                        }
+                        self.macro_key = 'D';
+                    }
+                    
+                    // 确认按钮: A / START (不包括B，B用于返回)
+                    let confirm_pressed = joystick.button_a || joystick.button_start;
+                    if confirm_pressed && !self.js_last_button {
+                        // 模拟 Enter 键 (scan_code = 28)
+                        self.handle_keyboard_input(
+                            28,
+                            buffers,
+                            game_number,
+                            &mut quit_game,
+                            play,
+                            music,
+                            config,
+                            cur_player as usize,
+                        );
+                    }
+                    
+                    // 返回按钮: SELECT 或 B (在子菜单中)
+                    // SELECT: 总是作为返回/ESC
+                    // B: 在子菜单中作为返回，在主菜单中不退出游戏
+                    let back_pressed = joystick.button_select || 
+                        (joystick.button_b && self.status != IntroStatus::Menu);
+                    if back_pressed && !self.js_last_back {
+                        // 模拟 ESC 键 (scan_code = 1)
+                        self.handle_keyboard_input(
+                            1,
+                            buffers,
+                            game_number,
+                            &mut quit_game,
+                            play,
+                            music,
+                            config,
+                            cur_player as usize,
+                        );
+                    }
+                    
+                    // 更新防抖状态
+                    self.js_last_up = joystick.up;
+                    self.js_last_down = joystick.down;
+                    self.js_last_button = confirm_pressed;
+                    self.js_last_back = back_pressed;
+                }
+
+                // 处理 TV 遥控器输入 (Android TV)
+                #[cfg(target_os = "android")]
+                {
+                    let tv = crate::platform::joystick_android_tv::read_tv_remote_state();
+                    if tv.detected {
+                        // 方向上 (边沿触发)
+                        if tv.up && !self.tv_last_up {
+                            self.up();
+                            if self.macro_key == '\x1B' {
+                                self.status = self.last_status;
+                            }
+                            self.macro_key = 'U';
+                        }
+                        // 方向下
+                        if tv.down && !self.tv_last_down {
+                            self.down();
+                            if self.macro_key == '\x1B' {
+                                self.status = self.last_status;
+                            }
+                            self.macro_key = 'D';
+                        }
+                        
+                        // OK键确认
+                        if tv.ok && !self.tv_last_ok {
+                            // 模拟 Enter 键 (scan_code = 28)
+                            self.handle_keyboard_input(
+                                28,
+                                buffers,
+                                game_number,
+                                &mut quit_game,
+                                play,
+                                music,
+                                config,
+                                cur_player as usize,
+                            );
+                        }
+                        
+                        // 返回键
+                        if tv.back && !self.tv_last_back {
+                            // 模拟 ESC 键 (scan_code = 1)
+                            self.handle_keyboard_input(
+                                1,
+                                buffers,
+                                game_number,
+                                &mut quit_game,
+                                play,
+                                music,
+                                config,
+                                cur_player as usize,
+                            );
+                        }
+                        
+                        // 更新防抖状态
+                        self.tv_last_up = tv.up;
+                        self.tv_last_down = tv.down;
+                        self.tv_last_ok = tv.ok;
+                        self.tv_last_back = tv.back;
+                    }
+                }
+
                 if self.macro_key != '\0' {
                     self.counter = 0;
                     self.update = true;
@@ -814,6 +982,43 @@ impl Intro {
         commands
     }
 
+    /// 渲染FPS信息（仅Intro界面显示）
+    fn collect_fps_commands(
+        &self,
+        txt: &mut Txt,
+        palette_index: u32,
+    ) -> Vec<crate::gpu::RenderCommand> {
+        use crate::txt::FontStyle;
+
+        let mut commands = Vec::new();
+        if self.fps > 0 {
+            // 使用粗体+阴影，在浅色砖块上更清晰
+            txt.set_font(0, FontStyle::BOLD | FontStyle::SHADOW);
+            // 显示格式: "GPU 60FPS 1.5MS" 或 "CPU 30FPS 5.2MS"
+            let render_mode_text = if self.render_mode == crate::status::RenderMode::CPU {
+                "CPU"
+            } else {
+                "GPU"
+            };
+            let fps_text = format!(
+                "{} {}FPS {:.1}MS",
+                render_mode_text,
+                self.fps,
+                self.frame_time_ms
+            );
+            let text_width = txt.text_width(&fps_text) as i32;
+            txt.write_text_ui_gpu(
+                &mut commands,
+                345 - text_width,
+                171,
+                &fps_text,
+                31,
+                palette_index,
+            );
+        }
+        commands
+    }
+
     fn draw_intro_screen(
         &mut self,
         render_state: &mut RenderState,
@@ -867,6 +1072,21 @@ impl Intro {
         // 原版 最后 DrawPlayer，GPU 这里再绘制一次以保证层级一致
         for p in players.collect_player_sprites_gpu(buffers, atlas, palette_index, enemies.star) {
             batch.push_sprite(p);
+        }
+
+        // Intro界面显示FPS信息（右下角）
+        for cmd in self.collect_fps_commands(txt, palette_index) {
+            if let crate::gpu::RenderCommand::UIFillRect(r) = cmd {
+                let fill = crate::gpu::sprite_batch::FillCommand {
+                    x: r.position[0],
+                    y: r.position[1],
+                    width: r.size[0],
+                    height: r.size[1],
+                    color_index: r.color_index as u8,
+                    palette_index: r.palette_index as u32,
+                };
+                batch.push_ui_fill(fill);
+            }
         }
     }
 
@@ -999,8 +1219,8 @@ impl Intro {
 
         let _ = cur_player;
         match scan_code {
-            1 | 75 => {
-                // ESC 或 Left Arrow - 返回上一级菜单
+            1 => {
+                // ESC - 返回上一级菜单或退出
                 if self.status == IntroStatus::Menu {
                     self.intro_done = true;
                     *quit_game = true;
@@ -1025,6 +1245,18 @@ impl Intro {
                     self.status = self.last_status;
                 }
                 self.macro_key = 'D';
+            }
+            75 | 203 => {
+                // Left Arrow - 在子菜单中返回上一级，在主菜单中不退出游戏
+                if self.status != IntroStatus::Menu {
+                    self.status = self.last_status;
+                    self.macro_key = '\x1B';
+                }
+                // 在主菜单中，Left Arrow 不触发任何操作，避免误触退出
+            }
+            77 | 205 => {
+                // Right Arrow - 相当于 Enter，进入子菜单
+                // 不做任何处理，让用户用 Enter/OK 键确认
             }
             28 | 56 | 57 => {
                 // Enter, Alt 或 Space - 菜单确认
@@ -1175,6 +1407,21 @@ impl Intro {
             for p in players.collect_player_sprites_gpu(buffers, atlas, palette_index, enemies.star)
             {
                 batch.push_sprite(p);
+            }
+
+            // Intro界面显示FPS信息（右下角）
+            for cmd in self.collect_fps_commands(txt, palette_index) {
+                if let crate::gpu::RenderCommand::UIFillRect(r) = cmd {
+                    let fill = crate::gpu::sprite_batch::FillCommand {
+                        x: r.position[0],
+                        y: r.position[1],
+                        width: r.size[0],
+                        height: r.size[1],
+                        color_index: r.color_index as u8,
+                        palette_index: r.palette_index as u32,
+                    };
+                    batch.push_ui_fill(fill);
+                }
             }
         }
 

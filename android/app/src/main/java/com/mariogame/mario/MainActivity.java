@@ -1,105 +1,69 @@
 package com.mariogame.mario;
 
-import android.content.Context;
-import android.content.SharedPreferences;
+import android.os.Build;
 import android.os.Bundle;
 import android.util.DisplayMetrics;
 import android.util.Log;
-import android.view.LayoutInflater;
+import android.view.InputDevice;
+import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
-import android.view.KeyEvent;
+import android.view.WindowInsets;
+import android.view.WindowInsetsController;
+import android.view.WindowManager;
 import android.widget.FrameLayout;
-import android.widget.TextView;
-import android.graphics.Color;
-import android.view.Gravity;
 
 import com.google.androidgamesdk.GameActivity;
+
 import com.mariogame.R;
 
 /**
  * 自定义 MainActivity
- * 继承 GameActivity, 添加原生按钮覆盖层解决多点触摸延迟问题
- * 自定义虚拟键盘面板用于输入作弊码
+ * 继承 GameActivity, 使用模块化的控制器来处理输入
+ * 
+ * 输入处理架构 (手柄与遥控器完全分离):
+ * - GamepadController: 处理USB/蓝牙手柄输入
+ * - RemoteController: 处理TV遥控器/键盘按键
+ * - VirtualController: 处理屏幕虚拟触摸按钮
+ * 
+ * 输入路由规则:
+ * - SOURCE_GAMEPAD/SOURCE_JOYSTICK -> GamepadController
+ * - 其他来源 (DPAD/键盘/遥控器) -> RemoteController
+ * - 手柄专用按键 (BUTTON_A等) -> GamepadController
+ * - 触摸事件 -> VirtualController
  */
 public class MainActivity extends GameActivity {
     private static final String TAG = "MarioRS";
-    private static final String PREFS_NAME = "MarioButtonLayout";
-    
-    // 按钮常量 (与 Rust 代码保持一致)
-    public static final int BTN_DPAD_LEFT = 1;
-    public static final int BTN_DPAD_RIGHT = 2;
-    public static final int BTN_DPAD_UP = 3;
-    public static final int BTN_DPAD_DOWN = 4;
-    public static final int BTN_A = 5;
-    public static final int BTN_B = 6;
-    public static final int BTN_X = 7;
-    public static final int BTN_Y = 8;
-    
-    // 虚拟键盘按键映射 (View ID -> KeyCode)
-    private static final int[][] VKBD_KEY_MAP = {
-        {R.id.vkbd_key_p, KeyEvent.KEYCODE_P},
-        {R.id.vkbd_key_tab, KeyEvent.KEYCODE_TAB},
-        {R.id.vkbd_key_0, KeyEvent.KEYCODE_0},
-        {R.id.vkbd_key_1, KeyEvent.KEYCODE_1},
-        {R.id.vkbd_key_2, KeyEvent.KEYCODE_2},
-        {R.id.vkbd_key_3, KeyEvent.KEYCODE_3},
-        {R.id.vkbd_key_4, KeyEvent.KEYCODE_4},
-        {R.id.vkbd_key_5, KeyEvent.KEYCODE_5},
-        {R.id.vkbd_key_6, KeyEvent.KEYCODE_6},
-        {R.id.vkbd_key_7, KeyEvent.KEYCODE_7},
-        {R.id.vkbd_key_8, KeyEvent.KEYCODE_8},
-        {R.id.vkbd_key_9, KeyEvent.KEYCODE_9},
-        {R.id.vkbd_key_a, KeyEvent.KEYCODE_A},
-        {R.id.vkbd_key_b, KeyEvent.KEYCODE_B},
-        {R.id.vkbd_key_c, KeyEvent.KEYCODE_C},
-        {R.id.vkbd_key_d, KeyEvent.KEYCODE_D},
-        {R.id.vkbd_key_e, KeyEvent.KEYCODE_E},
-        {R.id.vkbd_key_f, KeyEvent.KEYCODE_F},
-        {R.id.vkbd_key_ent, KeyEvent.KEYCODE_ENTER},
-    };
-    
-    // 按钮信息结构
-    private static class ButtonInfo {
-        View view;
-        int id;
-        int viewId;
-        int defaultX, defaultY;
-        int width, height;
-        int backgroundResId;
-        
-        ButtonInfo(int id, int viewId, int backgroundResId) {
-            this.id = id;
-            this.viewId = viewId;
-            this.backgroundResId = backgroundResId;
-        }
-    }
-    
-    // 所有游戏按钮
-    private ButtonInfo[] gameButtons;
-    // 功能按钮
-    private View btnEdit;
-    private TextView btnKeyboard;
-    private TextView btnHide;  // 隐藏/显示游戏按钮
-    private boolean gameButtonsVisible = true;  // 游戏按钮是否可见
-    // 虚拟键盘面板
-    private FrameLayout vkbdPanel;
-    private boolean vkbdVisible = false;
     
     // 屏幕尺寸
     private int screenWidth, screenHeight;
     
-    // 编辑模式
-    private boolean editMode = false;
+    // 控制器 (完全分离)
+    private VirtualController virtualController;
+    private RemoteController remoteController;
+    private GamepadController gamepadController;
     
     // Native 方法声明 - 由 Rust 实现
+    // 虚拟按钮事件 (屏幕触摸)
     public static native void nativeOnButtonEvent(int buttonId, boolean pressed);
+    
+    // 虚拟键盘按键事件
     public static native void nativeOnKeyEvent(int keyCode, boolean pressed);
+    
+    // 手柄专用JNI接口 (与遥控器分离)
+    public static native void nativeOnGamepadButton(int keyCode, boolean pressed);
+    public static native void nativeOnGamepadAxis(int axisId, float value);
+    
+    // 遥控器专用JNI接口 (与手柄分离)
+    public static native void nativeOnRemoteKey(int keyCode, boolean pressed);
     
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        
+        // 设置沉浸模式 - 隐藏状态栏和导航栏
+        enableImmersiveMode();
         
         // 获取屏幕尺寸
         DisplayMetrics metrics = new DisplayMetrics();
@@ -109,8 +73,88 @@ public class MainActivity extends GameActivity {
         
         Log.i(TAG, "Screen size: " + screenWidth + "x" + screenHeight);
         
-        // 延迟添加按钮层, 等待 GameActivity 的 SurfaceView 初始化完成
+        // 初始化控制器 (完全分离)
+        virtualController = new VirtualController(this, screenWidth, screenHeight);
+        remoteController = new RemoteController();
+        gamepadController = new GamepadController();
+        
+        // 设置遥控器回调 (检测到遥控器时隐藏虚拟按钮)
+        remoteController.setInputCallback(new RemoteController.InputCallback() {
+            @Override
+            public void onRemoteInputDetected() {
+                hideVirtualButtons();
+            }
+        });
+        
+        // 设置手柄回调 (检测到手柄时隐藏虚拟按钮)
+        gamepadController.setCallback(new GamepadController.GamepadCallback() {
+            @Override
+            public void onGamepadInputDetected() {
+                hideVirtualButtons();
+            }
+        });
+        
+        // 延迟添加按钮层
         getWindow().getDecorView().post(this::addButtonOverlay);
+    }
+    
+    /**
+     * 启用沉浸模式 - 隐藏状态栏和导航栏
+     * 确保游戏画面占满整个屏幕,不会被系统UI遮挡
+     */
+    private void enableImmersiveMode() {
+        View decorView = getWindow().getDecorView();
+        
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            // Android 11 (API 30) 及以上使用新API
+            getWindow().setDecorFitsSystemWindows(false);
+            WindowInsetsController controller = decorView.getWindowInsetsController();
+            if (controller != null) {
+                // 隐藏状态栏和导航栏
+                controller.hide(WindowInsets.Type.statusBars() | WindowInsets.Type.navigationBars());
+                // 设置沉浸模式行为: 从边缘滑动可以临时显示系统栏
+                controller.setSystemBarsBehavior(
+                    WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                );
+            }
+        } else {
+            // Android 10 及以下使用传统API
+            int uiOptions = View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                    | View.SYSTEM_UI_FLAG_FULLSCREEN
+                    | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                    | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                    | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                    | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION;
+            decorView.setSystemUiVisibility(uiOptions);
+        }
+        
+        // 允许窗口延伸到刘海屏区域
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            getWindow().getAttributes().layoutInDisplayCutoutMode = 
+                WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+        }
+        
+        Log.i(TAG, "Immersive mode enabled");
+    }
+    
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        // 窗口获得焦点时重新启用沉浸模式
+        if (hasFocus) {
+            enableImmersiveMode();
+        }
+    }
+    
+    /**
+     * 隐藏虚拟按钮
+     */
+    private void hideVirtualButtons() {
+        runOnUiThread(() -> {
+            if (virtualController != null) {
+                virtualController.hideGameButtons();
+            }
+        });
     }
     
     /**
@@ -122,468 +166,127 @@ public class MainActivity extends GameActivity {
             Log.e(TAG, "Content view not found");
             return;
         }
-        
-        // 从 XML 加载按钮布局
-        LayoutInflater inflater = LayoutInflater.from(this);
-        FrameLayout buttonLayer = (FrameLayout) inflater.inflate(R.layout.button_overlay, contentView, false);
-        
-        // 计算按钮尺寸 (基于屏幕高度)
-        int btnSize = screenHeight / 5;
-        int dpadSize = btnSize;
-        int margin = screenHeight / 20;
-        int spacing = btnSize / 8;
-        int smallBtnSize = btnSize / 2;
-        // 右侧额外边距 (避免被屏幕边缘遮挡)
-        int rightExtraMargin = screenWidth / 20;
-        
-        // D-Pad 中心位置
-        int dpadCenterX = margin + dpadSize;
-        int dpadCenterY = screenHeight - margin - dpadSize;
-        
-        // 右侧按钮中心位置 (增加额外边距)
-        int rightCenterX = screenWidth - margin - btnSize - rightExtraMargin;
-        int rightCenterY = screenHeight - margin - btnSize;
-        
-        // 初始化按钮信息 (只有 D-Pad 和 A/B/X/Y)
-        gameButtons = new ButtonInfo[] {
-            new ButtonInfo(BTN_DPAD_LEFT, R.id.btn_dpad_left, R.drawable.button_dpad),
-            new ButtonInfo(BTN_DPAD_RIGHT, R.id.btn_dpad_right, R.drawable.button_dpad),
-            new ButtonInfo(BTN_DPAD_UP, R.id.btn_dpad_up, R.drawable.button_dpad),
-            new ButtonInfo(BTN_DPAD_DOWN, R.id.btn_dpad_down, R.drawable.button_dpad),
-            new ButtonInfo(BTN_A, R.id.btn_a, R.drawable.button_a),
-            new ButtonInfo(BTN_B, R.id.btn_b, R.drawable.button_b),
-            new ButtonInfo(BTN_X, R.id.btn_x, R.drawable.button_x),
-            new ButtonInfo(BTN_Y, R.id.btn_y, R.drawable.button_y),
-        };
-        
-        // 计算默认位置
-        int[][] defaultPositions = {
-            {dpadCenterX - dpadSize, dpadCenterY - dpadSize/2, dpadSize, dpadSize},      // LEFT
-            {dpadCenterX, dpadCenterY - dpadSize/2, dpadSize, dpadSize},                  // RIGHT
-            {dpadCenterX - dpadSize/2, dpadCenterY - dpadSize, dpadSize, dpadSize},       // UP
-            {dpadCenterX - dpadSize/2, dpadCenterY, dpadSize, dpadSize},                  // DOWN
-            {rightCenterX, rightCenterY - btnSize/2, btnSize, btnSize},                   // A
-            {rightCenterX - btnSize/2 - spacing/2, rightCenterY + spacing, btnSize, btnSize}, // B
-            {rightCenterX - btnSize - spacing, rightCenterY - btnSize/2, btnSize, btnSize},   // X
-            {rightCenterX - btnSize/2 - spacing/2, rightCenterY - btnSize - spacing, btnSize, btnSize}, // Y
-        };
-        
-        // 加载保存的位置
-        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
-        
-        // 设置游戏按钮
-        for (int i = 0; i < gameButtons.length; i++) {
-            ButtonInfo info = gameButtons[i];
-            info.view = buttonLayer.findViewById(info.viewId);
-            
-            // 设置默认尺寸和位置
-            info.width = defaultPositions[i][2];
-            info.height = defaultPositions[i][3];
-            info.defaultX = prefs.getInt("btn_" + info.id + "_x", defaultPositions[i][0]);
-            info.defaultY = prefs.getInt("btn_" + info.id + "_y", defaultPositions[i][1]);
-            
-            // 应用布局参数
-            FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(info.width, info.height);
-            params.leftMargin = info.defaultX;
-            params.topMargin = info.defaultY;
-            info.view.setLayoutParams(params);
-            
-            // 设置触摸事件
-            final ButtonInfo finalInfo = info;
-            info.view.setOnTouchListener((v, event) -> {
-                if (editMode) {
-                    return handleEditTouch(finalInfo, v, event);
-                } else {
-                    return handleGameTouch(finalInfo.id, v, event);
-                }
-            });
+
+        View existing = contentView.findViewById(R.id.button_layer);
+        if (existing != null) {
+            Log.i(TAG, "Button overlay already present, skip adding");
+            return;
         }
-        
-        // 隐藏暂停按钮 (不再需要)
-        View btnPause = buttonLayer.findViewById(R.id.btn_pause);
-        if (btnPause != null) {
-            btnPause.setVisibility(View.GONE);
-        }
-        
-        // 隐藏作弊码按钮 (不再需要)
-        View btnCheat = buttonLayer.findViewById(R.id.btn_cheat);
-        if (btnCheat != null) {
-            btnCheat.setVisibility(View.GONE);
-        }
-        
-        // 设置编辑按钮 (增加右侧边距)
-        btnEdit = buttonLayer.findViewById(R.id.btn_edit);
-        FrameLayout.LayoutParams editParams = new FrameLayout.LayoutParams(smallBtnSize, smallBtnSize);
-        editParams.leftMargin = screenWidth - margin - smallBtnSize * 2 - spacing - rightExtraMargin;
-        editParams.topMargin = margin;
-        btnEdit.setLayoutParams(editParams);
-        btnEdit.setOnClickListener(v -> toggleEditMode());
-        
-        // 创建虚拟键盘按钮 (增加右侧边距, 使用 TextView 显示文字)
-        btnKeyboard = new TextView(this);
-        btnKeyboard.setBackgroundResource(R.drawable.button_keyboard);
-        btnKeyboard.setText("KB");
-        btnKeyboard.setTextColor(Color.WHITE);
-        btnKeyboard.setTextSize(12);
-        btnKeyboard.setGravity(Gravity.CENTER);
-        FrameLayout.LayoutParams kbParams = new FrameLayout.LayoutParams(smallBtnSize, smallBtnSize);
-        kbParams.leftMargin = screenWidth - margin - smallBtnSize - rightExtraMargin;
-        kbParams.topMargin = margin;
-        btnKeyboard.setLayoutParams(kbParams);
-        btnKeyboard.setOnClickListener(v -> toggleVirtualKeyboard());
-        buttonLayer.addView(btnKeyboard);
-        
-        // 创建隐藏/显示游戏按钮的按钮 (放在 E 按钮左边)
-        btnHide = new TextView(this);
-        btnHide.setBackgroundResource(R.drawable.button_edit);
-        btnHide.setText("H");
-        btnHide.setTextColor(Color.WHITE);
-        btnHide.setTextSize(12);
-        btnHide.setGravity(Gravity.CENTER);
-        FrameLayout.LayoutParams hideParams = new FrameLayout.LayoutParams(smallBtnSize, smallBtnSize);
-        hideParams.leftMargin = screenWidth - margin - smallBtnSize * 3 - spacing * 2 - rightExtraMargin;
-        hideParams.topMargin = margin;
-        btnHide.setLayoutParams(hideParams);
-        btnHide.setOnClickListener(v -> toggleGameButtons());
-        buttonLayer.addView(btnHide);
-        
-        // 加载游戏按钮可见状态
-        SharedPreferences prefs2 = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
-        gameButtonsVisible = prefs2.getBoolean("game_buttons_visible", true);
-        updateGameButtonsVisibility();
-        
-        // 创建虚拟键盘面板 (必须使用 WRAP_CONTENT 避免填充整个屏幕)
-        vkbdPanel = createVirtualKeyboardPanel();
-        vkbdPanel.setVisibility(View.GONE);
-        FrameLayout.LayoutParams vkbdParams = new FrameLayout.LayoutParams(
-            FrameLayout.LayoutParams.WRAP_CONTENT,
-            FrameLayout.LayoutParams.WRAP_CONTENT);
-        buttonLayer.addView(vkbdPanel, vkbdParams);
-        
+
+        FrameLayout buttonLayer = virtualController.createButtonOverlay(contentView);
         contentView.addView(buttonLayer);
+
         Log.i(TAG, "Button overlay added");
     }
     
     /**
-     * 创建虚拟键盘面板 (从 XML 加载)
+     * 检查事件源是否为手柄
      */
-    private FrameLayout createVirtualKeyboardPanel() {
-        // 从 XML 加载面板布局 (使用临时 FrameLayout 作为 parent 以保留 wrap_content)
-        LayoutInflater inflater = LayoutInflater.from(this);
-        FrameLayout tempParent = new FrameLayout(this);
-        FrameLayout panel = (FrameLayout) inflater.inflate(R.layout.vkbd_panel, tempParent, false);
-        
-        // 为每个按键设置触摸事件
-        for (int[] mapping : VKBD_KEY_MAP) {
-            int viewId = mapping[0];
-            int keyCode = mapping[1];
-            
-            View keyView = panel.findViewById(viewId);
-            if (keyView != null) {
-                setupKeyTouchListener(keyView, keyCode);
-            }
-        }
-        
-        // 为面板背景设置拖动触摸事件 (按住空白区域可拖动)
-        panel.setOnTouchListener((v, event) -> {
-            int action = event.getActionMasked();
-            FrameLayout.LayoutParams params = (FrameLayout.LayoutParams) v.getLayoutParams();
-            
-            switch (action) {
-                case MotionEvent.ACTION_DOWN:
-                    vkbdDragStartX = event.getRawX();
-                    vkbdDragStartY = event.getRawY();
-                    vkbdDragStartMarginX = params.leftMargin;
-                    vkbdDragStartMarginY = params.topMargin;
-                    return true;
-                    
-                case MotionEvent.ACTION_MOVE:
-                    float dx = event.getRawX() - vkbdDragStartX;
-                    float dy = event.getRawY() - vkbdDragStartY;
-                    
-                    int newX = (int)(vkbdDragStartMarginX + dx);
-                    int newY = (int)(vkbdDragStartMarginY + dy);
-                    
-                    // 限制在屏幕范围内
-                    int panelW = v.getWidth();
-                    int panelH = v.getHeight();
-                    newX = Math.max(0, Math.min(screenWidth - panelW, newX));
-                    newY = Math.max(0, Math.min(screenHeight - panelH, newY));
-                    
-                    params.leftMargin = newX;
-                    params.topMargin = newY;
-                    v.setLayoutParams(params);
-                    return true;
-                    
-                case MotionEvent.ACTION_UP:
-                case MotionEvent.ACTION_CANCEL:
-                    // 保存虚拟键盘位置
-                    saveVkbdPosition(params.leftMargin, params.topMargin);
-                    return true;
-            }
-            return false;
-        });
-        
-        return panel;
+    private boolean isGamepadSource(int source) {
+        return (source & InputDevice.SOURCE_GAMEPAD) == InputDevice.SOURCE_GAMEPAD ||
+               (source & InputDevice.SOURCE_JOYSTICK) == InputDevice.SOURCE_JOYSTICK;
     }
     
     /**
-     * 保存虚拟键盘面板位置
-     */
-    private void saveVkbdPosition(int x, int y) {
-        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
-        SharedPreferences.Editor editor = prefs.edit();
-        editor.putInt("vkbd_x", x);
-        editor.putInt("vkbd_y", y);
-        editor.apply();
-    }
-    
-    /**
-     * 更新虚拟键盘面板位置 (优先使用保存的位置, 否则居中显示)
-     */
-    private void updateVkbdPanelPosition() {
-        if (vkbdPanel == null) return;
-        
-        vkbdPanel.post(() -> {
-            int panelW = vkbdPanel.getWidth();
-            int panelH = vkbdPanel.getHeight();
-            
-            // 如果尺寸还是 0，使用测量值
-            if (panelW == 0 || panelH == 0) {
-                vkbdPanel.measure(
-                    View.MeasureSpec.makeMeasureSpec(screenWidth, View.MeasureSpec.AT_MOST),
-                    View.MeasureSpec.makeMeasureSpec(screenHeight, View.MeasureSpec.AT_MOST));
-                panelW = vkbdPanel.getMeasuredWidth();
-                panelH = vkbdPanel.getMeasuredHeight();
-            }
-            
-            // 从 SharedPreferences 加载保存的位置
-            SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
-            int defaultX = (screenWidth - panelW) / 2;
-            int defaultY = (screenHeight - panelH) / 3;
-            
-            int panelX = prefs.getInt("vkbd_x", defaultX);
-            int panelY = prefs.getInt("vkbd_y", defaultY);
-            
-            // 确保不会超出屏幕边界
-            panelX = Math.max(0, Math.min(screenWidth - panelW, panelX));
-            panelY = Math.max(0, Math.min(screenHeight - panelH, panelY));
-            
-            Log.i(TAG, "[VKBD] panel size=" + panelW + "x" + panelH + ", pos=(" + panelX + "," + panelY + ")");
-            
-            FrameLayout.LayoutParams params = (FrameLayout.LayoutParams) vkbdPanel.getLayoutParams();
-            if (params == null) {
-                params = new FrameLayout.LayoutParams(
-                    FrameLayout.LayoutParams.WRAP_CONTENT,
-                    FrameLayout.LayoutParams.WRAP_CONTENT);
-            }
-            params.leftMargin = panelX;
-            params.topMargin = panelY;
-            vkbdPanel.setLayoutParams(params);
-        });
-    }
-    
-    /**
-     * 为虚拟键盘按键设置触摸监听器
-     */
-    private void setupKeyTouchListener(View keyView, int keyCode) {
-        keyView.setOnTouchListener((v, event) -> {
-            int action = event.getActionMasked();
-            switch (action) {
-                case MotionEvent.ACTION_DOWN:
-                    Log.i(TAG, "[VKBD] keyCode=" + keyCode + ", pressed=true");
-                    nativeOnKeyEvent(keyCode, true);
-                    v.setAlpha(0.6f);
-                    return true;
-                case MotionEvent.ACTION_UP:
-                case MotionEvent.ACTION_CANCEL:
-                    Log.i(TAG, "[VKBD] keyCode=" + keyCode + ", pressed=false");
-                    nativeOnKeyEvent(keyCode, false);
-                    v.setAlpha(1.0f);
-                    return true;
-            }
-            return false;
-        });
-    }
-    
-    /**
-     * 切换虚拟键盘面板显示/隐藏
-     */
-    private void toggleVirtualKeyboard() {
-        vkbdVisible = !vkbdVisible;
-        vkbdPanel.setVisibility(vkbdVisible ? View.VISIBLE : View.GONE);
-        btnKeyboard.setAlpha(vkbdVisible ? 0.5f : 1.0f);
-        Log.i(TAG, "[toggleVirtualKeyboard] visible=" + vkbdVisible);
-        
-        // 显示时更新位置
-        if (vkbdVisible) {
-            updateVkbdPanelPosition();
-        }
-    }
-    
-    /**
-     * 切换游戏按钮显示/隐藏
-     */
-    private void toggleGameButtons() {
-        gameButtonsVisible = !gameButtonsVisible;
-        updateGameButtonsVisibility();
-        
-        // 保存状态
-        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
-        prefs.edit().putBoolean("game_buttons_visible", gameButtonsVisible).apply();
-        
-        Log.i(TAG, "[toggleGameButtons] visible=" + gameButtonsVisible);
-    }
-    
-    /**
-     * 更新游戏按钮可见性
-     */
-    private void updateGameButtonsVisibility() {
-        int visibility = gameButtonsVisible ? View.VISIBLE : View.GONE;
-        for (ButtonInfo info : gameButtons) {
-            if (info.view != null) {
-                info.view.setVisibility(visibility);
-            }
-        }
-        // 更新 H 按钮透明度表示当前状态
-        btnHide.setAlpha(gameButtonsVisible ? 1.0f : 0.5f);
-    }
-    
-    /**
-     * 处理游戏触摸事件
-     */
-    private boolean handleGameTouch(int buttonId, View v, MotionEvent event) {
-        int action = event.getActionMasked();
-        switch (action) {
-            case MotionEvent.ACTION_DOWN:
-            case MotionEvent.ACTION_POINTER_DOWN:
-                nativeOnButtonEvent(buttonId, true);
-                v.setAlpha(0.6f);
-                return true;
-                
-            case MotionEvent.ACTION_UP:
-            case MotionEvent.ACTION_POINTER_UP:
-            case MotionEvent.ACTION_CANCEL:
-                nativeOnButtonEvent(buttonId, false);
-                v.setAlpha(1.0f);
-                return true;
-        }
-        return false;
-    }
-    
-    // 编辑模式拖动相关
-    private float dragStartX, dragStartY;
-    private int dragStartMarginX, dragStartMarginY;
-    
-    // 虚拟键盘面板拖动相关
-    private float vkbdDragStartX, vkbdDragStartY;
-    private int vkbdDragStartMarginX, vkbdDragStartMarginY;
-    
-    /**
-     * 处理编辑模式拖动
-     */
-    private boolean handleEditTouch(ButtonInfo info, View v, MotionEvent event) {
-        int action = event.getActionMasked();
-        FrameLayout.LayoutParams params = (FrameLayout.LayoutParams) v.getLayoutParams();
-        
-        switch (action) {
-            case MotionEvent.ACTION_DOWN:
-                dragStartX = event.getRawX();
-                dragStartY = event.getRawY();
-                dragStartMarginX = params.leftMargin;
-                dragStartMarginY = params.topMargin;
-                v.setAlpha(0.7f);
-                return true;
-                
-            case MotionEvent.ACTION_MOVE:
-                float dx = event.getRawX() - dragStartX;
-                float dy = event.getRawY() - dragStartY;
-                
-                int newX = (int)(dragStartMarginX + dx);
-                int newY = (int)(dragStartMarginY + dy);
-                
-                // 限制在屏幕范围内
-                newX = Math.max(0, Math.min(screenWidth - info.width, newX));
-                newY = Math.max(0, Math.min(screenHeight - info.height, newY));
-                
-                params.leftMargin = newX;
-                params.topMargin = newY;
-                v.setLayoutParams(params);
-                return true;
-                
-            case MotionEvent.ACTION_UP:
-            case MotionEvent.ACTION_CANCEL:
-                // 保存新位置
-                info.defaultX = params.leftMargin;
-                info.defaultY = params.topMargin;
-                v.setAlpha(1.0f);
-                saveButtonPositions();
-                return true;
-        }
-        return false;
-    }
-    
-    /**
-     * 切换编辑模式
-     */
-    private void toggleEditMode() {
-        editMode = !editMode;
-        
-        if (editMode) {
-            btnEdit.setAlpha(0.5f);
-            for (ButtonInfo info : gameButtons) {
-                info.view.setBackgroundResource(R.drawable.button_edit_highlight);
-            }
-        } else {
-            btnEdit.setAlpha(1.0f);
-            for (ButtonInfo info : gameButtons) {
-                info.view.setBackgroundResource(info.backgroundResId);
-            }
-        }
-    }
-    
-    /**
-     * 保存按钮位置
-     */
-    private void saveButtonPositions() {
-        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
-        SharedPreferences.Editor editor = prefs.edit();
-        
-        for (ButtonInfo info : gameButtons) {
-            editor.putInt("btn_" + info.id + "_x", info.defaultX);
-            editor.putInt("btn_" + info.id + "_y", info.defaultY);
-        }
-        
-        editor.apply();
-    }
-    
-    /**
-     * 拦截物理键盘事件并转发到 Rust
+     * 处理按键按下事件
+     * 使用 onKeyDown/onKeyUp 代替 dispatchKeyEvent，因为 GameActivity 不调用 dispatchKeyEvent
      */
     @Override
-    public boolean dispatchKeyEvent(KeyEvent event) {
-        int keyCode = event.getKeyCode();
-        int action = event.getAction();
+    public boolean onKeyDown(int keyCode, KeyEvent event) {
+        return handleKeyEventInternal(keyCode, event) || super.onKeyDown(keyCode, event);
+    }
+    
+    @Override
+    public boolean onKeyUp(int keyCode, KeyEvent event) {
+        return handleKeyEventInternal(keyCode, event) || super.onKeyUp(keyCode, event);
+    }
+    
+    /**
+     * 内部按键处理逻辑
+     * 
+     * 路由规则:
+     * 1. 手柄专用按键 (BUTTON_A等) -> GamepadController
+     * 2. 来自手柄的DPAD -> GamepadController  
+     * 3. 来自遥控器/键盘的按键 -> RemoteController
+     */
+    private boolean handleKeyEventInternal(int keyCode, KeyEvent event) {
+        int source = event.getSource();
         
-        // 只处理按下和抬起事件
-        if (action == KeyEvent.ACTION_DOWN || action == KeyEvent.ACTION_UP) {
-            boolean pressed = (action == KeyEvent.ACTION_DOWN);
-            
-            // 忽略重复按键事件 (长按时会产生)
-            if (pressed && event.getRepeatCount() > 0) {
+        // 手柄专用按键 -> GamepadController (优先级最高)
+        if (GamepadController.isGamepadOnlyKey(keyCode)) {
+            if (gamepadController.handleKeyEvent(event)) {
                 return true;
             }
-            
-            // 调试日志
-            Log.i(TAG, "[dispatchKeyEvent] keyCode=" + keyCode + ", pressed=" + pressed);
-            
-            // 转发到 Rust
-            nativeOnKeyEvent(keyCode, pressed);
-            
-            // 返回 true 表示已处理, 防止事件继续传递
+        }
+        
+        // 来自手柄的DPAD按键 -> GamepadController
+        if (isGamepadSource(source) && isDpadKey(keyCode)) {
+            if (gamepadController.handleKeyEvent(event)) {
+                return true;
+            }
+        }
+        
+        // 来自遥控器/键盘的按键 -> RemoteController
+        if (remoteController.handleKeyEvent(event)) {
             return true;
         }
         
-        return super.dispatchKeyEvent(event);
+        return false;
+    }
+    
+    /**
+     * 检查是否为DPAD按键
+     */
+    private boolean isDpadKey(int keyCode) {
+        switch (keyCode) {
+            case KeyEvent.KEYCODE_DPAD_UP:
+            case KeyEvent.KEYCODE_DPAD_DOWN:
+            case KeyEvent.KEYCODE_DPAD_LEFT:
+            case KeyEvent.KEYCODE_DPAD_RIGHT:
+            case KeyEvent.KEYCODE_DPAD_CENTER:
+                return true;
+            default:
+                return false;
+        }
+    }
+    
+    /**
+     * 拦截手柄摇杆/扳机事件
+     * 
+     * 只有手柄会产生摇杆事件，直接转发给GamepadController
+     */
+    @Override
+    public boolean onGenericMotionEvent(MotionEvent event) {
+        // 手柄摇杆事件 -> GamepadController
+        if (gamepadController.handleMotionEvent(event)) {
+            return true;
+        }
+        
+        return super.onGenericMotionEvent(event);
+    }
+    
+    @Override
+    protected void onPause() {
+        super.onPause();
+        
+        // 释放所有控制器状态
+        if (remoteController != null) {
+            remoteController.releaseAllKeys();
+        }
+        if (gamepadController != null) {
+            gamepadController.reset();
+        }
+    }
+    
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        
+        if (remoteController != null) {
+            remoteController.releaseAllKeys();
+        }
+        if (gamepadController != null) {
+            gamepadController.reset();
+        }
     }
 }
