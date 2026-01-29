@@ -1561,16 +1561,17 @@ impl Play {
         txt: &mut Txt,
         music_player: &MusicPlayer,
     ) {
+        // 当正在统计计分时，降低音效触发频率但保持连续感。
+        // 每6帧触发一次完整的计分音序列（频率未更改），以减少播放次数但保持原始音色。
         if buffers.passed && self.counting_score {
-            music_player.beep(4 * 880);
+            if self.loop_count % 6 == 0 {
+                music_player.beep(4 * 880);
+                music_player.beep(2 * 880);
+                music_player.beep(0);
+            }
         }
-        if buffers.passed && self.counting_score {
-            music_player.beep(2 * 880);
-        }
+
         self.write_total_score(buffers, render_state, txt);
-        if buffers.passed && self.counting_score {
-            music_player.beep(0);
-        }
     }
 
     /// 开始暂停（初始化暂停状态）
