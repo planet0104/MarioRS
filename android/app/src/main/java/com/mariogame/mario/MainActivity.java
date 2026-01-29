@@ -1,5 +1,6 @@
 package com.mariogame.mario;
 
+import android.os.Build;
 import android.os.Bundle;
 import android.util.DisplayMetrics;
 import android.util.Log;
@@ -8,6 +9,9 @@ import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.WindowInsets;
+import android.view.WindowInsetsController;
+import android.view.WindowManager;
 import android.widget.FrameLayout;
 
 import com.google.androidgamesdk.GameActivity;
@@ -58,6 +62,9 @@ public class MainActivity extends GameActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         
+        // 设置沉浸模式 - 隐藏状态栏和导航栏
+        enableImmersiveMode();
+        
         // 获取屏幕尺寸
         DisplayMetrics metrics = new DisplayMetrics();
         getWindowManager().getDefaultDisplay().getRealMetrics(metrics);
@@ -89,6 +96,54 @@ public class MainActivity extends GameActivity {
         
         // 延迟添加按钮层
         getWindow().getDecorView().post(this::addButtonOverlay);
+    }
+    
+    /**
+     * 启用沉浸模式 - 隐藏状态栏和导航栏
+     * 确保游戏画面占满整个屏幕,不会被系统UI遮挡
+     */
+    private void enableImmersiveMode() {
+        View decorView = getWindow().getDecorView();
+        
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            // Android 11 (API 30) 及以上使用新API
+            getWindow().setDecorFitsSystemWindows(false);
+            WindowInsetsController controller = decorView.getWindowInsetsController();
+            if (controller != null) {
+                // 隐藏状态栏和导航栏
+                controller.hide(WindowInsets.Type.statusBars() | WindowInsets.Type.navigationBars());
+                // 设置沉浸模式行为: 从边缘滑动可以临时显示系统栏
+                controller.setSystemBarsBehavior(
+                    WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                );
+            }
+        } else {
+            // Android 10 及以下使用传统API
+            int uiOptions = View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                    | View.SYSTEM_UI_FLAG_FULLSCREEN
+                    | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                    | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                    | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                    | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION;
+            decorView.setSystemUiVisibility(uiOptions);
+        }
+        
+        // 允许窗口延伸到刘海屏区域
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            getWindow().getAttributes().layoutInDisplayCutoutMode = 
+                WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+        }
+        
+        Log.i(TAG, "Immersive mode enabled");
+    }
+    
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        // 窗口获得焦点时重新启用沉浸模式
+        if (hasFocus) {
+            enableImmersiveMode();
+        }
     }
     
     /**

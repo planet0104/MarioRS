@@ -1153,7 +1153,7 @@ pub fn android_main(app: AndroidApp) {
             // 获取 surface 配置信息
             let surface_config = display.wgpu_config.as_ref().map(|c| (c.width, c.height));
 
-            if let Some((width, height)) = surface_config {
+            if let Some((config_width, config_height)) = surface_config {
                 if let Some(gpu_renderer) = display.gpu_renderer_mut() {
                     // 准备渲染数据
                     state.submit_to_gpu(gpu_renderer);
@@ -1163,13 +1163,35 @@ pub fn android_main(app: AndroidApp) {
                 if let Some(surface) = &display.wgpu_surface {
                     match surface.get_current_texture() {
                         Ok(output) => {
+                            // 使用实际纹理尺寸而非配置尺寸
+                            // Android 上 NativeWindow 尺寸可能包含系统UI区域
+                            // 但实际 surface 纹理尺寸才是正确的渲染目标尺寸
+                            let actual_width = output.texture.width();
+                            let actual_height = output.texture.height();
+                            
+                            // 一次性日志: 检查配置尺寸与实际纹理尺寸是否不同
+                            static SIZE_LOG_ONCE: std::sync::Once = std::sync::Once::new();
+                            SIZE_LOG_ONCE.call_once(|| {
+                                if config_width != actual_width || config_height != actual_height {
+                                    log_info(&format!(
+                                        "[GPU] Size mismatch! Config: {}x{}, Actual texture: {}x{}",
+                                        config_width, config_height, actual_width, actual_height
+                                    ));
+                                } else {
+                                    log_info(&format!(
+                                        "[GPU] Surface size: {}x{} (config matches texture)",
+                                        actual_width, actual_height
+                                    ));
+                                }
+                            });
+                            
                             let view = output
                                 .texture
                                 .create_view(&wgpu::TextureViewDescriptor::default());
 
                             if let Some(gpu_renderer) = display.gpu_renderer_mut() {
-                                // 更新缩放参数
-                                gpu_renderer.update_scale(width, height);
+                                // 使用实际纹理尺寸更新缩放参数
+                                gpu_renderer.update_scale(actual_width, actual_height);
 
                                 // 一次性完成渲染和呈现（单次GPU提交）
                                 gpu_renderer.render_frame_and_present(&view);
