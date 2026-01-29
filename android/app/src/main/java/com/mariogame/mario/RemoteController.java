@@ -1,7 +1,5 @@
 package com.mariogame.mario;
 
-import android.os.Handler;
-import android.os.Looper;
 import android.util.Log;
 import android.view.KeyEvent;
 
@@ -18,16 +16,14 @@ import android.view.KeyEvent;
  * - 返回键: ESC
  * 
  * 遥控器特性 (与手柄不同):
- * - 延迟释放: 左右行走按键松开后添加延迟，支持边走边跳
  * - 自动加速: 检测到遥控器时自动开启加速模式
+ * - 空中慢动作: 跳跃后空中停留时间延长，便于单键操作时左右移动
+ *   (物理调整在Rust层实现，Java层只负责检测和传递遥控器模式)
  * 
  * 注意: 此控制器不处理手柄输入，手柄由GamepadController处理
  */
 public class RemoteController {
     private static final String TAG = "RemoteController";
-    
-    // 左右方向键延迟释放时间 (毫秒)
-    private static final long DIRECTION_RELEASE_DELAY_MS = 700;
     
     // 回调接口
     public interface InputCallback {
@@ -35,21 +31,11 @@ public class RemoteController {
         void onRemoteInputDetected();
     }
     
-    // Handler用于延迟释放
-    private Handler handler = new Handler(Looper.getMainLooper());
-    
     // 当前按下的方向键状态
     private boolean leftPressed = false;
     private boolean rightPressed = false;
     private boolean upPressed = false;
     private boolean downPressed = false;
-    
-    // 延迟释放任务
-    private Runnable leftReleaseRunnable;
-    private Runnable rightReleaseRunnable;
-
-    // 如果为 true，则下次释放不使用延迟，立即生效
-    private boolean suppressReleaseDelay = false;
     
     // 加速模式状态 (遥控器自动开启)
     private boolean accelerateMode = false;
@@ -188,26 +174,13 @@ public class RemoteController {
     private void handleDownKey(boolean pressed) {
         downPressed = pressed;
         Log.d(TAG, "[Remote 遥控器!!] DOWN pressed=" + pressed);
-        
-        // 按下向下键时取消左右延迟
-        if (pressed) {
-            cancelDirectionDelays();
-            suppressReleaseDelay = true;
-        }
-
         MainActivity.nativeOnRemoteKey(KeyEvent.KEYCODE_DPAD_DOWN, pressed);
     }
     
     /**
-     * 处理左键 (带延迟释放)
+     * 处理左键 (立即响应，空中慢动作在Rust层实现)
      */
     private void handleLeftKey(boolean pressed) {
-        // 取消现有延迟
-        if (leftReleaseRunnable != null || rightReleaseRunnable != null) {
-            cancelDirectionDelays();
-            suppressReleaseDelay = true;
-        }
-        
         if (pressed) {
             if (!leftPressed) {
                 leftPressed = true;
@@ -222,38 +195,19 @@ public class RemoteController {
                 Log.d(TAG, "[Remote 遥控器!!] RIGHT cancelled by LEFT");
             }
         } else {
-            // 松开时延迟释放
-            if (suppressReleaseDelay) {
-                if (leftPressed) {
-                    leftPressed = false;
-                    MainActivity.nativeOnRemoteKey(KeyEvent.KEYCODE_DPAD_LEFT, false);
-                    Log.d(TAG, "[Remote 遥控器!!] LEFT released immediately");
-                }
-                suppressReleaseDelay = false;
-            } else {
-                leftReleaseRunnable = () -> {
-                    if (leftPressed) {
-                        leftPressed = false;
-                        Log.d(TAG, "[Remote 遥控器!!] LEFT released (delayed)");
-                        MainActivity.nativeOnRemoteKey(KeyEvent.KEYCODE_DPAD_LEFT, false);
-                    }
-                    leftReleaseRunnable = null;
-                };
-                handler.postDelayed(leftReleaseRunnable, DIRECTION_RELEASE_DELAY_MS);
+            // 立即释放，不再延迟
+            if (leftPressed) {
+                leftPressed = false;
+                Log.d(TAG, "[Remote 遥控器!!] LEFT released");
+                MainActivity.nativeOnRemoteKey(KeyEvent.KEYCODE_DPAD_LEFT, false);
             }
         }
     }
     
     /**
-     * 处理右键 (带延迟释放)
+     * 处理右键 (立即响应，空中慢动作在Rust层实现)
      */
     private void handleRightKey(boolean pressed) {
-        // 取消现有延迟
-        if (leftReleaseRunnable != null || rightReleaseRunnable != null) {
-            cancelDirectionDelays();
-            suppressReleaseDelay = true;
-        }
-        
         if (pressed) {
             if (!rightPressed) {
                 rightPressed = true;
@@ -268,24 +222,11 @@ public class RemoteController {
                 Log.d(TAG, "[Remote 遥控器!!] LEFT cancelled by RIGHT");
             }
         } else {
-            // 松开时延迟释放
-            if (suppressReleaseDelay) {
-                if (rightPressed) {
-                    rightPressed = false;
-                    MainActivity.nativeOnRemoteKey(KeyEvent.KEYCODE_DPAD_RIGHT, false);
-                    Log.d(TAG, "[Remote 遥控器!!] RIGHT released immediately");
-                }
-                suppressReleaseDelay = false;
-            } else {
-                rightReleaseRunnable = () -> {
-                    if (rightPressed) {
-                        rightPressed = false;
-                        Log.d(TAG, "[Remote 遥控器!!] RIGHT released (delayed)");
-                        MainActivity.nativeOnRemoteKey(KeyEvent.KEYCODE_DPAD_RIGHT, false);
-                    }
-                    rightReleaseRunnable = null;
-                };
-                handler.postDelayed(rightReleaseRunnable, DIRECTION_RELEASE_DELAY_MS);
+            // 立即释放，不再延迟
+            if (rightPressed) {
+                rightPressed = false;
+                Log.d(TAG, "[Remote 遥控器!!] RIGHT released");
+                MainActivity.nativeOnRemoteKey(KeyEvent.KEYCODE_DPAD_RIGHT, false);
             }
         }
     }
@@ -307,24 +248,16 @@ public class RemoteController {
     }
     
     /**
-     * 取消所有方向键延迟释放
+     * 释放所有方向键
      */
-    private void cancelDirectionDelays() {
-        if (leftReleaseRunnable != null) {
-            handler.removeCallbacks(leftReleaseRunnable);
-            if (leftPressed) {
-                leftPressed = false;
-                MainActivity.nativeOnRemoteKey(KeyEvent.KEYCODE_DPAD_LEFT, false);
-            }
-            leftReleaseRunnable = null;
+    private void releaseDirectionKeys() {
+        if (leftPressed) {
+            leftPressed = false;
+            MainActivity.nativeOnRemoteKey(KeyEvent.KEYCODE_DPAD_LEFT, false);
         }
-        if (rightReleaseRunnable != null) {
-            handler.removeCallbacks(rightReleaseRunnable);
-            if (rightPressed) {
-                rightPressed = false;
-                MainActivity.nativeOnRemoteKey(KeyEvent.KEYCODE_DPAD_RIGHT, false);
-            }
-            rightReleaseRunnable = null;
+        if (rightPressed) {
+            rightPressed = false;
+            MainActivity.nativeOnRemoteKey(KeyEvent.KEYCODE_DPAD_RIGHT, false);
         }
     }
     
@@ -350,7 +283,7 @@ public class RemoteController {
      * 释放所有按键 (Activity暂停时调用)
      */
     public void releaseAllKeys() {
-        cancelDirectionDelays();
+        releaseDirectionKeys();
         
         if (upPressed) {
             upPressed = false;

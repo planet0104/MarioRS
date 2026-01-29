@@ -1001,14 +1001,29 @@ impl Play {
                 players.key_up = keyboard.kb_up() || joystick.up;
                 players.key_down = keyboard.kb_down() || joystick.down;
                 // 跳跃: Alt 或 手柄 A/B 按钮
-                // Android TV: 方向上键也作为跳跃键(不影响其他平台/手柄)
+                // Android TV 遥控器按键映射:
+                // - OK键: 跳跃
+                // - 上键: 发射子弹
+                // - 左右键: 行走
+                // - 下键: 蹲下/钻管道
                 let mut tv_jump_hold = false;
+                let mut tv_fire = false;
                 #[cfg(target_os = "android")]
                 {
                     let tv = crate::platform::joystick_android_tv::read_tv_remote_state();
-                    tv_jump_hold = tv.up || tv.ok;
+                    // OK键用于跳跃
+                    tv_jump_hold = tv.ok;
+                    // 上键用于发射子弹
+                    tv_fire = tv.up;
+                    // TV遥控器模式：检测到遥控器输入时启用空中慢动作
+                    players.tv_remote_mode = tv.detected;
+                    // TV遥控器左右键控制行走
+                    players.key_left = players.key_left || tv.left;
+                    players.key_right = players.key_right || tv.right;
+                    players.key_down = players.key_down || tv.down;
                     if players.status == crate::players::ST_ON_THE_GROUND {
-                        if tv.up_pressed_once || tv.ok_pressed_once {
+                        // 只有OK键触发跳跃
+                        if tv.ok_pressed_once {
                             players.alt_pressed_once = true;
                         }
                     }
@@ -1028,10 +1043,11 @@ impl Play {
 
                 // 加速: Ctrl 或 手柄 LB/RB (肩键)
                 // 注意: 加速和发射必须分开映射，否则按加速时会触发发射动画
-                // - key_ctrl: 加速功能，使用 LB/RB 肩键
-                // - key_space: 发射功能，使用 X/Y 按钮
-                players.key_ctrl = keyboard.kb_ctrl() || joystick.button2;
-                players.key_space = keyboard.kb_space() || joystick.button_x || joystick.button_y;
+                // - key_ctrl: 加速功能，使用 LB/RB 肩键，TV遥控器自动开启
+                // - key_space: 发射功能，使用 X/Y 按钮，TV遥控器上键
+                // TV遥控器模式下自动开启加速（因为遥控器按键有限）
+                players.key_ctrl = keyboard.kb_ctrl() || joystick.button2 || players.tv_remote_mode;
+                players.key_space = keyboard.kb_space() || joystick.button_x || joystick.button_y || tv_fire;
                 players.key_left_shift = keyboard.kb_left_shift();
                 players.key_right_shift = keyboard.kb_right_shift();
 

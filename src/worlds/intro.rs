@@ -147,6 +147,12 @@ pub struct Intro {
     js_last_down: bool,
     js_last_button: bool,
     js_last_back: bool,
+
+    // TV遥控器菜单导航状态 (防抖动)
+    tv_last_up: bool,
+    tv_last_down: bool,
+    tv_last_ok: bool,
+    tv_last_back: bool,
 }
 
 use crate::mario::{ConfigData, IntroResult};
@@ -198,6 +204,11 @@ impl Intro {
             js_last_down: false,
             js_last_button: false,
             js_last_back: false,
+            // TV遥控器防抖状态
+            tv_last_up: false,
+            tv_last_down: false,
+            tv_last_ok: false,
+            tv_last_back: false,
         }
     }
 
@@ -677,6 +688,66 @@ impl Intro {
                     self.js_last_down = joystick.down;
                     self.js_last_button = confirm_pressed;
                     self.js_last_back = back_pressed;
+                }
+
+                // 处理 TV 遥控器输入 (Android TV)
+                #[cfg(target_os = "android")]
+                {
+                    let tv = crate::platform::joystick_android_tv::read_tv_remote_state();
+                    if tv.detected {
+                        // 方向上 (边沿触发)
+                        if tv.up && !self.tv_last_up {
+                            self.up();
+                            if self.macro_key == '\x1B' {
+                                self.status = self.last_status;
+                            }
+                            self.macro_key = 'U';
+                        }
+                        // 方向下
+                        if tv.down && !self.tv_last_down {
+                            self.down();
+                            if self.macro_key == '\x1B' {
+                                self.status = self.last_status;
+                            }
+                            self.macro_key = 'D';
+                        }
+                        
+                        // OK键确认
+                        if tv.ok && !self.tv_last_ok {
+                            // 模拟 Enter 键 (scan_code = 28)
+                            self.handle_keyboard_input(
+                                28,
+                                buffers,
+                                game_number,
+                                &mut quit_game,
+                                play,
+                                music,
+                                config,
+                                cur_player as usize,
+                            );
+                        }
+                        
+                        // 返回键
+                        if tv.back && !self.tv_last_back {
+                            // 模拟 ESC 键 (scan_code = 1)
+                            self.handle_keyboard_input(
+                                1,
+                                buffers,
+                                game_number,
+                                &mut quit_game,
+                                play,
+                                music,
+                                config,
+                                cur_player as usize,
+                            );
+                        }
+                        
+                        // 更新防抖状态
+                        self.tv_last_up = tv.up;
+                        self.tv_last_down = tv.down;
+                        self.tv_last_ok = tv.ok;
+                        self.tv_last_back = tv.back;
+                    }
                 }
 
                 if self.macro_key != '\0' {
