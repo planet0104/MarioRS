@@ -255,7 +255,7 @@ impl MusicPlayer {
             .map(|j| {
                 let freq = 130 - 20 * j;
                 let wrapped = freq.rem_euclid(1 << 16) as u32;
-                (wrapped, 35)
+                (wrapped, 40)
             })
             .collect();
         self.state.borrow_mut().audio.play_sequence(&notes);
@@ -427,7 +427,7 @@ impl MusicPlayer {
             .map(|j| {
                 let freq = 130 - 20 * j;
                 let wrapped = freq.rem_euclid(1 << 16) as u32;
-                (wrapped, 35)
+                (wrapped, 40)
             })
             .collect();
         if let Ok(mut audio) = self.audio.lock() {

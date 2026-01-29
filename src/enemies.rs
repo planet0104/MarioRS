@@ -84,6 +84,7 @@ struct EnemyRec {
     counter: i32,
     status: i32,
     dir_counter: u8,
+    sound_played: bool,
 }
 
 impl Default for EnemyRec {
@@ -104,6 +105,7 @@ impl Default for EnemyRec {
             counter: 0,
             status: ENEMY_GROUNDED,
             dir_counter: 0,
+            sound_played: false,
         }
     }
 }
@@ -414,6 +416,7 @@ impl Enemies {
         enemy.status = ENEMY_GROUNDED;
         // GPU渲染每帧完全重绘，不需要背景保存/恢复
         enemy.counter = 0;
+        enemy.sound_played = false;
 
         match init_type {
             TP_VERT_PLANT => {
@@ -864,11 +867,10 @@ impl Enemies {
                 } else {
                     // Pascal原始逻辑：当蘑菇仍在砖块中上升时，偶数帧调用 Beep(130 - 20 * j)
                     // 其中 j = YPos % H。负频率在16位下会折返成高频，保留这一特性以贴近原声。
-                    j = enemy.y_pos % H;
-                    if j % 2 == 0 {
-                        let freq = 130 - 20 * j;
-                        let wrapped = freq.rem_euclid(1 << 16) as u16;
-                        music_player.beep(wrapped as u32);
+                    // 使用一次性序列严格复刻 Pascal 的上升音效，避免逐帧重复触发
+                    if !self.enemies[i].sound_played {
+                        self.enemies[i].sound_played = true;
+                        music_player.play_powerup_rise();
                     }
                     return;
                 }
