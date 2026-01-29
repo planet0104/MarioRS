@@ -815,25 +815,51 @@ pub type DesktopDisplay = AndroidDisplay;
 // 存储后端 - Android 扩展 FileStorage
 // ============================================================================
 
+/// 全局 Android 内部存储路径
+/// 在 with_app() 首次调用时设置，之后 new() 会使用此路径
+static ANDROID_STORAGE_PATH: Mutex<Option<PathBuf>> = Mutex::new(None);
+
 /// Android 存储后端 - 使用内部存储路径
 pub struct AndroidStorage {
     inner: FileStorage,
 }
 
 impl AndroidStorage {
+    /// 创建存储后端
+    /// 如果已通过 with_app() 设置了全局路径，则使用该路径
+    /// 否则使用当前工作目录（可能无法写入）
     pub fn new() -> Self {
+        // 尝试使用已设置的全局路径
+        if let Ok(guard) = ANDROID_STORAGE_PATH.lock() {
+            if let Some(ref path) = *guard {
+                log_debug(&format!("[Storage] Using cached path: {:?}", path));
+                return Self {
+                    inner: FileStorage::with_base_path(path.clone()),
+                };
+            }
+        }
+        // 回退到默认路径（可能无法写入，但避免崩溃）
+        log_warn("[Storage] No Android storage path set, using fallback");
         Self {
             inner: FileStorage::new(),
         }
     }
 
-    /// 使用 AndroidApp 获取内部存储路径
+    /// 使用 AndroidApp 获取内部存储路径并缓存到全局变量
+    /// 必须在应用启动时调用一次，确保后续 new() 能获取正确路径
     pub fn with_app(app: &AndroidApp) -> Self {
         let base_path = if let Some(path) = app.internal_data_path() {
             path.to_path_buf()
         } else {
             PathBuf::from(".")
         };
+        
+        // 缓存到全局变量，供后续 new() 使用
+        if let Ok(mut guard) = ANDROID_STORAGE_PATH.lock() {
+            log_info(&format!("[Storage] Setting Android storage path: {:?}", base_path));
+            *guard = Some(base_path.clone());
+        }
+        
         Self {
             inner: FileStorage::with_base_path(base_path),
         }
@@ -1024,6 +1050,11 @@ pub fn android_main(app: AndroidApp) {
                     }
                 }
                 MainEvent::Destroy => {
+                    // 应用销毁时保存游戏状态
+                    if let Some(state) = &mut game_state {
+                        log_info("[Android] Destroy event, saving game state...");
+                        state.shutdown();
+                    }
                     running = false;
                 }
                 MainEvent::Resume { .. } => {
@@ -1040,7 +1071,13 @@ pub fn android_main(app: AndroidApp) {
                         }
                     }
                 }
-                MainEvent::Pause => {}
+                MainEvent::Pause => {
+                    // 暂停时保存游戏状态（Android 可能在暂停后直接杀死应用）
+                    if let Some(state) = &mut game_state {
+                        log_info("[Android] Pause event, saving game state...");
+                        state.shutdown();
+                    }
+                }
                 _ => {}
             },
             PollEvent::Wake => {}
@@ -1442,10 +1479,24 @@ fn run_cpu_fallback(app: AndroidApp) {
                 MainEvent::TerminateWindow { .. } => {
                     display.set_native_window(None);
                 }
-                MainEvent::Destroy => { running = false; }
+                MainEvent::Destroy => {
+                    // 应用销毁时保存游戏状态
+                    if let Some(state) = &mut game_state {
+                        log_info("[CPU] Destroy event, saving game state...");
+                        state.shutdown();
+                    }
+                    running = false;
+                }
                 MainEvent::Resume { .. } => {
                     if let Some(window) = app.native_window() {
                         display.set_native_window(Some(window));
+                    }
+                }
+                MainEvent::Pause => {
+                    // 暂停时保存游戏状态（Android 可能在暂停后直接杀死应用）
+                    if let Some(state) = &mut game_state {
+                        log_info("[CPU] Pause event, saving game state...");
+                        state.shutdown();
                     }
                 }
                 _ => {}
