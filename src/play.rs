@@ -279,21 +279,28 @@ impl Play {
             return PlayResult::GameOver;
         }
 
-        // Pascal: Demo模式下按任意键退出
+        // Pascal: Demo模式下按任意键或手柄按钮退出
         // PLAY.PAS line 513-517: if Key <> #0 then begin GameDone := TRUE; Passed := TRUE; end;
-        if self.demo_mode && keyboard.kb_hit() {
-            // 按任意键退出Demo
+        // 手柄: 任意按钮 (A/B/X/Y/LB/RB/START/SELECT) 也可以退出Demo
+        joystick.read();
+        let gamepad_any_button = joystick.detected && 
+            (joystick.button_a || joystick.button_b || joystick.button_x || joystick.button_y ||
+             joystick.button_lb || joystick.button_rb || joystick.button_start || joystick.button_select);
+        if self.demo_mode && (keyboard.kb_hit() || gamepad_any_button) {
+            // 按任意键或手柄按钮退出Demo
             return PlayResult::GameOver;
         }
 
-        // 检查ESC键（暂停状态下不退出游戏，ESC用于退出暂停）
+        // 检查ESC键或手柄SELECT键（暂停状态下不退出游戏，ESC用于退出暂停）
         // 使用kb_key检测ESC键状态，添加去抖动逻辑防止重复触发
+        // 手柄: SELECT键 = 返回/退出 (与Windows手柄一致)
         // 注意：渐隐过程中不再检测ESC，让状态机处理
         if self.phase != PlayPhase::Paused && self.phase != PlayPhase::FadingDownForQuit {
-            let esc_key_held = keyboard.kb_key(1); // ESC键扫描码是1
+            // 手柄状态已在上面读取
+            let esc_key_held = keyboard.kb_key(1) || joystick.button_select; // ESC键或手柄SELECT
 
             if esc_key_held && !self.esc_key_was_pressed {
-                // ESC键刚被按下，启动渐隐后退出
+                // ESC键或SELECT键刚被按下，启动渐隐后退出
                 self.esc_key_was_pressed = true;
                 buffers.quit_game = true;
                 // 启动非阻塞渐隐（ render_state.palette已经是当前显示的调色板）
@@ -302,7 +309,7 @@ impl Play {
                 // 不要return，让状态机处理
             }
 
-            // ESC键释放时重置标志
+            // ESC键/SELECT键释放时重置标志
             if !esc_key_held {
                 self.esc_key_was_pressed = false;
             }
@@ -843,6 +850,7 @@ impl Play {
                 enemies,
                 tmpobj,
                 keyboard,
+                joystick,
             ),
 
             // 管道传送渐隐中
@@ -1102,11 +1110,12 @@ impl Play {
             }
         }
 
-        // P - pause (扫描码 25)
+        // P 或 手柄START - pause (P键扫描码 25)
         // 使用kb_key检测P键状态，添加去抖动逻辑防止重复触发
-        let p_key_held = keyboard.kb_key(25);
+        // 手柄: START键 = 暂停 (与Windows/Android手柄一致)
+        let p_key_held = keyboard.kb_key(25) || joystick.button_start;
         if p_key_held && !self.p_key_was_pressed {
-            // P键刚被按下，进入暂停状态
+            // P键或START键刚被按下，进入暂停状态
             self.p_key_was_pressed = true;
             self.start_pause(
                 render_state,
@@ -1128,7 +1137,7 @@ impl Play {
             return PlayResult::Continue;
         }
         if !p_key_held {
-            // P键已释放，重置标志
+            // P键/START键已释放，重置标志
             self.p_key_was_pressed = false;
         }
 
@@ -1681,18 +1690,20 @@ impl Play {
         enemies: &mut Enemies,
         tmpobj: &mut TmpObjManager,
         keyboard: &mut Keyboard,
+        joystick: &mut JoystickState,
     ) -> crate::mario::PlayResult {
         use crate::mario::PlayResult;
 
-        // 轮询按键
+        // 轮询按键和手柄
         keyboard.poll_os_keys();
+        joystick.read();
 
         // 使用kb_hit检测是否有新按键事件
         let has_key_event = keyboard.kb_hit();
         let current_scan_code = keyboard.get_current_scan_code().unwrap_or(0);
 
-        // 使用kb_key检测P键是否被按住
-        let p_key_held = keyboard.kb_key(25); // P键扫描码是25
+        // 使用kb_key检测P键或手柄START键是否被按住
+        let p_key_held = keyboard.kb_key(25) || joystick.button_start; // P键或START键
 
         match self.pause_state {
             PauseState::Init => {
@@ -1702,9 +1713,9 @@ impl Play {
             }
 
             PauseState::WaitingPRelease => {
-                // 等待P键释放（使用kb_key检测P键是否被按住）
+                // 等待P键/START键释放
                 if !p_key_held {
-                    // P键已释放，进入等待输入状态
+                    // P键/START键已释放，进入等待输入状态
                     self.pause_old_scan_code = 0;
                     keyboard.clear_key(); // 清除按键状态
                     self.pause_state = PauseState::WaitingInput;
@@ -1715,8 +1726,16 @@ impl Play {
             PauseState::WaitingInput => {
                 let mut end_pause = false;
 
+                // 检测手柄按钮退出暂停 (A/B/START/SELECT)
+                let gamepad_resume = joystick.detected && 
+                    (joystick.button_a || joystick.button_b || 
+                     joystick.button_start || joystick.button_select);
+                if gamepad_resume {
+                    end_pause = true;
+                }
+
                 // 检测是否有新按键事件
-                if has_key_event && current_scan_code != 0 && current_scan_code < 0x80 {
+                if !end_pause && has_key_event && current_scan_code != 0 && current_scan_code < 0x80 {
                     // 有新的按键按下事件
 
                     // 检查是否按下Tab进入作弊模式

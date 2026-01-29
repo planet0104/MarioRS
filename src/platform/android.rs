@@ -5,12 +5,13 @@
 //
 // 重要: 这个模块依赖 android-activity, 其他游戏模块通过 platform.rs 抽象访问
 //
-// Android TV 遥控器支持:
-// TV遥控器按键通过 nativeOnKeyEvent 传递原始 Android KeyCode
-// Rust 端的 joystick_android_tv 模块处理遥控器状态管理
-// 与手柄逻辑完全分离，互不影响
+// 输入架构 (手柄与遥控器完全分离):
+// - 手柄: Java GamepadController -> nativeOnGamepadButton/Axis -> joystick_android.rs
+// - 遥控器: Java RemoteController -> nativeOnRemoteKey -> joystick_android_tv.rs
+// - 虚拟按钮: Java VirtualController -> nativeOnButtonEvent -> 键盘事件队列
 
 use super::common::{CommonRandom, CommonTime, FileStorage, FpsCounter};
+use super::joystick_android;
 use super::joystick_android_tv;
 use super::{
     DisplayBackend, InputBackend, KeyCode as PlatformKeyCode, KeyEvent as PlatformKeyEvent,
@@ -72,7 +73,68 @@ pub extern "C" fn Java_com_mariogame_mario_MainActivity_nativeOnButtonEvent(
     }
 }
 
-/// JNI 导出函数 - 由 Java MainActivity 调用 (软键盘按键)
+// ============================================================================
+// 手柄专用 JNI 接口 (与遥控器完全分离)
+// Java GamepadController -> Rust joystick_android 模块
+// ============================================================================
+
+/// JNI 导出函数 - 手柄按钮事件
+/// 由 Java GamepadController.handleKeyEvent() 调用
+#[unsafe(no_mangle)]
+pub extern "C" fn Java_com_mariogame_mario_MainActivity_nativeOnGamepadButton(
+    _env: *mut std::ffi::c_void,
+    _class: *mut std::ffi::c_void,
+    key_code: i32,
+    pressed: i32,
+) {
+    log_debug(&format!("[JNI Gamepad] button key_code={}, pressed={}", key_code, pressed != 0));
+    // 直接转发到手柄模块
+    joystick_android::on_gamepad_button(key_code, pressed != 0);
+    joystick_android::on_gamepad_connected();
+}
+
+/// JNI 导出函数 - 手柄摇杆轴事件
+/// 由 Java GamepadController.handleMotionEvent() 调用
+#[unsafe(no_mangle)]
+pub extern "C" fn Java_com_mariogame_mario_MainActivity_nativeOnGamepadAxis(
+    _env: *mut std::ffi::c_void,
+    _class: *mut std::ffi::c_void,
+    axis_id: i32,
+    value: f32,
+) {
+    // 直接转发到手柄模块
+    joystick_android::on_gamepad_axis(axis_id, value);
+}
+
+// ============================================================================
+// 遥控器专用 JNI 接口 (与手柄完全分离)
+// Java RemoteController -> Rust joystick_android_tv 模块
+// ============================================================================
+
+/// JNI 导出函数 - 遥控器按键事件
+/// 由 Java RemoteController.handleKeyEvent() 调用
+#[unsafe(no_mangle)]
+pub extern "C" fn Java_com_mariogame_mario_MainActivity_nativeOnRemoteKey(
+    _env: *mut std::ffi::c_void,
+    _class: *mut std::ffi::c_void,
+    key_code: i32,
+    pressed: i32,
+) {
+    log_debug(&format!("[JNI Remote] key_code={}, pressed={}", key_code, pressed != 0));
+    // 直接转发到遥控器模块
+    joystick_android_tv::on_tv_remote_key(key_code, pressed != 0);
+    
+    // 同时加入软键盘事件队列 (用于键盘输入处理，如菜单导航)
+    if let Ok(mut queue) = SOFT_KEY_EVENTS.lock() {
+        queue.push(SoftKeyEvent { key_code, pressed: pressed != 0 });
+    }
+}
+
+// ============================================================================
+// 兼容性: 保留旧的 nativeOnKeyEvent (已弃用，仅用于软键盘)
+// ============================================================================
+
+/// JNI 导出函数 - 软键盘按键 (已弃用，保留兼容性)
 #[unsafe(no_mangle)]
 pub extern "C" fn Java_com_mariogame_mario_MainActivity_nativeOnKeyEvent(
     _env: *mut std::ffi::c_void,
@@ -80,7 +142,7 @@ pub extern "C" fn Java_com_mariogame_mario_MainActivity_nativeOnKeyEvent(
     key_code: i32,
     pressed: i32,
 ) {
-    log_info(&format!("[JNI KeyEvent] key_code={}, pressed={}", key_code, pressed != 0));
+    // 旧接口，转发到软键盘队列
     if let Ok(mut queue) = SOFT_KEY_EVENTS.lock() {
         queue.push(SoftKeyEvent { key_code, pressed: pressed != 0 });
     }
@@ -231,9 +293,66 @@ pub fn soft_key_to_platform_event(event: &SoftKeyEvent) -> PlatformKeyEvent {
 
 use android_activity::{
     AndroidApp, InputStatus, MainEvent, PollEvent,
-    input::{InputEvent, KeyAction, Keycode, MotionAction},
+    input::{InputEvent, KeyAction, Keycode, Source},
 };
 use ndk::native_window::NativeWindow;
+
+// ============================================================================
+// 手柄输入辅助函数
+// ============================================================================
+
+/// 检查 keycode 是否为手柄专用按键 (不包含 DPAD，因为 DPAD 可能来自遥控器)
+fn is_gamepad_only_keycode(keycode: Keycode) -> bool {
+    matches!(
+        keycode,
+        // 手柄主要按钮
+        Keycode::ButtonA
+            | Keycode::ButtonB
+            | Keycode::ButtonC
+            | Keycode::ButtonX
+            | Keycode::ButtonY
+            | Keycode::ButtonZ
+            // 肩键和扳机
+            | Keycode::ButtonL1
+            | Keycode::ButtonR1
+            | Keycode::ButtonL2
+            | Keycode::ButtonR2
+            // 功能键
+            | Keycode::ButtonSelect
+            | Keycode::ButtonStart
+            | Keycode::ButtonMode
+            // 摇杆按下
+            | Keycode::ButtonThumbl
+            | Keycode::ButtonThumbr
+    )
+}
+
+/// 检查 keycode 是否为 DPAD 方向键
+fn is_dpad_keycode(keycode: Keycode) -> bool {
+    matches!(
+        keycode,
+        Keycode::DpadUp | Keycode::DpadDown | Keycode::DpadLeft | Keycode::DpadRight
+    )
+}
+
+/// 检查 MotionEvent 的 source 是否为手柄/摇杆
+fn is_gamepad_motion_source(source: Source) -> bool {
+    // 直接比较 Source 枚举值
+    source == Source::Gamepad || source == Source::Joystick
+}
+
+/// 处理手柄摇杆 MotionEvent
+/// 
+/// 目前只标记手柄已连接，轴值处理依赖按键事件 (DPAD 等)
+/// 摇杆的模拟轴支持可以在后续版本中添加
+fn handle_gamepad_motion(_motion_event: &android_activity::input::MotionEvent) {
+    // 标记手柄已连接
+    joystick_android::on_gamepad_connected();
+    
+    // TODO: 添加摇杆轴值读取
+    // android-activity 0.6 的 Pointer API 需要进一步研究
+    // 当前版本主要依赖手柄的 DPAD 按键和按钮事件
+}
 
 // ============================================================================
 // 常量定义
@@ -894,16 +1013,38 @@ pub fn android_main(app: AndroidApp) {
             _ => {}
         });
 
-        // 处理输入事件 - 快速消费事件队列
+        // 处理 native 层输入事件
+        // 注意: 手柄和遥控器输入已由 Java 层分离处理，通过专用 JNI 接口转发
+        // 这里只处理可能绕过 Java dispatchKeyEvent 的底层事件 (如物理键盘)
         if let Ok(mut iter) = app.input_events_iter() {
             loop {
                 let read_event = iter.next(|event| {
                     match event {
                         InputEvent::KeyEvent(key_event) => {
-                            input.handle_key(key_event.key_code(), key_event.action());
+                            let keycode = key_event.key_code();
+                            let action = key_event.action();
+                            let android_keycode = u32::from(keycode) as i32;
+                            let pressed = action == KeyAction::Down;
+                            
+                            // 手柄专用按键: 转发到 joystick_android 模块
+                            // (备用路径，主要路径是 Java GamepadController)
+                            if is_gamepad_only_keycode(keycode) {
+                                joystick_android::on_gamepad_connected();
+                                joystick_android::on_gamepad_button(android_keycode, pressed);
+                            } else if is_dpad_keycode(keycode) {
+                                // DPAD 按键: 转发到键盘输入系统
+                                // (备用路径，主要路径是 Java RemoteController/GamepadController)
+                                input.handle_key(keycode, action);
+                            } else {
+                                // 其他按键: 使用键盘输入逻辑
+                                input.handle_key(keycode, action);
+                            }
                         }
-                        InputEvent::MotionEvent(_) => {
-                            // 触摸事件由 Java 原生按钮处理
+                        InputEvent::MotionEvent(motion_event) => {
+                            // 手柄摇杆事件 (备用路径，主要路径是 Java GamepadController)
+                            if is_gamepad_motion_source(motion_event.source()) {
+                                handle_gamepad_motion(&motion_event);
+                            }
                         }
                         _ => {}
                     }
@@ -925,18 +1066,13 @@ pub fn android_main(app: AndroidApp) {
             }
         }
         
-        // 处理软键盘事件 (来自 Java dispatchKeyEvent / RemoteController)
-        // TV遥控器按键通过 nativeOnKeyEvent 传递原始 Android KeyCode
-        // 同时更新 joystick_android_tv 模块的遥控器状态
+        // 处理软键盘/遥控器事件队列
+        // 注意: 遥控器状态已由 nativeOnRemoteKey 直接更新到 joystick_android_tv 模块
+        // 这里只负责将事件转换为平台按键事件，用于游戏菜单导航等
         if let Some(state) = &mut game_state {
             for soft_event in take_soft_key_events() {
-                // 更新 TV 遥控器状态 (独立于手柄逻辑)
-                joystick_android_tv::on_tv_remote_key(soft_event.key_code, soft_event.pressed);
-                
                 // 转换为平台按键事件并处理
                 let key_event = soft_key_to_platform_event(&soft_event);
-                log_info(&format!("[SoftKey] android_code={}, platform_key={:?}, pressed={}", 
-                    soft_event.key_code, key_event.key, key_event.pressed));
                 if key_event.key != PlatformKeyCode::Unknown {
                     state.handle_key_event(&key_event);
                 }

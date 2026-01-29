@@ -146,6 +146,7 @@ pub struct Intro {
     js_last_up: bool,
     js_last_down: bool,
     js_last_button: bool,
+    js_last_back: bool,
 }
 
 use crate::mario::{ConfigData, IntroResult};
@@ -196,6 +197,7 @@ impl Intro {
             js_last_up: false,
             js_last_down: false,
             js_last_button: false,
+            js_last_back: false,
         }
     }
 
@@ -612,6 +614,10 @@ impl Intro {
                 }
 
                 // 处理手柄输入 (菜单导航)
+                // 按钮映射 (与 Windows 手柄一致):
+                // - A/START: 确认 (Enter)
+                // - SELECT/B: 返回 (ESC) - B键在子菜单中作为返回
+                // - 方向键: 菜单导航
                 joystick.read();
                 if joystick.detected {
                     // 方向上 (边沿触发，防止连续触发)
@@ -630,9 +636,10 @@ impl Intro {
                         }
                         self.macro_key = 'D';
                     }
-                    // 按钮确认 (button1 = 跳跃/确认)
-                    let button_pressed = joystick.button1 || joystick.button2;
-                    if button_pressed && !self.js_last_button {
+                    
+                    // 确认按钮: A / START (不包括B，B用于返回)
+                    let confirm_pressed = joystick.button_a || joystick.button_start;
+                    if confirm_pressed && !self.js_last_button {
                         // 模拟 Enter 键 (scan_code = 28)
                         self.handle_keyboard_input(
                             28,
@@ -645,10 +652,31 @@ impl Intro {
                             cur_player as usize,
                         );
                     }
+                    
+                    // 返回按钮: SELECT 或 B (在子菜单中)
+                    // SELECT: 总是作为返回/ESC
+                    // B: 在子菜单中作为返回，在主菜单中不退出游戏
+                    let back_pressed = joystick.button_select || 
+                        (joystick.button_b && self.status != IntroStatus::Menu);
+                    if back_pressed && !self.js_last_back {
+                        // 模拟 ESC 键 (scan_code = 1)
+                        self.handle_keyboard_input(
+                            1,
+                            buffers,
+                            game_number,
+                            &mut quit_game,
+                            play,
+                            music,
+                            config,
+                            cur_player as usize,
+                        );
+                    }
+                    
                     // 更新防抖状态
                     self.js_last_up = joystick.up;
                     self.js_last_down = joystick.down;
-                    self.js_last_button = button_pressed;
+                    self.js_last_button = confirm_pressed;
+                    self.js_last_back = back_pressed;
                 }
 
                 if self.macro_key != '\0' {

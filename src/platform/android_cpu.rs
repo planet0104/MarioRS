@@ -5,8 +5,14 @@
 //
 // 架构:
 // 游戏逻辑 -> RenderCommand -> CpuRenderer -> RGBA帧缓冲 -> ANativeWindow
+//
+// 输入架构 (手柄与遥控器完全分离):
+// - 手柄: Java GamepadController -> nativeOnGamepadButton/Axis -> joystick_android.rs
+// - 遥控器: Java RemoteController -> nativeOnRemoteKey -> joystick_android_tv.rs
+// - 虚拟按钮: Java VirtualController -> nativeOnButtonEvent -> 键盘事件队列
 
 use super::common::{CommonRandom, CommonTime, FileStorage, FpsCounter};
+use super::joystick_android;
 use super::joystick_android_tv;
 use super::{
     DisplayBackend, InputBackend, KeyCode as PlatformKeyCode, KeyEvent as PlatformKeyEvent,
@@ -68,7 +74,62 @@ pub extern "C" fn Java_com_mariogame_mario_MainActivity_nativeOnButtonEvent(
     }
 }
 
-/// JNI 导出函数 - 软键盘按键事件
+// ============================================================================
+// 手柄专用 JNI 接口 (与遥控器完全分离)
+// Java GamepadController -> Rust joystick_android 模块
+// ============================================================================
+
+/// JNI 导出函数 - 手柄按钮事件
+#[unsafe(no_mangle)]
+pub extern "C" fn Java_com_mariogame_mario_MainActivity_nativeOnGamepadButton(
+    _env: *mut std::ffi::c_void,
+    _class: *mut std::ffi::c_void,
+    key_code: i32,
+    pressed: i32,
+) {
+    log_debug(&format!("[JNI Gamepad] button key_code={}, pressed={}", key_code, pressed != 0));
+    joystick_android::on_gamepad_button(key_code, pressed != 0);
+    joystick_android::on_gamepad_connected();
+}
+
+/// JNI 导出函数 - 手柄摇杆轴事件
+#[unsafe(no_mangle)]
+pub extern "C" fn Java_com_mariogame_mario_MainActivity_nativeOnGamepadAxis(
+    _env: *mut std::ffi::c_void,
+    _class: *mut std::ffi::c_void,
+    axis_id: i32,
+    value: f32,
+) {
+    joystick_android::on_gamepad_axis(axis_id, value);
+}
+
+// ============================================================================
+// 遥控器专用 JNI 接口 (与手柄完全分离)
+// Java RemoteController -> Rust joystick_android_tv 模块
+// ============================================================================
+
+/// JNI 导出函数 - 遥控器按键事件
+#[unsafe(no_mangle)]
+pub extern "C" fn Java_com_mariogame_mario_MainActivity_nativeOnRemoteKey(
+    _env: *mut std::ffi::c_void,
+    _class: *mut std::ffi::c_void,
+    key_code: i32,
+    pressed: i32,
+) {
+    log_debug(&format!("[JNI Remote] key_code={}, pressed={}", key_code, pressed != 0));
+    joystick_android_tv::on_tv_remote_key(key_code, pressed != 0);
+    
+    // 同时加入软键盘事件队列
+    if let Ok(mut queue) = SOFT_KEY_EVENTS.lock() {
+        queue.push(SoftKeyEvent { key_code, pressed: pressed != 0 });
+    }
+}
+
+// ============================================================================
+// 兼容性: 保留旧的 nativeOnKeyEvent
+// ============================================================================
+
+/// JNI 导出函数 - 软键盘按键事件 (已弃用，保留兼容性)
 #[unsafe(no_mangle)]
 pub extern "C" fn Java_com_mariogame_mario_MainActivity_nativeOnKeyEvent(
     _env: *mut std::ffi::c_void,
@@ -76,7 +137,6 @@ pub extern "C" fn Java_com_mariogame_mario_MainActivity_nativeOnKeyEvent(
     key_code: i32,
     pressed: i32,
 ) {
-    log_info(&format!("[JNI KeyEvent] key_code={}, pressed={}", key_code, pressed != 0));
     if let Ok(mut queue) = SOFT_KEY_EVENTS.lock() {
         queue.push(SoftKeyEvent { key_code, pressed: pressed != 0 });
     }
@@ -716,12 +776,11 @@ pub fn android_main(app: AndroidApp) {
             }
         }
 
-        // 处理软键盘事件 (来自 Java dispatchKeyEvent / RemoteController)
-        // TV遥控器按键通过 nativeOnKeyEvent 传递原始 Android KeyCode
-        // 同时更新 joystick_android_tv 模块的遥控器状态
+        // 处理软键盘/遥控器事件队列
+        // 注意: 遥控器状态已由 nativeOnRemoteKey 直接更新到 joystick_android_tv 模块
+        // 这里只负责将事件转换为平台按键事件，用于游戏菜单导航等
         if let Some(state) = &mut game_state {
             for soft_event in take_soft_key_events() {
-                joystick_android_tv::on_tv_remote_key(soft_event.key_code, soft_event.pressed);
                 let key_event = soft_key_to_platform_event(&soft_event);
                 if key_event.key != PlatformKeyCode::Unknown {
                     state.handle_key_event(&key_event);

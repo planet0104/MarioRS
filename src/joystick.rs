@@ -5,17 +5,22 @@
 // - 提供易于测试的 API
 // - 支持未来的输入系统整合
 //
-// 手柄/遥控器支持：
+// 手柄支持 (与遥控器完全分离):
 // - Windows: 使用 winmm.dll (Multimedia Joystick API)
-// - Android TV: 遥控器按键由 Java 层通过 nativeOnKeyEvent 传入
-//               Rust 端使用 platform::joystick_android_tv 维护遥控器状态
+// - Android: USB/蓝牙手柄，由 Java GamepadController 通过 nativeOnGamepadButton/Axis 传入
+//            Rust 端使用 platform::joystick_android 维护手柄状态
 // - 其他平台: 占位实现 (可扩展)
+//
+// 注意: Android TV 遥控器由独立的 joystick_android_tv 模块处理
+//       游戏逻辑层应分别读取手柄和遥控器状态
 
 // Windows 手柄后端
 #[cfg(target_os = "windows")]
 use crate::platform::joystick_win::WinJoystick;
 
-// Android TV 遥控器后端
+// Android 手柄和遥控器后端
+#[cfg(target_os = "android")]
+use crate::platform::joystick_android;
 #[cfg(target_os = "android")]
 use crate::platform::joystick_android_tv;
 
@@ -158,32 +163,39 @@ impl JoystickState {
 
         #[cfg(target_os = "android")]
         {
-            let tv = joystick_android_tv::peek_tv_remote_state();
+            // 只读取 USB/蓝牙手柄状态
+            // 游戏逻辑层应分别读取两个模块的状态
+            let gamepad = joystick_android::read_gamepad_state();
 
-            self.detected = tv.detected;
-            self.enabled = tv.detected;
+            // 手柄连接状态
+            self.detected = gamepad.connected;
+            self.enabled = gamepad.connected;
 
-            // 方向
-            self.left = tv.left;
-            self.right = tv.right;
-            self.up = tv.up;
-            self.down = tv.down;
+            // 方向: 只来自手柄
+            self.left = gamepad.left;
+            self.right = gamepad.right;
+            self.up = gamepad.up;
+            self.down = gamepad.down;
 
-            // TV遥控器: OK键作为确认/跳跃(button1)，下键同时作为发射(button_x)
-            self.button1 = tv.ok;
-            self.button_x = tv.down;
+            // 主要按钮 (A/B/X/Y) - 来自手柄
+            self.button_a = gamepad.button_a;
+            self.button_b = gamepad.button_b;
+            self.button_x = gamepad.button_x;
+            self.button_y = gamepad.button_y;
+            
+            // 肩键 (LB/RB) - 来自手柄
+            self.button_lb = gamepad.button_lb;
+            self.button_rb = gamepad.button_rb;
+            
+            // 功能键 - 来自手柄
+            self.button_select = gamepad.button_select;
+            self.button_start = gamepad.button_start;
 
-            // 其他按钮保持关闭，由虚拟按键或其他输入链路处理
-            self.button2 = false;
-            self.button_a = false;
-            self.button_b = false;
-            self.button_y = false;
-            self.button_lb = false;
-            self.button_rb = false;
-            self.button_select = false;
-            self.button_start = false;
+            // 兼容旧接口 - 只来自手柄
+            self.button1 = gamepad.button1;
+            self.button2 = gamepad.button2;
 
-            self.button_pressed = self.button1 || self.button_x;
+            self.button_pressed = self.button_a || self.button_b || self.button_x || self.button_y;
         }
 
         #[cfg(all(not(target_os = "windows"), not(target_os = "android")))]
@@ -236,10 +248,15 @@ impl JoystickState {
             self.backend.is_connected()
         }
 
-        #[cfg(not(target_os = "windows"))]
+        #[cfg(target_os = "android")]
         {
-            // 其他平台 (包括 Android): 返回 false
-            // Android TV 遥控器输入通过键盘/按钮事件处理，不使用手柄后端
+            // Android: 检查 USB/蓝牙手柄是否连接
+            joystick_android::is_gamepad_connected()
+        }
+
+        #[cfg(all(not(target_os = "windows"), not(target_os = "android")))]
+        {
+            // 其他平台: 返回 false
             false
         }
     }
@@ -266,29 +283,4 @@ impl JoystickState {
         self.button_a || self.button_b || self.button_x || self.button_y
             || self.button_lb || self.button_rb
     }
-}
-
-// ============================================================================
-// 向后兼容的全局函数（如果需要的话，未来可以移除）
-// ============================================================================
-
-/// 占位函数：读取手柄（向后兼容）
-///
-/// 注意：新代码应该使用 JoystickState 实例方法
-pub fn read_joystick() {
-    // 占位实现
-}
-
-/// 占位函数：重置手柄（向后兼容）
-///
-/// 注意：新代码应该使用 JoystickState 实例方法
-pub fn reset_joystick() {
-    // 占位实现
-}
-
-/// 占位函数：校准手柄（向后兼容）
-///
-/// 注意：新代码应该使用 JoystickState 实例方法
-pub fn calibrate() {
-    // 占位实现
 }

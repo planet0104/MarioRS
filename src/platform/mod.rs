@@ -26,6 +26,10 @@ pub mod joystick_win;
 #[cfg(target_os = "android")]
 pub mod joystick_android_tv;
 
+// Android 手柄支持 (USB/蓝牙手柄)
+#[cfg(target_os = "android")]
+pub mod joystick_android;
+
 // Windows GDI + wgpu 后端（需要同时启用 gdi-backend 和 wgpu-backend）
 #[cfg(all(target_os = "windows", feature = "gdi-backend", feature = "wgpu-backend", not(feature = "cpu-backend")))]
 mod windows;
