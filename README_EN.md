@@ -70,8 +70,8 @@ Supports Android TV remote control for playing on TV.
 
 | Key | Action |
 |-----|--------|
-| Up | Menu up / Jump |
-| Down | Menu down / Enter pipe / Fire |
+| Up | Menu up / Fire |
+| Down | Menu down / Enter pipe |
 | Left | Move left |
 | Right | Move right |
 | OK (Center) | Menu confirm / Jump |

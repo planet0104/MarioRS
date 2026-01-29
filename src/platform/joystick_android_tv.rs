@@ -15,8 +15,8 @@
 //! - 只有6个按键，无摇杆
 //!
 //! 按键映射:
-//! - 上键: 菜单向上 / 游戏中跳跃
-//! - 下键: 菜单向下 / 游戏中钻管道+发射子弹
+//! - 上键: 菜单向上 / 游戏中发射子弹
+//! - 下键: 菜单向下 / 游戏中钻管道
 //! - 左键: 左移动
 //! - 右键: 右移动
 //! - OK键: 菜单确认 / 游戏中跳跃
@@ -84,7 +84,7 @@ impl TvRemoteGlobalState {
 /// TV 遥控器输入快照 (用于游戏主循环读取)
 #[derive(Debug, Clone, Copy, Default)]
 pub struct TvRemoteSnapshot {
-    /// 方向上 (菜单向上)
+    /// 方向上 (菜单向上/游戏中发射子弹)
     pub up: bool,
     /// 方向下 (菜单向下/钻管道)
     pub down: bool,
@@ -98,7 +98,7 @@ pub struct TvRemoteSnapshot {
     pub back: bool,
     /// 是否检测到遥控器
     pub detected: bool,
-    /// 上键按下边沿 (用于游戏中跳跃)
+    /// 上键按下边沿 (用于游戏中发射子弹)
     pub up_pressed_once: bool,
     /// OK键按下边沿 (用于跳跃/确认)
     pub ok_pressed_once: bool,
