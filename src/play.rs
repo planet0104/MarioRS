@@ -599,6 +599,18 @@ impl Play {
                 // 进入Restart阶段时必须重置为true，否则敌人不可见但仍有碰撞判定
                 self.show_objects = true;
 
+                // 关键修复：清除残留的跳跃边沿状态
+                // 防止从菜单进入游戏时触发意外跳跃
+                // 问题原因：intro菜单阶段未消费keyboard.alt_pressed_once，
+                // 或者TV遥控器/虚拟按钮在菜单淡出期间产生了新的边沿事件
+                let _ = keyboard.take_alt_pressed_once();
+                players.alt_pressed_once = false;
+                #[cfg(target_os = "android")]
+                {
+                    // 消费残留的TV遥控器边沿状态
+                    let _ = crate::platform::joystick_android_tv::read_tv_remote_state();
+                }
+
                 let current_opt = self.get_current_opt(buffers);
 
                 // 关键修复：只有死亡重启才重置玩家位置和x_view
