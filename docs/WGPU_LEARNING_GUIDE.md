@@ -315,11 +315,11 @@ impl ApplicationHandler for GameApp {
 
 ### 3.2 帧渲染流程
 
-每帧的渲染在 `RedrawRequested` 事件中完成：
+每帧的渲染在 `RedrawRequested` 事件中完成，参考 `src/platform/desktop.rs`：
 
 ```rust
 WindowEvent::RedrawRequested => {
-    // 1. 帧率控制
+    // 1. 帧率控制（60FPS）
     if !self.frame_timer.should_render() {
         self.display.request_redraw();
         return;
@@ -336,17 +336,22 @@ WindowEvent::RedrawRequested => {
     let output = surface.get_current_texture()?;
     let view = output.texture.create_view(&Default::default());
 
-    // 5. 更新缩放参数并渲染
+    // 5. 更新缩放参数
     gpu_renderer.update_scale(width, height);
+
+    // 6. 合并渲染：一次GPU提交完成所有渲染
+    // render_frame_and_present 将三个Pass合并到单次命令提交
     gpu_renderer.render_frame_and_present(&view);
 
-    // 6. 呈现到屏幕
+    // 7. 呈现到屏幕
     output.present();
 
-    // 7. 请求下一帧
+    // 8. 请求下一帧
     self.display.request_redraw();
 }
 ```
+
+**性能优化说明**：`render_frame_and_present()` 方法将原本分离的 `render_frame()` 和 `render_to_surface()` 合并为单次GPU命令提交，减少了CPU-GPU同步开销。
 
 ### 3.3 游戏状态更新
 
@@ -379,16 +384,17 @@ impl GameState {
         }
 
         // 只在调色板变化时上传（淡入淡出效果）
+        let current_palette = &self.render_state.palette.palette;
         if current_palette != &self.last_palette {
             let palette_rgba = self.get_palette_rgba();
             gpu.upload_palette(0, &palette_rgba);
             self.last_palette = *current_palette;
         }
 
-        // 开始新一帧
+        // 开始新一帧（清空渲染批次）
         gpu.begin_frame();
 
-        // 提交渲染命令
+        // 直接从SpriteBatch获取数据并提交（避免额外Vec分配）
         let batch = self.render_state.get_sprite_batch();
         
         // 填充矩形（背景层）
@@ -400,32 +406,135 @@ impl GameState {
         for sprite in batch.sprites_iter() {
             gpu.draw_sprite(sprite.to_instance());
         }
+
+        // 直接实例（预构建的SpriteInstance）
+        for inst in batch.instances_iter() {
+            gpu.draw_sprite(*inst);
+        }
         
-        // UI层填充矩形（状态栏等）
+        // UI层填充矩形（状态栏等，在sprites之后渲染）
         for fill in batch.ui_fills_iter() {
             gpu.draw_ui_fill(fill.to_fill_rect());
         }
+
+        // 注意：不再调用 render_frame()
+        // 由平台层调用 render_frame_and_present() 完成渲染和呈现
     }
 }
 ```
 
+**CPU渲染后端**：项目同时支持CPU软件渲染作为备选方案，通过 `submit_to_cpu()` 方法实现，适用于不支持GPU的环境。
+```
+
 ### 3.4 渲染流程图
+
+**GPU渲染管线（render_frame_and_present 合并优化）**：
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│ Pass 1: 游戏渲染 (render_frame)                                         │
+│ 单次命令提交 (render_frame_and_present)                                 │
+├─────────────────────────────────────────────────────────────────────────┤
+│ Pass 1: 游戏渲染                                                        │
 │   目标: render_texture (320x182)                                        │
 │   内容: fills -> sprites -> ui_fills                                    │
 ├─────────────────────────────────────────────────────────────────────────┤
-│ Pass 2: 缩放输出 (render_to_surface)                                    │
+│ Pass 2: 缩放输出                                                        │
 │   目标: window surface (任意尺寸)                                       │
-│   内容: 等比例缩放游戏画面                                              │
+│   内容: 等比例缩放游戏画面到窗口                                        │
 ├─────────────────────────────────────────────────────────────────────────┤
-│ Pass 3: UI叠加 (render_to_surface)                                      │
+│ Pass 3: 叠加层                                                          │
 │   目标: window surface                                                  │
-│   内容: 触摸面板、FPS显示等                                             │
+│   内容: 触摸面板（Android）、调试信息等                                 │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
+
+**游戏内容渲染层级（Pass 1 详细）**：
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│ 渲染顺序（从底层到顶层，由 Renderer::collect_gpu_frame 收集）           │
+├─────────────────────────────────────────────────────────────────────────┤
+│  1. 天空层 (Sky)         - 填充矩形，调色板渐变色                       │
+│  2. 星星层 (Stars)       - 夜空关卡的星星粒子                           │
+│  3. 背景层 (Background)  - 山丘/云朵等装饰，填充矩形                    │
+│  4. 地图层 (Tilemap)     - 砖块、地面、水管等，精灵渲染                 │
+│  5. 敌人层 (Enemies)     - 板栗仔、乌龟等，精灵渲染                     │
+│  6. 玩家层 (Player)      - Mario/Luigi，精灵渲染                        │
+│  7. 管道遮挡层 (Pipe)    - 管道出入动画时的遮挡重绘                     │
+│  8. 临时对象层 (TmpObj)  - 碎片、火球等临时对象                         │
+│  9. 方块动画层 (Blocks)  - 方块碰撞弹跳效果                             │
+│ 10. 闪光特效层 (Glitter) - 金币收集、无敌星等闪光粒子                   │
+│ 11. UI层 (Status)        - 分数、生命、金币等，填充矩形                 │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### 3.5 统一渲染管线模块
+
+在 `src/renderer.rs` 中，`Renderer` 结构体负责统一管理所有渲染逻辑，将分散在各模块的渲染调用收敛到一处：
+
+```rust
+/// 渲染上下文 - 包含渲染一帧所需的所有引用
+pub struct RenderContext<'a> {
+    pub render_state: &'a mut RenderState,
+    pub buffers: &'a mut Buffers,
+    pub backgr: &'a mut BackGr,
+    pub figures: &'a mut Figures,
+    pub sprites: &'a mut SpriteDataManager,
+    pub atlas: &'a SpriteAtlas,
+    pub blocks: &'a mut Blocks,
+    pub enemies: &'a mut Enemies,
+    pub players: &'a mut Players,
+    pub tmpobj: &'a mut TmpObjManager,
+    pub stars: &'a mut Stars,
+    pub glitters: &'a mut GlitterSystem,
+    pub status: &'a mut Status,
+    pub txt: &'a mut Txt,
+}
+
+/// 渲染器 - 负责统一管理所有渲染逻辑
+pub struct Renderer {
+    pub show_objects: bool,   // 是否显示对象（blocks、enemies、tmpobj）
+    pub show_score: bool,     // 是否显示分数
+    pub show_status: bool,    // 是否显示状态栏
+    pub show_players: bool,   // 是否显示玩家
+    pub only_draw: bool,      // 是否仅绘制（intro模式）
+}
+```
+
+**核心方法 `collect_gpu_frame`**：
+
+```rust
+impl Renderer {
+    /// GPU模式：收集帧渲染命令
+    /// 替代直接绘制，收集所有渲染命令到Vec<RenderCommand>中
+    pub fn collect_gpu_frame(
+        &mut self,
+        ctx: &mut RenderContext,
+        atlas: &SpriteAtlas,
+    ) -> Vec<RenderCommand> {
+        let mut commands = Vec::with_capacity(2048);
+        
+        // 按层级顺序收集渲染命令
+        // 1. 天空层
+        // 2. 星星层（如果有）
+        // 3. 背景装饰层
+        // 4. 地形/方块层
+        // 5. 敌人层
+        // 6. 玩家层
+        // 7. 临时对象层
+        // 8. 方块动画层
+        // 9. 状态栏UI
+        // 10. 闪光特效层
+        
+        commands
+    }
+}
+```
+
+**设计优点**：
+- 明确渲染层级顺序，避免逻辑和渲染混杂
+- GPU模式每帧完全重绘，不需要hide/erase操作
+- 通过 `RenderContext` 统一传递所有渲染依赖
 
 ---
 
@@ -1980,32 +2089,39 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 2. 帧率控制
    └─ 检查是否应该渲染这一帧（60FPS）
 
-3. 游戏逻辑更新
+3. 游戏逻辑更新（MarioGame::frame_update）
    ├─ 处理玩家输入
    ├─ 更新物理状态
    ├─ 碰撞检测
    └─ 更新动画帧
 
-4. 渲染命令收集
+4. 渲染命令收集（Renderer::collect_gpu_frame）
    ├─ 清空SpriteBatch
-   ├─ 添加背景填充矩形
-   ├─ 添加地图精灵
-   ├─ 添加敌人精灵
-   ├─ 添加玩家精灵
-   └─ 添加UI层
+   ├─ 天空层（填充矩形）
+   ├─ 星星层（如果有）
+   ├─ 背景装饰层（山丘/云朵）
+   ├─ 地形层（砖块、地面、水管）
+   ├─ 敌人层
+   ├─ 玩家层
+   ├─ 管道遮挡层（出入动画）
+   ├─ 临时对象层（碎片、火球）
+   ├─ 方块动画层（弹跳效果）
+   ├─ 闪光特效层
+   └─ UI层（状态栏）
 
-5. GPU数据上传
+5. GPU数据上传（GameState::submit_to_gpu）
    ├─ 检查图集是否变化（关卡切换时上传）
    ├─ 检查调色板是否变化（淡入淡出时上传）
-   └─ 上传精灵实例数据
+   └─ 上传精灵/填充实例数据
 
-6. GPU渲染执行
-   ├─ Pass 1: 渲染到320x182纹理
+6. GPU渲染执行（GpuRenderer::render_frame_and_present）
+   ├─ Pass 1: 渲染到320x182内部纹理
    │   ├─ 填充矩形（背景层）
    │   ├─ 精灵（实体层）
    │   └─ UI填充（前景层）
-   ├─ Pass 2: 缩放到窗口
+   ├─ Pass 2: 缩放输出到窗口surface
    └─ Pass 3: 叠加层（触摸UI等）
+   └─ 单次命令提交（性能优化）
 
 7. 呈现
    └─ output.present()
@@ -2016,31 +2132,37 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
 ### 10.2 关键性能优化
 
-1. **实例化渲染** - 一次DrawCall绘制所有精灵
-2. **纹理图集** - 所有精灵打包到单个纹理，减少纹理切换
-3. **索引调色板** - 图集只需1字节/像素，节省显存
-4. **增量上传** - 只在变化时上传图集和调色板
-5. **预分配缓冲区** - 避免每帧创建新缓冲区
-6. **单次命令提交** - 合并所有Pass到一个CommandEncoder
+1. **实例化渲染** - 一次DrawCall绘制所有精灵（draw(0..6, 0..sprite_count)）
+2. **纹理图集** - 所有精灵打包到单个1024x1024纹理，减少纹理切换
+3. **索引调色板** - 图集使用R8格式（1字节/像素），节省显存
+4. **增量上传** - 只在变化时上传图集（关卡切换）和调色板（淡入淡出）
+5. **预分配缓冲区** - 使用缓冲池，容量不足时翻倍扩容
+6. **合并渲染** - `render_frame_and_present()` 将3个Pass合并到单次命令提交
+7. **迭代器直传** - `submit_to_gpu` 直接迭代SpriteBatch，避免额外Vec分配
+8. **GPU全帧重绘** - 无需hide/erase操作，简化渲染逻辑
 
 ### 10.3 核心代码文件索引
 
 | 文件 | 说明 |
 |------|------|
 | `src/main.rs` | 程序入口 |
-| `src/platform/desktop.rs` | 窗口和wgpu初始化 |
-| `src/game_runner.rs` | 游戏状态管理 |
+| `src/platform/desktop.rs` | 窗口和wgpu初始化、事件循环 |
+| `src/game_runner.rs` | 游戏状态管理、GPU/CPU数据提交 |
 | `src/mario.rs` | 游戏核心逻辑 |
+| `src/renderer.rs` | 统一渲染管线、渲染层级管理 |
+| `src/render_state.rs` | 渲染状态、SpriteBatch管理 |
 | `src/gpu/mod.rs` | GPU模块入口 |
-| `src/gpu/renderer.rs` | GPU渲染器核心 |
+| `src/gpu/renderer.rs` | GPU渲染器核心、render_frame_and_present |
 | `src/gpu/pipeline.rs` | 渲染管线创建 |
-| `src/gpu/types.rs` | 数据类型定义 |
-| `src/gpu/sprite_batch.rs` | 精灵批处理 |
-| `src/gpu/texture_atlas.rs` | 纹理图集 |
+| `src/gpu/types.rs` | GPU数据类型定义（SpriteInstance、FillRect等） |
+| `src/gpu/sprite_batch.rs` | 精灵批处理、渲染命令收集 |
+| `src/gpu/texture_atlas.rs` | 纹理图集打包 |
 | `src/gpu/shaders/sprite.wgsl` | 精灵着色器 |
 | `src/gpu/shaders/fill.wgsl` | 填充着色器 |
 | `src/gpu/shaders/scale.wgsl` | 缩放着色器 |
-| `src/render_state.rs` | 渲染状态管理 |
+| `src/gpu/shaders/overlay.wgsl` | 叠加层着色器 |
+| `src/cpu/mod.rs` | CPU软件渲染模块（备选方案） |
+| `src/cpu/renderer.rs` | CPU渲染器实现 |
 | `src/worlds/level_1.rs` | 第一关卡数据 |
 
 ---
@@ -2054,5 +2176,5 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
 ---
 
-*文档生成日期: 2026-01-23*
+*文档生成日期: 2026-01-30*
 *基于MarioRS wgpu分支代码*
