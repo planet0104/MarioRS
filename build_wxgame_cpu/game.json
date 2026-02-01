@@ -1,0 +1,12 @@
+{
+    "deviceOrientation": "landscape",
+    "showStatusBar": false,
+    "networkTimeout": {
+        "request": 10000,
+        "connectSocket": 10000
+    },
+    "keyboard": {
+        "onKeyDown": true,
+        "onKeyUp": true
+    }
+}

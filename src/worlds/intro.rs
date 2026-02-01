@@ -1106,14 +1106,25 @@ impl Intro {
 
         match self.status {
             IntroStatus::Menu => {
-                self.menu[0] = "START".to_string();
-                self.menu[1] = "OPTIONS".to_string();
-                self.menu[2] = "END".to_string();
-                self.menu[3] = String::new();
-                self.menu[4] = String::new();
-                self.num_options = 3;
-                self.last_status = IntroStatus::Menu;
-                intro_dbg!("[INTRO] Menu set: START, OPTIONS, END");
+                if cfg!(target_arch = "wasm32") {
+                    self.menu[0] = "START".to_string();
+                    self.menu[1] = "OPTIONS".to_string();
+                    self.menu[2] = "".to_string();
+                    self.menu[3] = String::new();
+                    self.menu[4] = String::new();
+                    self.num_options = 2;
+                    self.last_status = IntroStatus::Menu;
+                    intro_dbg!("[INTRO] Menu set: START, OPTIONS (wasm32)");
+                } else {
+                    self.menu[0] = "START".to_string();
+                    self.menu[1] = "OPTIONS".to_string();
+                    self.menu[2] = "END".to_string();
+                    self.menu[3] = String::new();
+                    self.menu[4] = String::new();
+                    self.num_options = 3;
+                    self.last_status = IntroStatus::Menu;
+                    intro_dbg!("[INTRO] Menu set: START, OPTIONS, END");
+                }
             }
             IntroStatus::Options => {
                 self.menu[0] = if music.beeper_sound {

@@ -588,6 +588,14 @@ impl MarioGame {
         let idx = self.cur_player as usize;
         self.buffers.data.progress[idx] += 1;
 
+        // 立即保存进度到配置文件（避免进度丢失）
+        if self.game_number >= 0 && self.game_number < 3 {
+            // 更新存档槽位数据
+            self.config.games[self.game_number as usize] = self.buffers.data.clone();
+            // 保存到文件
+            crate::config::write_config(&self.config);
+        }
+
         // 在双人模式中，通关后切换到下一个玩家
         // Pascal: for CurPlayer := plMario to Data.NumPlayers - 1 do
         self.try_next_player();

@@ -35,6 +35,14 @@ fn run_platform() -> Result<(), Box<dyn std::error::Error>> {
     mario::platform::run_game()
 }
 
+/// 微信小游戏 CPU 渲染版本 (WASM) 入口
+#[cfg(all(target_arch = "wasm32", feature = "wxgame-cpu-backend"))]
+fn run_platform() -> Result<(), Box<dyn std::error::Error>> {
+    // wxgame-cpu 提供的是 `run_wxgame_cpu()`（无返回值），这里调用并返回 Ok
+    mario::platform::run_wxgame_cpu();
+    Ok(())
+}
+
 /// Windows GDI 后端（仅在未启用 wgpu-backend 时使用）
 #[cfg(all(
     target_os = "windows",

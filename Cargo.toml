@@ -22,14 +22,11 @@ bytemuck = { version = "1.21", features = ["derive"], optional = true }
 futures = { version = "0.3", optional = true }
 
 # winit 窗口管理 (桌面平台)
-winit = { version = "0.30", optional = true }
+# 在 wasm32 上不编译：见下方 target.'cfg(not(target_arch = "wasm32"))'.dependencies
 bitflags = "2.9.1"
 
 # Optional logging dependencies (activate via `--features logging`).
-tracing = { version = "0.1", default-features = false, features = ["std"], optional = true }
-tracing-subscriber = { version = "0.3", default-features = false, features = ["env-filter", "fmt", "std", "ansi"], optional = true }
-tracing-wasm = { version = "0.2", optional = true }
-tracing-android = { version = "0.2", optional = true }
+# tracing 及相关实现由非-wasm 平台启用（避免在 wasm32 上编译）
 
 # include_dir: compile-time embedding of directories (used by src/sprites.rs)
 # Removed: assets are generated at build time into generated_assets.rs
@@ -39,7 +36,7 @@ tracing-android = { version = "0.2", optional = true }
 
 [target.'cfg(not(target_os = "windows"))'.dependencies]
 # Use cpal on non-Windows platforms; Windows uses audio_waveout.rs instead
-cpal = "0.15"
+# cpal moved to a more specific target to avoid compiling on wasm32
 
 # ============================================================================
 # 跨平台日志系统（通过 feature 激活，可选依赖以减少 release 体积）
@@ -67,8 +64,70 @@ version = "0.2"
 # ============================================================================
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { version = "0.2", features = ["js"] }
-# tracing-wasm is optional; activate via `--features logging` when needed.
-tracing-wasm = { version = "0.2", optional = true }
+# 不在 wasm32 上包含 tracing* 相关库以减小体积并避免平台不兼容代码
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+web-sys = { version = "0.3", features = [
+  "console",
+  "Window",
+  "Document",
+  "HtmlCanvasElement",
+  "Navigator",
+  "Storage",
+  "Performance",
+  "KeyboardEvent",
+  # Web Audio API
+  "AudioContext",
+  "OscillatorNode",
+  "GainNode",
+  "AudioNode",
+  "AudioParam",
+  "AudioDestinationNode",
+  "AudioScheduledSourceNode",
+  "Event",
+  # WebGL2 API (for wxgame-backend)
+  "WebGl2RenderingContext",
+  "WebGlProgram",
+  "WebGlShader",
+  "WebGlTexture",
+  "WebGlBuffer",
+  "WebGlFramebuffer",
+  "WebGlUniformLocation",
+] }
+console_error_panic_hook = "0.1"
+base64 = "0.22"
+raw-window-handle = "0.6"
+# web-time 提供 std::time 在 WASM 上的实现，某些依赖可能需要
+web-time = "1.1"
+# WASM 平台通常使用浏览器提供的 WebGPU；不要把 `wgpu` 强制加入 wasm 目标以避免引入 profiling 等本地依赖
+
+# 为 Web (wasm32) 添加一个可选的、精简的 wgpu 依赖，默认为关闭。
+# 当用户启用 `--features wgpu-backend` 时，
+# Cargo 会使用此目标特定配置来拉入适合 Web 的 wgpu 特性。
+# - wgpu-backend: 使用 "webgpu" feature (现代浏览器 WebGPU API)
+# - wxgame-backend: 使用原生 WebGL API (微信小游戏，不使用 wgpu)
+[target.'cfg(target_arch = "wasm32")'.dependencies.wgpu]
+version = "28.0.0"
+default-features = false
+# wgsl: WGSL 着色器支持
+# webgpu: WebGPU 后端 (用于 wgpu-backend)
+# fragile-send-sync-non-atomic-wasm: 在非原子 WASM 上实现 Send/Sync
+features = ["wgsl", "webgpu", "fragile-send-sync-non-atomic-wasm"]
+optional = true
+
+# ============================================================================
+# 限制依赖以避免在 wasm32 上编译
+# ============================================================================
+[target.'cfg(all(not(target_os = "windows"), not(target_arch = "wasm32")))'.dependencies]
+# Use cpal on non-Windows, non-wasm platforms
+cpal = "0.15"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# Desktop / non-wasm-only optional deps
+winit = { version = "0.30", optional = true }
+tracing-subscriber = { version = "0.3", default-features = false, features = ["env-filter", "fmt", "std", "ansi"], optional = true }
+tracing = { version = "0.1", default-features = false, features = ["std"], optional = true }
 
 # ============================================================================
 # Android平台特定依赖
@@ -114,9 +173,11 @@ rand = { version = "0.8", default-features = false, features = ["alloc", "small_
 hashbrown = "0.15"
 
 [features]
-default = ["wgpu-backend", "dark-theme"]   # 默认使用 GPU + GDI回退 + 暗黑主题适配
-logging = ["dep:tracing", "dep:tracing-subscriber", "dep:tracing-wasm", "dep:tracing-android"]
+# 不在默认 feature 中启用 wgpu-backend，避免在 wasm 或未显式启用的构建中拉入大型 GPU 依赖
+default = ["dark-theme"]   # 默认仅启用暗黑主题适配
+logging = ["dep:tracing", "dep:tracing-subscriber"]
 wgpu-backend = ["dep:winit", "dep:wgpu", "dep:bytemuck", "dep:futures", "dep:windows-sys"]  # wgpu 渲染后端（跨平台，体积大）
+wxgame-cpu-backend = []  # 微信小游戏 CPU 渲染版本（纯软件渲染，无额外依赖）
 gdi-backend = ["dep:windows-sys"]         # Windows GDI（仅用于窗口创建，渲染使用GPU）
 cpu-backend = ["gdi-backend"]             # CPU软件渲染后端（XP兼容，使用GDI显示）
 dark-theme = []                           # 暗黑主题适配（需要 Vista+ dwmapi.dll）
@@ -136,8 +197,12 @@ embed-resource = "3.0"
 # 开发依赖 - 仅用于示例和测试
 # ============================================================================
 [dev-dependencies]
-image = "0.25"
+# Core dev-deps kept minimal for tools that run in all targets
 png = "0.17"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+# Dev dependencies that should not be compiled for wasm32 (avoid pulling tracing into wasm builds)
+image = { version = "0.25", default-features = false, features = ["png"] }
 winit = "0.30"
 wgpu = { version = "28.0.0", default-features = false, features = ["wgsl", "vulkan"] }
 bytemuck = { version = "1.21", features = ["derive"] }

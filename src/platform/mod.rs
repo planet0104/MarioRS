@@ -38,7 +38,7 @@ mod windows;
 #[cfg(all(target_os = "windows", feature = "cpu-backend", not(feature = "wgpu-backend")))]
 mod windows_cpu;
 
-#[cfg(feature = "wgpu-backend")]
+#[cfg(all(feature = "wgpu-backend", not(target_arch = "wasm32")))]
 mod desktop;
 
 // Android 后端（需要 wgpu-backend）
@@ -366,10 +366,12 @@ pub use self::windows_cpu::{
 // 注意：
 // - 在 Windows 上如果启用了 gdi-backend，则使用 windows.rs 而不是 desktop.rs
 // - 在 Android 上使用 android.rs 而不是 desktop.rs
+// - 在 Web 平台上使用 web.rs 而不是 desktop.rs
 #[cfg(all(
     feature = "wgpu-backend",
     not(all(target_os = "windows", feature = "gdi-backend")),
-    not(target_os = "android")
+    not(target_os = "android"),
+    not(target_arch = "wasm32")
 ))]
 pub use self::desktop::{
     DesktopAudio, DesktopDisplay, DesktopInput, DesktopLog, DesktopRandom, DesktopStorage,
@@ -380,15 +382,36 @@ pub use self::desktop::{
 // Android 后端 (GPU + CPU 自动 fallback)
 // 主入口从 android.rs 导出
 // GPU 初始化失败时自动切换到 android_cpu.rs 的 CPU 渲染
-#[cfg(all(target_os = "android", feature = "wgpu-backend"))]
+#[cfg(all(target_os = "android", feature = "wgpu-backend", not(target_arch = "wasm32")))]
 pub use self::android::{
     DesktopAudio, DesktopDisplay, DesktopInput, DesktopLog, DesktopRandom, DesktopStorage,
     DesktopTime, android_main, log_debug, log_error, log_info, log_warn, now_ms, random_f32,
     random_i32, random_u8, random_u32, random_usize, run_game,
 };
 
-// Web 平台（未来扩展）
-// #[cfg(target_arch = "wasm32")]
-// pub mod web;
-// #[cfg(target_arch = "wasm32")]
-// pub use self::web::{...};
+// Web 平台（WASM）- WebGPU 后端
+#[cfg(all(target_arch = "wasm32", feature = "wgpu-backend", not(feature = "wxgame-cpu-backend")))]
+pub mod web;
+
+#[cfg(all(target_arch = "wasm32", feature = "wgpu-backend", not(feature = "wxgame-cpu-backend")))]
+pub use self::web::{
+    DesktopAudio, DesktopDisplay, DesktopInput, DesktopLog, DesktopRandom, DesktopStorage,
+    DesktopTime, run_game_wrapper as run_game, log_debug, log_error, log_info, log_warn, now_ms, random_f32,
+    random_i32, random_u8, random_u32, random_usize,
+};
+
+// 微信小游戏 CPU 渲染版本
+#[cfg(all(target_arch = "wasm32", feature = "wxgame-cpu-backend"))]
+pub mod wxgame_cpu;
+
+#[cfg(all(target_arch = "wasm32", feature = "wxgame-cpu-backend"))]
+pub use self::wxgame_cpu::{
+    on_button_event_cpu, on_key_event_cpu, resume_audio_cpu, run_wxgame_cpu,
+    log_info, log_warn, log_error,
+    WxStorage as DesktopStorage,
+    WxAudio as DesktopAudio,
+};
+
+// wxgame-cpu 需要导出 common 中的公共函数
+#[cfg(all(target_arch = "wasm32", feature = "wxgame-cpu-backend"))]
+pub use self::common::{random_f32, random_i32, random_u8, random_u32, random_usize};

@@ -1,0 +1,9 @@
+{
+    "appid": "your_appid_here",
+    "projectname": "MarioRS-CPU",
+    "setting": {
+        "es6": true,
+        "enhance": false,
+        "minified": true
+    }
+}

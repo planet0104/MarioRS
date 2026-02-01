@@ -23,7 +23,8 @@ pub mod gpu;
 // CPU软件渲染模块
 // - Windows: 用于XP兼容 (cpu-backend feature)
 // - Android: 始终编译，作为 GPU 失败时的 fallback
-#[cfg(any(feature = "cpu-backend", target_os = "android"))]
+// - 微信小游戏: CPU渲染版本 (wxgame-cpu-backend feature)
+#[cfg(any(feature = "cpu-backend", feature = "wxgame-cpu-backend", target_os = "android"))]
 pub mod cpu;
 
 // 游戏核心模块

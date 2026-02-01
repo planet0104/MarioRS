@@ -12,11 +12,11 @@ mod waveout;
 #[cfg(target_os = "windows")]
 pub use waveout::WaveOutAudio;
 
-// 非 Windows 平台使用 cpal
-#[cfg(not(target_os = "windows"))]
+// 非 Windows 且 非 WASM 平台使用 cpal
+#[cfg(all(not(target_os = "windows"), not(target_arch = "wasm32")))]
 mod cpal_audio;
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(all(not(target_os = "windows"), not(target_arch = "wasm32")))]
 pub use cpal_audio::CpalAudio;
 
 // 统一的音频类型别名

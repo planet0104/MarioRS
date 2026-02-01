@@ -2,6 +2,7 @@
 //!
 //! 使用 rand::SmallRng 实现，种子获取方式根据平台不同:
 //! - Windows GDI模式: 使用 RtlGenRandom (Win32 API)
+//! - WASM: 使用 js_sys::Math::random() 或 getrandom
 //! - 其他平台: 使用 SystemTime
 
 use rand::Rng;
@@ -15,12 +16,25 @@ use crate::platform::RandomBackend;
 // 种子获取 - 根据平台选择不同实现
 // ============================================================================
 
-/// 使用系统时间生成种子 (通用方案)
+/// 使用系统时间生成种子 (通用方案，非 WASM)
+#[cfg(not(target_arch = "wasm32"))]
 fn system_time_seed() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_nanos() as u64
+}
+
+/// WASM 平台使用 js_sys::Math::random() 生成种子
+#[cfg(target_arch = "wasm32")]
+fn wasm_random_seed() -> u64 {
+    // 使用 Math.random() 生成随机数作为种子
+    let r1 = js_sys::Math::random();
+    let r2 = js_sys::Math::random();
+    // 将两个 f64 随机数组合成一个 u64 种子
+    let high = (r1 * u32::MAX as f64) as u64;
+    let low = (r2 * u32::MAX as f64) as u64;
+    (high << 32) | low
 }
 
 /// Windows 平台使用 RtlGenRandom 生成更高质量的种子
@@ -49,6 +63,7 @@ mod win32_seed {
 
 /// 获取随机种子
 fn get_seed() -> u64 {
+    // Windows GDI 模式使用 RtlGenRandom
     #[cfg(all(
         target_os = "windows",
         feature = "gdi-backend",
@@ -57,11 +72,20 @@ fn get_seed() -> u64 {
     {
         win32_seed::get_seed()
     }
-    #[cfg(not(all(
-        target_os = "windows",
-        feature = "gdi-backend",
-        not(feature = "wgpu-backend")
-    )))]
+    // WASM 平台使用 js_sys::Math::random()
+    #[cfg(target_arch = "wasm32")]
+    {
+        wasm_random_seed()
+    }
+    // 其他平台使用 SystemTime
+    #[cfg(all(
+        not(all(
+            target_os = "windows",
+            feature = "gdi-backend",
+            not(feature = "wgpu-backend")
+        )),
+        not(target_arch = "wasm32")
+    ))]
     {
         system_time_seed()
     }

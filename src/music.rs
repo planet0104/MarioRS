@@ -8,14 +8,22 @@
 //! Windows 版本：单线程非阻塞，使用 RefCell 实现内部可变性
 //! Linux/Mac 版本：使用 Arc<Mutex> 支持 cpal 回调线程
 
-use crate::platform::{AudioBackend, DesktopAudio};
+use crate::platform::AudioBackend;
 
-// Windows: 使用 RefCell 实现内部可变性，保持 &self API
+// 平台特定的音频后端类型
 #[cfg(target_os = "windows")]
+use crate::platform::DesktopAudio;
+#[cfg(all(not(target_os = "windows"), not(target_arch = "wasm32")))]
+use crate::platform::DesktopAudio;
+#[cfg(target_arch = "wasm32")]
+use crate::platform::DesktopAudio;
+
+// Windows 和 WASM: 使用 RefCell 实现内部可变性，保持 &self API
+#[cfg(any(target_os = "windows", target_arch = "wasm32"))]
 use std::cell::RefCell;
 
-// Linux/Mac 需要 Mutex 支持 cpal 的音频回调线程
-#[cfg(not(target_os = "windows"))]
+// Linux/Mac (非 WASM) 需要 Mutex 支持 cpal 的音频回调线程
+#[cfg(all(not(target_os = "windows"), not(target_arch = "wasm32")))]
 use std::sync::{Arc, Mutex};
 
 // ---------------------------------------------------------------------------
@@ -286,10 +294,184 @@ impl MusicPlayer {
 }
 
 // ============================================================================
+// WASM 版本：单线程，使用 RefCell 实现内部可变性
+// ============================================================================
+
+#[cfg(target_arch = "wasm32")]
+struct WasmAudioState {
+    audio: DesktopAudio,
+    music_state: MusicState,
+}
+
+#[cfg(target_arch = "wasm32")]
+pub struct MusicPlayer {
+    state: RefCell<WasmAudioState>,
+    note_frequencies: [i32; 85],
+    pub beeper_sound: bool,
+}
+
+#[cfg(target_arch = "wasm32")]
+impl MusicPlayer {
+    pub fn new() -> Self {
+        let audio = DesktopAudio::new();
+
+        const HALF_NOTE: f64 = 1.059463094;
+        const MAX_OCT: usize = 7;
+        let mut note_frequencies = [0i32; 85];
+        let mut r_tmp = HALF_NOTE * 55.0;
+
+        for i in 1..=MAX_OCT * 12 {
+            note_frequencies[i] = r_tmp.round() as i32;
+            r_tmp *= HALF_NOTE;
+        }
+
+        Self {
+            state: RefCell::new(WasmAudioState {
+                audio,
+                music_state: MusicState {
+                    music_sequence: Vec::new(),
+                    position: 0,
+                },
+            }),
+            note_frequencies,
+            beeper_sound: true,
+        }
+    }
+
+    /// 每帧调用（WASM 版本为空操作，Web Audio API 自动管理）
+    pub fn tick(&self) {}
+
+    pub fn start_music(&self, sequence: &[u8]) {
+        if !self.beeper_sound {
+            return;
+        }
+        let mut state = self.state.borrow_mut();
+        state.music_state.music_sequence = sequence.to_vec();
+        state.music_state.position = 0;
+    }
+
+    pub fn play_music(&self) {
+        if !self.beeper_sound {
+            return;
+        }
+
+        let mut state = self.state.borrow_mut();
+        let ms = &mut state.music_state;
+
+        if ms.music_sequence.is_empty() || ms.position >= ms.music_sequence.len() {
+            return;
+        }
+
+        let c = ms.music_sequence[ms.position];
+        if c > 1 {
+            ms.music_sequence[ms.position] -= 1;
+        } else {
+            ms.position += 1;
+            if ms.position >= ms.music_sequence.len() {
+                return;
+            }
+
+            let note_index = ms.music_sequence[ms.position];
+            if note_index > 0 {
+                let freq = self.note_frequencies[note_index as usize];
+                state.audio.beep(freq as u32, 50);
+                state.music_state.position += 1;
+            } else {
+                ms.music_sequence.clear();
+                ms.position = 0;
+            }
+        }
+    }
+
+    pub fn stop_music(&self) {
+        let mut state = self.state.borrow_mut();
+        state.music_state.music_sequence.clear();
+        state.music_state.position = 0;
+    }
+
+    pub fn pause_music(&self) {}
+
+    pub fn beep(&self, freq: u32) {
+        if !self.beeper_sound || freq == 0 {
+            return;
+        }
+        let duration_ms = if freq == 110 { 30 } else { 50 };
+        self.state.borrow_mut().audio.beep(freq, duration_ms);
+    }
+
+    pub fn play_life(&self) {
+        self.start_music(LIFE_MUSIC);
+    }
+    pub fn play_coin(&self) {
+        self.start_music(COIN_MUSIC);
+    }
+    pub fn play_fire(&self) {
+        self.start_music(FIRE_MUSIC);
+    }
+    pub fn play_hit(&self) {
+        self.start_music(HIT_MUSIC);
+    }
+    pub fn play_dead(&self) {
+        self.start_music(DEAD_MUSIC);
+    }
+    pub fn play_note(&self) {
+        self.start_music(NOTE_MUSIC);
+    }
+    pub fn play_star(&self) {
+        self.start_music(STAR_MUSIC);
+    }
+    pub fn play_grow(&self) {
+        self.start_music(GROW_MUSIC);
+    }
+    pub fn play_pipe(&self) {
+        self.start_music(PIPE_MUSIC);
+    }
+
+    pub fn play_powerup_rise(&self) {
+        if !self.beeper_sound {
+            return;
+        }
+        const J_SEQUENCE: [i32; 7] = [0, 12, 10, 8, 6, 4, 2];
+        let notes: Vec<(u32, u32)> = J_SEQUENCE
+            .iter()
+            .map(|j| {
+                let freq = 130 - 20 * j;
+                let wrapped = freq.rem_euclid(1 << 16) as u32;
+                (wrapped, 40)
+            })
+            .collect();
+        self.state.borrow_mut().audio.play_sequence(&notes);
+    }
+
+    pub fn play_bump(&self) {
+        self.beep(110);
+    }
+    pub fn play_coin_beep(&self) {
+        self.beep(2420);
+    }
+    pub fn play_death_start(&self) {
+        self.beep(220);
+    }
+    pub fn play_collision(&self) {
+        self.beep(30);
+    }
+
+    pub fn beeper_on(&mut self) {
+        self.beeper_sound = true;
+        self.state.borrow_mut().audio.set_enabled(true);
+    }
+
+    pub fn beeper_off(&mut self) {
+        self.beeper_sound = false;
+        self.state.borrow_mut().audio.set_enabled(false);
+    }
+}
+
+// ============================================================================
 // Linux/Mac 版本：使用 Mutex 支持 cpal 回调线程
 // ============================================================================
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(all(not(target_os = "windows"), not(target_arch = "wasm32")))]
 pub struct MusicPlayer {
     audio: Arc<Mutex<DesktopAudio>>,
     note_frequencies: [i32; 85],
@@ -297,7 +479,7 @@ pub struct MusicPlayer {
     pub beeper_sound: bool,
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(all(not(target_os = "windows"), not(target_arch = "wasm32")))]
 impl MusicPlayer {
     pub fn new() -> Self {
         let audio = DesktopAudio::new();

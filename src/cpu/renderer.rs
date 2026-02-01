@@ -98,7 +98,16 @@ impl CpuRenderer {
                 self.framebuffer[offset + 3] = 0xFF;     // A
             }
             
-            #[cfg(not(target_os = "android"))]
+            #[cfg(all(target_arch = "wasm32", not(target_os = "android")))]
+            {
+                // RGBA格式（Web/微信小游戏 Canvas ImageData 原生格式）
+                self.framebuffer[offset] = color[0];     // R
+                self.framebuffer[offset + 1] = color[1]; // G
+                self.framebuffer[offset + 2] = color[2]; // B
+                self.framebuffer[offset + 3] = color[3]; // A
+            }
+            
+            #[cfg(not(any(target_os = "android", target_arch = "wasm32")))]
             {
                 // BGRA格式（Windows GDI原生格式）
                 self.framebuffer[offset] = color[2];     // B
@@ -136,7 +145,10 @@ impl CpuRenderer {
         #[cfg(target_os = "android")]
         let pixel_bytes = [color[0], color[1], color[2], 0xFF]; // ABGR (Android RGBA_8888 小端序: R G B A)
         
-        #[cfg(not(target_os = "android"))]
+        #[cfg(all(target_arch = "wasm32", not(target_os = "android")))]
+        let pixel_bytes = [color[0], color[1], color[2], color[3]]; // RGBA (Web/微信小游戏 Canvas ImageData)
+        
+        #[cfg(not(any(target_os = "android", target_arch = "wasm32")))]
         let pixel_bytes = [color[2], color[1], color[0], color[3]]; // BGRA (Windows GDI)
         
         let fb_stride = self.width * 4;
@@ -250,7 +262,16 @@ impl CpuRenderer {
                     self.framebuffer[offset + 3] = 0xFF;     // A
                 }
                 
-                #[cfg(not(target_os = "android"))]
+                #[cfg(all(target_arch = "wasm32", not(target_os = "android")))]
+                {
+                    // RGBA格式 (Web/微信小游戏 Canvas ImageData)
+                    self.framebuffer[offset] = color[0];     // R
+                    self.framebuffer[offset + 1] = color[1]; // G
+                    self.framebuffer[offset + 2] = color[2]; // B
+                    self.framebuffer[offset + 3] = color[3]; // A
+                }
+                
+                #[cfg(not(any(target_os = "android", target_arch = "wasm32")))]
                 {
                     // BGRA格式 (Windows GDI)
                     self.framebuffer[offset] = color[2];     // B
