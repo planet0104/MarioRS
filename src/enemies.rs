@@ -443,8 +443,9 @@ impl Enemies {
     /// 替代show_enemies，不再直接绘制到VGA，而是收集RenderCommand
     /// 使用SpriteId和着色器翻转，而非动态生成的镜像ImageBuffer
     /// 注意：火花效果(glitter)在move_enemies中通过glitter_sys创建
+    /// 注意：DONUT精灵需要在渲染时修改status，因此使用&mut self
     pub fn collect_enemy_sprites_gpu(
-        &self,
+        &mut self,
         commands: &mut Vec<RenderCommand>,
         buffers: &Buffers,
         atlas: &crate::sprites::SpriteAtlas,
@@ -756,13 +757,27 @@ impl Enemies {
                     commands.push(RenderCommand::DrawSprite(inst));
                 }
                 TP_DONUT => {
+                    // 严格对齐Pascal ENEMIES.PAS ShowEnemies 第562-579行
                     let sprite_id = if enemy.status == 0 {
+                        // Pascal: if Status = 0 then begin ... if YVel = 0 then Counter := 0; end
+                        if self.enemies[j].y_vel == 0 {
+                            self.enemies[j].counter = 0;
+                        }
                         SpriteId::DONUT_000
                     } else {
+                        // Pascal: else begin ... Dec(Status); end
+                        self.enemies[j].status -= 1;
                         SpriteId::DONUT_001
                     };
                     let inst = self.create_enemy_sprite(atlas, sprite_id, sx, sy, false, false);
                     commands.push(RenderCommand::DrawSprite(inst));
+
+                    // Pascal: if YVel > 0 then if Counter mod 24 = 0 then Inc(YVel)
+                    if self.enemies[j].y_vel > 0 && self.enemies[j].counter % 24 == 0 {
+                        self.enemies[j].y_vel += 1;
+                    }
+                    // Pascal: Inc(Counter)
+                    self.enemies[j].counter += 1;
                 }
                 _ => {}
             }
@@ -808,7 +823,6 @@ impl Enemies {
         let mut new_ch1: u8;
         let mut new_ch2: u8;
         let ch: u8;
-        let j: i32;
         let l: i32;
         let side: i32;
         let mut at_x: i32;
