@@ -41,6 +41,10 @@ mod windows_cpu;
 #[cfg(all(feature = "wgpu-backend", not(target_arch = "wasm32")))]
 mod desktop;
 
+// Headless 平台实现（无窗口、无 GPU、无音频）。
+// 始终编译以作为默认无渲染后端的 fallback，导出仍由 feature 控制。
+mod headless;
+
 // Android 后端（需要 wgpu-backend）
 // GPU 渲染 + CPU 自动 fallback (全部在 android.rs 中实现)
 #[cfg(all(target_os = "android", feature = "wgpu-backend"))]
@@ -379,6 +383,15 @@ pub use self::desktop::{
     random_u8, random_u32, random_usize, run_game,
 };
 
+#[cfg(all(
+    feature = "debug-bridge",
+    feature = "wgpu-backend",
+    not(all(target_os = "windows", feature = "gdi-backend")),
+    not(target_os = "android"),
+    not(target_arch = "wasm32")
+))]
+pub use self::desktop::{install_debug_bridge, set_debug_speed, set_debug_start_level};
+
 // Android 后端 (GPU + CPU 自动 fallback)
 // 主入口从 android.rs 导出
 // GPU 初始化失败时自动切换到 android_cpu.rs 的 CPU 渲染
@@ -415,3 +428,78 @@ pub use self::wxgame_cpu::{
 // wxgame-cpu 需要导出 common 中的公共函数
 #[cfg(all(target_arch = "wasm32", feature = "wxgame-cpu-backend"))]
 pub use self::common::{random_f32, random_i32, random_u8, random_u32, random_usize};
+
+// ============================================================================
+// Headless 后端导出（debug-headless feature，且没有启用任何渲染后端时）
+// ============================================================================
+#[cfg(all(
+    feature = "debug-headless",
+    not(any(
+        feature = "wgpu-backend",
+        feature = "gdi-backend",
+        feature = "cpu-backend",
+        feature = "wxgame-cpu-backend",
+    )),
+    not(target_arch = "wasm32"),
+))]
+pub use self::common::FileStorage as DesktopStorage;
+
+#[cfg(all(
+    feature = "debug-headless",
+    not(any(
+        feature = "wgpu-backend",
+        feature = "gdi-backend",
+        feature = "cpu-backend",
+        feature = "wxgame-cpu-backend",
+    )),
+    not(target_arch = "wasm32"),
+))]
+pub use self::headless::{
+    log_debug, log_error, log_info, log_warn, HeadlessAudio as DesktopAudio, HeadlessLog,
+};
+
+#[cfg(all(
+    feature = "debug-headless",
+    not(any(
+        feature = "wgpu-backend",
+        feature = "gdi-backend",
+        feature = "cpu-backend",
+        feature = "wxgame-cpu-backend",
+    )),
+    not(target_arch = "wasm32"),
+))]
+pub use self::common::{random_f32, random_i32, random_u8, random_u32, random_usize};
+
+// ============================================================================
+// 默认无渲染后端导出（没有任何后端 feature 时，保证库和原始二进制可编译）
+// ============================================================================
+#[cfg(all(
+    not(any(
+        feature = "wgpu-backend",
+        feature = "gdi-backend",
+        feature = "cpu-backend",
+        feature = "wxgame-cpu-backend",
+    )),
+    not(feature = "debug-headless"),
+    not(target_os = "android"),
+    not(target_arch = "wasm32"),
+))]
+pub use self::common::{random_f32, random_i32, random_u8, random_u32, random_usize,
+                       FileStorage as DesktopStorage};
+
+#[cfg(all(
+    not(any(
+        feature = "wgpu-backend",
+        feature = "gdi-backend",
+        feature = "cpu-backend",
+        feature = "wxgame-cpu-backend",
+    )),
+    not(feature = "debug-headless"),
+    not(target_os = "android"),
+    not(target_arch = "wasm32"),
+))]
+pub use self::headless::{
+    log_debug, log_error, log_info, log_warn,
+    HeadlessAudio as DesktopAudio,
+    HeadlessLog,
+};

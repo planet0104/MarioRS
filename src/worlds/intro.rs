@@ -158,6 +158,10 @@ pub struct Intro {
     fps: u32,
     frame_time_ms: f32,
     render_mode: crate::status::RenderMode,
+
+    /// debug-bridge 模式下禁用超时自动 Demo，避免 AI 连接前误入演示
+    #[cfg(feature = "debug-bridge")]
+    suppress_demo: bool,
 }
 
 use crate::mario::{ConfigData, IntroResult};
@@ -218,6 +222,8 @@ impl Intro {
             fps: 0,
             frame_time_ms: 0.0,
             render_mode: crate::status::RenderMode::GPU,
+            #[cfg(feature = "debug-bridge")]
+            suppress_demo: false,
         }
     }
 
@@ -242,6 +248,42 @@ impl Intro {
         self.status = IntroStatus::None;
         self.old_status = IntroStatus::None;
         self.selected = 1;
+    }
+
+    #[cfg(feature = "debug-bridge")]
+    pub fn set_suppress_demo(&mut self, suppress: bool) {
+        self.suppress_demo = suppress;
+    }
+
+    #[cfg(feature = "debug-bridge")]
+    pub fn reset_demo_timer(&mut self) {
+        self.counter = 0;
+    }
+
+    #[cfg(feature = "debug-bridge")]
+    pub fn status(&self) -> IntroStatus {
+        self.status
+    }
+
+    #[cfg(feature = "debug-bridge")]
+    pub fn selected(&self) -> i32 {
+        self.selected
+    }
+
+    #[cfg(feature = "debug-bridge")]
+    pub fn phase(&self) -> IntroPhase {
+        self.phase
+    }
+
+    fn is_demo_suppressed(&self) -> bool {
+        #[cfg(feature = "debug-bridge")]
+        {
+            self.suppress_demo
+        }
+        #[cfg(not(feature = "debug-bridge"))]
+        {
+            false
+        }
     }
 
     /// 每帧更新（由mario.rs的统一事件循环调用）
@@ -805,7 +847,7 @@ impl Intro {
                 if self.intro_done {
                     render_state.palette.start_fade_down_steps(64);
                     self.phase = IntroPhase::FadingDownForExit;
-                } else if self.counter >= WAIT_BEFORE_DEMO {
+                } else if self.counter >= WAIT_BEFORE_DEMO && !self.is_demo_suppressed() {
                     // Pascal: if not IntroDone then Demo;
                     // 超时后开始播放Demo
                     self.counter = 0;

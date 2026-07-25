@@ -68,23 +68,23 @@ const MAX_ENEMIES: usize = 11;
 const MAX_ENEMIES_AT_ONCE: usize = 25;
 
 #[derive(Clone, Debug)]
-struct EnemyRec {
-    tp: i32,
-    sub_tp: i32,
-    x_pos: i32,
-    y_pos: i32,
-    last_x_pos: i32,
-    last_y_pos: i32,
-    map_x: i32,
-    map_y: i32,
-    x_vel: i32,
-    y_vel: i32,
-    move_delay: i32,
-    delay_counter: i32,
-    counter: i32,
-    status: i32,
-    dir_counter: u8,
-    sound_played: bool,
+pub struct EnemyRec {
+    pub tp: i32,
+    pub sub_tp: i32,
+    pub x_pos: i32,
+    pub y_pos: i32,
+    pub last_x_pos: i32,
+    pub last_y_pos: i32,
+    pub map_x: i32,
+    pub map_y: i32,
+    pub x_vel: i32,
+    pub y_vel: i32,
+    pub move_delay: i32,
+    pub delay_counter: i32,
+    pub counter: i32,
+    pub status: i32,
+    pub dir_counter: u8,
+    pub sound_played: bool,
 }
 
 impl Default for EnemyRec {
@@ -112,7 +112,7 @@ impl Default for EnemyRec {
 
 pub struct Enemies {
     enemy_pictures: [[ImageBuffer; 2]; MAX_ENEMIES + 1],
-    enemies: Vec<EnemyRec>,
+    pub enemies: Vec<EnemyRec>,
     active_enemies: Vec<usize>,
     num_enemies: usize,
     time_counter: u8,

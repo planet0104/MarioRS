@@ -60,3 +60,16 @@ fn run_platform() -> Result<(), Box<dyn std::error::Error>> {
     // 这个函数不会被调用，仅用于编译通过
     Ok(())
 }
+
+/// 没有启用任何渲染后端时的兜底实现
+/// 当仅启用 debug-headless 等无渲染 feature 时，原始 mario 二进制仍可编译，
+/// 运行时会提示用户使用正确的后端或调试二进制。
+#[cfg(all(
+    not(feature = "wgpu-backend"),
+    not(feature = "gdi-backend"),
+    not(target_arch = "wasm32"),
+    not(target_os = "android"),
+))]
+fn run_platform() -> Result<(), Box<dyn std::error::Error>> {
+    Err("未启用渲染后端。请使用 --features wgpu-backend/gdi-backend 编译可视化版本，或运行 mario-debug-headless。".into())
+}

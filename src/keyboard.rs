@@ -882,6 +882,36 @@ impl Keyboard {
             .check_key(KeyType::Space.macro_index().unwrap(), pressed)
     }
 
+    /// 直接查询原始按键状态（不经过宏/连发系统），供 debug observation 使用
+    #[cfg(feature = "debug-bridge")]
+    pub fn raw_key_right(&self) -> bool {
+        *self.key_states.get(&KeyType::Right).unwrap_or(&false)
+    }
+    #[cfg(feature = "debug-bridge")]
+    pub fn raw_key_left(&self) -> bool {
+        *self.key_states.get(&KeyType::Left).unwrap_or(&false)
+    }
+    #[cfg(feature = "debug-bridge")]
+    pub fn raw_key_up(&self) -> bool {
+        *self.key_states.get(&KeyType::Up).unwrap_or(&false)
+    }
+    #[cfg(feature = "debug-bridge")]
+    pub fn raw_key_down(&self) -> bool {
+        *self.key_states.get(&KeyType::Down).unwrap_or(&false)
+    }
+    #[cfg(feature = "debug-bridge")]
+    pub fn raw_key_alt(&self) -> bool {
+        *self.key_states.get(&KeyType::Alt).unwrap_or(&false)
+    }
+    #[cfg(feature = "debug-bridge")]
+    pub fn raw_key_ctrl(&self) -> bool {
+        *self.key_states.get(&KeyType::Ctrl).unwrap_or(&false)
+    }
+    #[cfg(feature = "debug-bridge")]
+    pub fn raw_key_space(&self) -> bool {
+        *self.key_states.get(&KeyType::Space).unwrap_or(&false)
+    }
+
     // 宏操作接口
     pub fn record_macro(&mut self) {
         self.macro_system.start_recording();

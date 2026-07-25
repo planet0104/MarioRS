@@ -41,6 +41,11 @@ use crate::{
     worlds::intro::Intro,
 };
 
+#[cfg(feature = "debug-bridge")]
+use crate::debug_bridge::{CameraInfo, EnemyInfo, GameStats, Observation, PlayerInfo, WorldInfo};
+#[cfg(feature = "debug-bridge")]
+use crate::worlds::intro::{IntroPhase, IntroStatus};
+
 /// Pascal 常量
 pub const NUM_LEV: i32 = 6;
 pub const LAST_LEV: i32 = 2 * NUM_LEV - 1;
@@ -130,36 +135,15 @@ pub struct MarioGame {
 impl MarioGame {
     /// 创建新的游戏实例
     pub fn new() -> Self {
-        eprintln!("[DEBUG] MarioGame::new: 开始");
-
-        eprintln!("size Buffers = {}", std::mem::size_of::<Buffers>());
-        eprintln!(
-            "size PictureBuffer = {}",
-            std::mem::size_of::<crate::buffers::PictureBuffer>()
-        );
-        eprintln!(
-            "size StarBuffer = {}",
-            std::mem::size_of::<crate::buffers::StarBuffer>()
-        );
-
-        eprintln!("[DEBUG] MarioGame::new: 创建Buffers1");
         let mut buffers = Buffers::new();
-        eprintln!("[DEBUG] MarioGame::new: 创建SpriteDataManager");
         let sprites = SpriteDataManager::new();
-        eprintln!("[DEBUG] MarioGame::new: 创建MusicPlayer");
         let mut music = MusicPlayer::new();
-        eprintln!("[DEBUG] MarioGame::new: 创建Players");
         let mut players = Players::new();
-        eprintln!("[DEBUG] MarioGame::new: 创建Enemies");
         let enemies = Enemies::new(&sprites);
-        eprintln!("[DEBUG] MarioGame::new: 创建BackGr");
         let backgr = BackGr::new(MAX_WORLD_SIZE as usize, W as usize, NV as usize, H as usize);
-        eprintln!("[DEBUG] MarioGame::new: 初始化Figures");
         let figures = Self::init_figures(&sprites);
-        eprintln!("[DEBUG] MarioGame::new: 构建精灵图集");
         // 构建GPU精灵图集（需要figures来获取fig_list和运行时精灵）
         let atlas = sprites.build_atlas(&figures);
-        eprintln!("[DEBUG] MarioGame::new: 创建其他组件");
         let blocks = Blocks::new();
         let stars = Stars::new();
         let status = Status::new(); // GPU版Status包含FPS显示数据
@@ -170,7 +154,6 @@ impl MarioGame {
         let tmpobj = TmpObjManager::new();
         let txt = Txt::new();
 
-        eprintln!("[DEBUG] MarioGame::new: 初始化玩家图形");
         players.init_player_figures(&mut buffers, &sprites);
 
         let play = Play::new();
@@ -178,7 +161,6 @@ impl MarioGame {
         let joystick = JoystickState::new();
 
         // 读取配置文件（对应 Pascal ReadConfig）
-        eprintln!("[DEBUG] MarioGame::new: 读取配置");
         let config = config::read_config();
 
         // 应用配置到游戏状态
@@ -199,9 +181,7 @@ impl MarioGame {
         joystick.rec = config.jsdat;
 
         // 游戏数据初始化在 buffers.data 中
-        eprintln!("[DEBUG] MarioGame::new: 创建Intro");
         let intro = Intro::new();
-        eprintln!("[DEBUG] MarioGame::new: 组装结构体");
 
         Self {
             main_phase: MainPhase::Initializing,
@@ -258,7 +238,7 @@ impl MarioGame {
         }
 
         // 主状态机
-        match self.main_phase {
+        let result = match self.main_phase {
             MainPhase::Initializing => {
                 // 等待init_palette被调用
                 FrameResult::Continue
@@ -447,7 +427,8 @@ impl MarioGame {
             }
 
             MainPhase::Exiting => FrameResult::Exit,
-        }
+        };
+        result
     }
 
     /// 开始游戏
@@ -730,6 +711,148 @@ impl MarioGame {
 impl Default for MarioGame {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+// ============================================================================
+// 调试接口（仅在 debug-bridge feature 启用时编译）
+// ============================================================================
+#[cfg(feature = "debug-bridge")]
+impl MarioGame {
+    /// debug-bridge 模式下禁用 Intro 超时自动 Demo
+    pub fn set_suppress_intro_demo(&mut self, suppress: bool) {
+        self.intro.set_suppress_demo(suppress);
+    }
+
+    /// 重置 Intro Demo 倒计时
+    pub fn reset_intro_demo_timer(&mut self) {
+        self.intro.reset_demo_timer();
+    }
+
+    /// 获取当前主阶段
+    pub fn main_phase(&self) -> MainPhase {
+        self.main_phase
+    }
+
+    /// 获取当前菜单状态（仅在 Intro 阶段有效）
+    pub fn intro_status(&self) -> Option<IntroStatus> {
+        if self.main_phase == MainPhase::Intro {
+            Some(self.intro.status())
+        } else {
+            None
+        }
+    }
+
+    /// 获取当前菜单选中项（仅在 Intro 阶段有效）
+    pub fn intro_selected(&self) -> Option<i32> {
+        if self.main_phase == MainPhase::Intro {
+            Some(self.intro.selected())
+        } else {
+            None
+        }
+    }
+
+    /// 获取当前 Intro 阶段
+    pub fn intro_phase(&self) -> Option<IntroPhase> {
+        if self.main_phase == MainPhase::Intro {
+            Some(self.intro.phase())
+        } else {
+            None
+        }
+    }
+
+    /// 获取当前关卡索引
+    pub fn current_level(&self) -> i32 {
+        self.current_level
+    }
+
+    /// 重新开始新游戏并直接进入指定关卡（跳过 Intro 和闪屏）
+    pub fn start_new_game_at_level(&mut self, level_index: i32) {
+        let level_index = level_index.clamp(0, NUM_LEV - 1);
+        // 先走正常的新游戏流程（重置生命/分数/进度等）
+        self.start_playing();
+        // 覆盖为指定关卡
+        self.current_level = level_index;
+        self.buffers.data.progress[self.cur_player as usize] = level_index as i16;
+        // 跳过 ShowPlayerName 闪屏，直接进入 Playing 并初始化关卡
+        self.main_phase = MainPhase::Playing;
+        self.init_current_level();
+    }
+
+    /// 打包当前游戏状态为观测数据
+    pub fn observe(&self) -> Observation {
+        let player = &self.players;
+        let data = &self.buffers.data;
+        let cur = self.cur_player as usize;
+
+        let enemies: Vec<EnemyInfo> = self
+            .enemies
+            .enemies
+            .iter()
+            .filter(|e| e.tp > 0)
+            .map(|e| EnemyInfo {
+                tp: e.tp,
+                x: e.x_pos,
+                y: e.y_pos,
+                vx: e.x_vel,
+                vy: e.y_vel,
+                status: e.status,
+            })
+            .collect();
+
+        let world_width = self.buffers.world_map.len();
+        let world_height = self.buffers.world_map.first().map(|r| r.len()).unwrap_or(0);
+
+        Observation {
+            frame: self.frame_count,
+            main_phase: format!("{:?}", self.main_phase),
+            play_phase: format!("{:?}", self.play.phase),
+            level_index: self.current_level,
+            world_number: self.buffers.world_number.clone(),
+            player: PlayerInfo {
+                x: player.x,
+                y: player.y,
+                vx: player.x_vel,
+                vy: player.y_vel,
+                status: player.status,
+                mode: data.mode[cur],
+                direction: player.direction,
+                in_pipe: player.in_pipe,
+            },
+            camera: CameraInfo {
+                x_view: self.buffers.x_view,
+                y_view: self.buffers.y_view,
+            },
+            stats: GameStats {
+                lives: data.lives[cur],
+                coins: data.coins[cur],
+                score: data.score[cur],
+                level_score: self.buffers.level_score,
+                progress: data.progress[cur],
+                game_done: self.buffers.game_done,
+                passed: self.buffers.passed,
+                quit_game: self.buffers.quit_game,
+            },
+            enemies,
+            world: WorldInfo {
+                width: world_width,
+                height: world_height,
+                x_offset: crate::buffers::EX,
+                y_offset: crate::buffers::EY1,
+                x_size: self.buffers.options.x_size,
+                tiles: self.buffers.world_map.clone(),
+            },
+            done: self.should_exit(),
+            waiting: self.play.waiting,
+            demo: self.buffers.demo,
+            key_right: self.keyboard.raw_key_right(),
+            key_left: self.keyboard.raw_key_left(),
+            key_up: self.keyboard.raw_key_up(),
+            key_down: self.keyboard.raw_key_down(),
+            key_jump: self.keyboard.raw_key_alt(),
+            key_fire: self.keyboard.raw_key_space(),
+            key_run: self.keyboard.raw_key_ctrl(),
+        }
     }
 }
 

@@ -13,7 +13,11 @@ use super::{
 use crate::gpu::GpuRenderer;
 use crate::status::RenderMode;
 
+use std::cell::RefCell;
 use std::sync::Arc;
+
+#[cfg(feature = "debug-bridge")]
+use crate::debug_bridge::{Bridge, Command, SpeedMode};
 
 // ============================================================================
 // Winit 和 wgpu 相关导入
@@ -453,6 +457,40 @@ pub fn log_error(msg: &str) {
 }
 
 // ============================================================================
+// 调试桥接（仅 debug-bridge feature 启用时）
+// ============================================================================
+
+#[cfg(feature = "debug-bridge")]
+thread_local! {
+    static PENDING_BRIDGE: RefCell<Option<Bridge>> = const { RefCell::new(None) };
+    static PENDING_DEBUG_FAST: RefCell<bool> = const { RefCell::new(false) };
+    static PENDING_DEBUG_FPS: RefCell<f64> = const { RefCell::new(60.0) };
+    static PENDING_START_LEVEL: RefCell<Option<i32>> = const { RefCell::new(None) };
+}
+
+/// 为下一个创建的 GameApp 安装调试桥。
+/// 由 `mario-debug-vis` 二进制在调用 `run_game()` 之前设置。
+#[cfg(feature = "debug-bridge")]
+pub fn install_debug_bridge(bridge: Bridge) {
+    PENDING_BRIDGE.with(|b| *b.borrow_mut() = Some(bridge));
+}
+
+/// 设置下一个 GameApp 启动后直接进入的关卡（跳过 Intro 菜单）。
+/// 由 `mario-debug-vis` 的 `--level` / `--auto-start` 参数设置。
+#[cfg(feature = "debug-bridge")]
+pub fn set_debug_start_level(level: Option<i32>) {
+    PENDING_START_LEVEL.with(|l| *l.borrow_mut() = level);
+}
+
+/// 设置下一个 GameApp 的初始运行速度和帧率。
+/// 由 `mario-debug-vis` 二进制在调用 `run_game()` 之前设置。
+#[cfg(feature = "debug-bridge")]
+pub fn set_debug_speed(fast: bool, fps: f64) {
+    PENDING_DEBUG_FAST.with(|f| *f.borrow_mut() = fast);
+    PENDING_DEBUG_FPS.with(|f| *f.borrow_mut() = fps.max(1.0));
+}
+
+// ============================================================================
 // 游戏应用程序 - 封装事件循环
 // ============================================================================
 
@@ -470,18 +508,35 @@ struct GameApp {
     #[allow(dead_code)]
     running: bool,
     is_fullscreen: bool,
+    #[cfg(feature = "debug-bridge")]
+    debug_bridge: Option<Bridge>,
+    #[cfg(feature = "debug-bridge")]
+    debug_fast: bool,
 }
 
 impl GameApp {
     fn new() -> Self {
+        #[cfg(feature = "debug-bridge")]
+        let (initial_fast, initial_fps) = PENDING_DEBUG_FAST.with(|f| {
+            let fast = *f.borrow();
+            let fps = PENDING_DEBUG_FPS.with(|r| *r.borrow());
+            (fast, fps)
+        });
+        #[cfg(not(feature = "debug-bridge"))]
+        let initial_fps = 60.0;
+
         Self {
             display: DesktopDisplay::new(GAME_WIDTH, GAME_HEIGHT),
             input: DesktopInput::new(),
             game_state: None,
-            frame_timer: FrameTimer::new(60.0),
+            frame_timer: FrameTimer::new(initial_fps),
             fps_counter: FpsCounter::new(),
             running: true,
             is_fullscreen: false,
+            #[cfg(feature = "debug-bridge")]
+            debug_bridge: PENDING_BRIDGE.with(|b| b.borrow_mut().take()),
+            #[cfg(feature = "debug-bridge")]
+            debug_fast: initial_fast,
         }
     }
 
@@ -502,25 +557,25 @@ impl GameApp {
 
 impl ApplicationHandler for GameApp {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        eprintln!("[DEBUG] resumed: 开始");
         if !self.display.has_window() {
-            eprintln!("[DEBUG] resumed: 创建窗口");
             if let Err(e) = self.display.create_window(event_loop) {
                 eprintln!("创建窗口失败: {}", e);
                 event_loop.exit();
                 return;
             }
-            eprintln!("[DEBUG] resumed: 窗口创建完成");
 
-            eprintln!("[DEBUG] resumed: 创建GameState");
-            let game_state = GameState::new();
-            eprintln!("[DEBUG] resumed: GameState创建完成");
-
+            let mut game_state = GameState::new();
+            #[cfg(feature = "debug-bridge")]
+            if self.debug_bridge.is_some() {
+                game_state.set_suppress_intro_demo(true);
+                if let Some(level) = PENDING_START_LEVEL.with(|l| l.borrow_mut().take()) {
+                    game_state.start_new_game_at_level(level);
+                    eprintln!("[mario-debug-vis] auto-started at level {}", level);
+                }
+            }
             self.game_state = Some(game_state);
 
             self.display.show_window();
-            eprintln!("[DEBUG] resumed: 窗口已显示");
-
             print_startup_info();
         }
     }
@@ -581,8 +636,14 @@ impl ApplicationHandler for GameApp {
                 }
             }
             WindowEvent::RedrawRequested => {
-                // 使用公共帧率控制器
+                // 使用公共帧率控制器（调试全速模式跳过限制）
+                #[cfg(not(feature = "debug-bridge"))]
                 if !self.frame_timer.should_render() {
+                    self.display.request_redraw();
+                    return;
+                }
+                #[cfg(feature = "debug-bridge")]
+                if !(self.debug_fast || self.frame_timer.should_render()) {
                     self.display.request_redraw();
                     return;
                 }
@@ -595,7 +656,40 @@ impl ApplicationHandler for GameApp {
                     state.set_fps_display(self.fps_counter.fps(), self.fps_counter.frame_time_ms());
                     state.set_render_mode(RenderMode::GPU);
 
+                    #[cfg(feature = "debug-bridge")]
+                    if let Some(bridge) = &mut self.debug_bridge {
+                        let just_connected = bridge.try_connect();
+                        if just_connected {
+                            state.reset_intro_demo_timer();
+                        }
+                        for cmd in bridge.poll_commands() {
+                            match cmd {
+                                Command::SetSpeed { mode } => {
+                                    self.debug_fast = matches!(mode, SpeedMode::Fast);
+                                }
+                                Command::SetSeed { seed } => {
+                                    crate::platform::common::random::reseed(seed);
+                                }
+                                Command::GetState => {}
+                                other => state.apply_command(other),
+                            }
+                        }
+                    }
+
                     let result = state.frame_update();
+
+                    #[cfg(feature = "debug-bridge")]
+                    if let Some(bridge) = &mut self.debug_bridge {
+                        if bridge.is_connected() {
+                            let obs = state.observe();
+                            if bridge.send_observation(obs).is_err() {
+                                state.shutdown();
+                                self.running = false;
+                                event_loop.exit();
+                                return;
+                            }
+                        }
+                    }
 
                     // 使用合并渲染：一次GPU提交完成所有渲染
                     // 先获取需要的配置信息
@@ -652,8 +746,6 @@ impl ApplicationHandler for GameApp {
 
 /// 运行游戏(平台入口函数)
 pub fn run_game() -> Result<(), Box<dyn std::error::Error>> {
-    eprintln!("[DEBUG] run_game: 开始");
-
     #[cfg(feature = "logging")]
     {
         use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
@@ -669,13 +761,10 @@ pub fn run_game() -> Result<(), Box<dyn std::error::Error>> {
             .ok();
     }
 
-    eprintln!("[DEBUG] run_game: 创建EventLoop");
     let event_loop = EventLoop::new()?;
     event_loop.set_control_flow(ControlFlow::Poll);
 
-    eprintln!("[DEBUG] run_game: 创建GameApp");
     let mut app = GameApp::new();
-    eprintln!("[DEBUG] run_game: GameApp创建完成，开始运行");
     let _ = event_loop.run_app(&mut app);
 
     Ok(())

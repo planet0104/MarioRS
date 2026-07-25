@@ -242,20 +242,8 @@ impl Buffers {
     /// 创建并初始化所有缓冲区和资源
     pub fn new() -> Self {
         // WorldBuffer: [-EX..MAX_WORLD_SIZE-1+EX, -EY1..NV-1+EY2]
-
-        eprintln!("[DEBUG] Buffers::new: 开始.....");
-
         let w_width = (MAX_WORLD_SIZE + 2 * EX) as usize;
-
-        eprintln!("[DEBUG] Buffers::new: w_width = {}", w_width);
-        eprintln!("[DEBUG] Buffers::new: EX = {}", EX);
-        eprintln!("[DEBUG] Buffers::new: EY1 = {}", EY1);
-        eprintln!("[DEBUG] Buffers::new: EY2 = {}", EY2);
-        eprintln!("[DEBUG] Buffers::new: NV = {}", NV);
-        eprintln!("[DEBUG] Buffers::new: MAX_WORLD_SIZE = {}", MAX_WORLD_SIZE);
         let w_height = (NV + EY1 + EY2) as usize;
-
-        eprintln!("[DEBUG] Buffers::new: w_height = {}", w_height);
         let world_map = vec![vec![0; w_height]; w_width];
 
         let save_world_map = vec![vec![0; w_height]; w_width];

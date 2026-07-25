@@ -142,6 +142,15 @@ thread_local! {
     static RANDOM: RefCell<CommonRandom> = RefCell::new(CommonRandom::new());
 }
 
+/// 重新设置全局随机种子（用于 AI 训练的可复现性）
+pub fn reseed(seed: u64) {
+    RANDOM.with(|r| {
+        *r.borrow_mut() = CommonRandom {
+            rng: SmallRng::seed_from_u64(seed),
+        };
+    });
+}
+
 /// 生成 [0, max) 范围内的随机 i32
 pub fn random_i32(max: i32) -> i32 {
     RANDOM.with(|r| r.borrow_mut().random_range(max))

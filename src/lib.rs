@@ -4,6 +4,10 @@
 // 平台抽象层
 pub mod platform;
 
+// AI 调试桥（仅调试 feature 启用时编译）
+#[cfg(feature = "debug-bridge")]
+pub mod debug_bridge;
+
 // Android 入口点 - 使用 android-activity crate
 #[cfg(target_os = "android")]
 use android_activity::AndroidApp;

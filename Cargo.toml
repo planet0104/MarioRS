@@ -24,6 +24,9 @@ futures = { version = "0.3", optional = true }
 # winit 窗口管理 (桌面平台)
 # 在 wasm32 上不编译：见下方 target.'cfg(not(target_arch = "wasm32"))'.dependencies
 bitflags = "2.9.1"
+serde = { version = "1", features = ["derive"], optional = true }
+serde_json = { version = "1", optional = true }
+rmp-serde = { version = "1", optional = true }
 
 # Optional logging dependencies (activate via `--features logging`).
 # tracing 及相关实现由非-wasm 平台启用（避免在 wasm32 上编译）
@@ -184,6 +187,11 @@ dark-theme = []                           # 暗黑主题适配（需要 Vista+ d
 touch-panel = []                          # 触摸控制面板 (2D绘图)
 android = ["touch-panel", "wgpu-backend"]  # Android 平台后端 (GPU加速 + CPU自动fallback)
 
+# 调试版本 feature：原有 mario 二进制不启用，避免引入调试代码
+debug-bridge = ["dep:serde", "dep:serde_json", "dep:rmp-serde"]
+debug-vis = ["wgpu-backend", "debug-bridge"]
+debug-headless = ["debug-bridge"]
+
 # ============================================================================
 # Release 编译优化 - 最小体积
 # ============================================================================
@@ -215,3 +223,24 @@ codegen-units = 1       # 单代码生成单元，更好的优化
 panic = "abort"         # 不使用 unwind，减少 panic 处理代码
 strip = true            # 移除符号表和调试信息
 debug = 0
+
+# ============================================================================
+# 调试版本二进制入口
+# ============================================================================
+[[bin]]
+name = "mario-debug-headless"
+path = "src/bin/mario_debug_headless.rs"
+required-features = ["debug-headless"]
+
+[[bin]]
+name = "mario-debug-vis"
+path = "src/bin/mario_debug_vis.rs"
+required-features = ["debug-vis"]
+
+# ============================================================================
+# 调试版本集成测试
+# ============================================================================
+[[test]]
+name = "debug_headless"
+path = "tests/debug_headless.rs"
+required-features = ["debug-headless"]

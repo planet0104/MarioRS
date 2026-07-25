@@ -31,14 +31,10 @@ pub struct GameState {
 impl GameState {
     /// 创建新的游戏状态
     pub fn new() -> Self {
-        eprintln!("[DEBUG] GameState::new: 创建VGA");
         let mut render_state =
             RenderState::new_offscreen(SCREEN_WIDTH as usize, WINDOWHEIGHT as usize);
-        eprintln!("[DEBUG] GameState::new: VGA创建完成，创建MarioGame");
         let mut game = MarioGame::new();
-        eprintln!("[DEBUG] GameState::new: MarioGame创建完成");
         game.init_palette(&mut render_state);
-        eprintln!("[DEBUG] GameState::new: 调色板初始化完成");
 
         Self {
             render_state,
@@ -276,6 +272,82 @@ impl GameState {
 impl Default for GameState {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+// ============================================================================
+// 调试接口（仅在 debug-bridge feature 启用时编译）
+// ============================================================================
+#[cfg(feature = "debug-bridge")]
+impl GameState {
+    /// debug-bridge 模式下禁用 Intro 超时自动 Demo
+    pub fn set_suppress_intro_demo(&mut self, suppress: bool) {
+        self.game.set_suppress_intro_demo(suppress);
+    }
+
+    /// 重置 Intro Demo 倒计时
+    pub fn reset_intro_demo_timer(&mut self) {
+        self.game.reset_intro_demo_timer();
+    }
+
+    /// 打包当前游戏状态
+    pub fn observe(&self) -> crate::debug_bridge::Observation {
+        self.game.observe()
+    }
+
+    /// 当前关卡索引
+    pub fn current_level(&self) -> i32 {
+        self.game.current_level()
+    }
+
+    /// 重新开始新游戏并进入指定关卡
+    pub fn start_new_game_at_level(&mut self, level_index: i32) {
+        self.game.start_new_game_at_level(level_index);
+    }
+
+    /// 用当前关卡重新开始
+    pub fn restart_current_level(&mut self) {
+        let level = self.game.current_level();
+        self.game.start_new_game_at_level(level);
+    }
+
+    /// 应用一条远程命令
+    pub fn apply_command(&mut self, cmd: crate::debug_bridge::Command) {
+        use crate::debug_bridge::Command;
+        use crate::platform::KeyEvent;
+
+        match cmd {
+            Command::SetKey { key, pressed } => {
+                if let Some(code) = key_name_to_code(&key) {
+                    self.handle_key_event(&KeyEvent { key: code, pressed });
+                }
+            }
+            Command::StartLevel { level } => self.start_new_game_at_level(level),
+            Command::Restart => self.restart_current_level(),
+            Command::Quit => self.request_quit(),
+            Command::StartGame => self.start_new_game_at_level(0),
+            _ => {}
+        }
+    }
+}
+
+#[cfg(feature = "debug-bridge")]
+fn key_name_to_code(name: &str) -> Option<crate::platform::KeyCode> {
+    use crate::platform::KeyCode;
+    match name {
+        "left" => Some(KeyCode::Left),
+        "right" => Some(KeyCode::Right),
+        "up" => Some(KeyCode::Up),
+        "down" => Some(KeyCode::Down),
+        "jump" => Some(KeyCode::AltLeft),
+        "fire" | "space" => Some(KeyCode::Space),
+        "run" | "ctrl" => Some(KeyCode::ControlLeft),
+        "shift" => Some(KeyCode::ShiftLeft),
+        "esc" => Some(KeyCode::Escape),
+        "enter" => Some(KeyCode::Enter),
+        "p" => Some(KeyCode::KeyP),
+        "s" => Some(KeyCode::KeyS),
+        _ => None,
     }
 }
 
